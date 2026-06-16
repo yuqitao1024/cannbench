@@ -116,6 +116,25 @@ def test_masked_select_request_accepts_builtin_dataset_case():
     }
 
 
+def test_cross_entropy_request_accepts_builtin_dataset_case():
+    request = OperatorBenchmarkRequest(
+        backend="nvidia",
+        op="cross_entropy",
+        dtype="float16",
+        dataset="smoke",
+        case_id="tiny_token_classification_loss",
+        warmup=5,
+        iterations=10,
+    )
+
+    assert request.op == "cross_entropy"
+    assert request.case_payload == {
+        "logits_shape": (32, 128, 64),
+        "target_shape": (32, 128),
+        "num_classes": 64,
+    }
+
+
 def test_operator_request_rejects_unknown_dtype():
     with pytest.raises(ValueError, match="Unsupported dtype"):
         OperatorBenchmarkRequest(

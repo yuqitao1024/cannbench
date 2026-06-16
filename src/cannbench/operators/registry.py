@@ -39,6 +39,12 @@ _OPERATOR_SPECS = {
         dataset_namespace="masked_select",
         runner_name="masked_select",
     ),
+    "cross_entropy": OperatorSpec(
+        name="cross_entropy",
+        supported_dtypes=("float32", "float16", "bfloat16"),
+        dataset_namespace="cross_entropy",
+        runner_name="cross_entropy",
+    ),
 }
 
 

@@ -15,6 +15,10 @@ from cannbench.datasets.masked_select import (
     get_masked_select_case,
     get_masked_select_dataset,
 )
+from cannbench.datasets.cross_entropy import (
+    get_cross_entropy_case,
+    get_cross_entropy_dataset,
+)
 from cannbench.datasets.embedding import get_embedding_case, get_embedding_dataset
 from cannbench.datasets.softmax import get_softmax_case, get_softmax_dataset
 
@@ -37,6 +41,8 @@ class OperatorDataset:
             return get_take_along_dim_dataset(split)
         if self.dataset_namespace == "masked_select":
             return get_masked_select_dataset(split)
+        if self.dataset_namespace == "cross_entropy":
+            return get_cross_entropy_dataset(split)
         raise ValueError(f"Unknown operator dataset namespace: {self.dataset_namespace}")
 
 
@@ -55,6 +61,8 @@ def get_operator_dataset(name: str) -> OperatorDataset:
         )
     if name == "masked_select":
         return OperatorDataset(name="masked_select", dataset_namespace="masked_select")
+    if name == "cross_entropy":
+        return OperatorDataset(name="cross_entropy", dataset_namespace="cross_entropy")
     raise ValueError(f"Unsupported operator: {name}")
 
 
@@ -71,4 +79,6 @@ def get_operator_case(op_name: str, dataset_name: str, case_id: str):
         return get_take_along_dim_case(dataset_name, case_id)
     if op_name == "masked_select":
         return get_masked_select_case(dataset_name, case_id)
+    if op_name == "cross_entropy":
+        return get_cross_entropy_case(dataset_name, case_id)
     raise ValueError(f"Unsupported operator: {op_name}")

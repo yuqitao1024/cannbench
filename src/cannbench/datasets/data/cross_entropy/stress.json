@@ -1,0 +1,41 @@
+{
+  "name": "stress",
+  "cases": [
+    {
+      "case_id": "long_context_token_loss",
+      "family": "long_context",
+      "logits_shape": [2, 4096, 128000],
+      "target_shape": [2, 4096],
+      "num_classes": 128000,
+      "source_kind": "synthetic_boundary",
+      "source_project": "cannbench",
+      "source_model": "cross_entropy_long_context_boundary",
+      "source_file": "generated",
+      "source_op": "torch.nn.functional.cross_entropy"
+    },
+    {
+      "case_id": "wide_vocab_token_loss",
+      "family": "wide_vocab",
+      "logits_shape": [4, 1024, 262144],
+      "target_shape": [4, 1024],
+      "num_classes": 262144,
+      "source_kind": "synthetic_boundary",
+      "source_project": "cannbench",
+      "source_model": "cross_entropy_wide_vocab_boundary",
+      "source_file": "generated",
+      "source_op": "torch.nn.functional.cross_entropy"
+    },
+    {
+      "case_id": "large_batch_token_loss",
+      "family": "large_batch",
+      "logits_shape": [64, 2048, 8192],
+      "target_shape": [64, 2048],
+      "num_classes": 8192,
+      "source_kind": "synthetic_boundary",
+      "source_project": "cannbench",
+      "source_model": "cross_entropy_large_batch_boundary",
+      "source_file": "generated",
+      "source_op": "torch.nn.functional.cross_entropy"
+    }
+  ]
+}

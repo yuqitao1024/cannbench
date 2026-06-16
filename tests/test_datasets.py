@@ -9,6 +9,8 @@ from cannbench.datasets import (
     get_index_select_dataset,
     get_masked_select_case,
     get_masked_select_dataset,
+    get_cross_entropy_case,
+    get_cross_entropy_dataset,
     get_softmax_case,
     get_softmax_dataset,
     get_take_along_dim_case,
@@ -19,6 +21,7 @@ from cannbench.datasets.materialize import (
     materialize_gather_inputs,
     materialize_index_select_inputs,
     materialize_masked_select_inputs,
+    materialize_cross_entropy_inputs,
     materialize_softmax_inputs,
     materialize_take_along_dim_inputs,
 )
@@ -399,3 +402,47 @@ def test_materialized_masked_select_inputs_change_with_different_seed():
     right = materialize_masked_select_inputs(case, dtype="float16", seed=456)
 
     assert left["mask"] != right["mask"] or left["values"] != right["values"]
+
+
+def test_get_cross_entropy_case_preserves_source_metadata():
+    case = get_cross_entropy_case("realistic", "bert_token_classification_loss")
+
+    assert case.case_id == "bert_token_classification_loss"
+    assert case.logits_shape == (16, 128, 30522)
+    assert case.target_shape == (16, 128)
+    assert case.num_classes == 30522
+    assert case.source_project == "TritonBench"
+    assert case.source_model == "BERT_pytorch"
+    assert case.source_op == "torch.nn.functional.cross_entropy"
+
+
+def test_get_cross_entropy_dataset_loads_builtin_splits():
+    smoke = get_cross_entropy_dataset("smoke")
+    realistic = get_cross_entropy_dataset("realistic")
+    stress = get_cross_entropy_dataset("stress")
+
+    assert smoke.name == "smoke"
+    assert len(smoke.cases) == 3
+    assert len(realistic.cases) >= 3
+    assert len(stress.cases) >= 3
+
+
+def test_materialized_cross_entropy_inputs_are_deterministic_for_same_seed():
+    case = get_cross_entropy_case("smoke", "tiny_token_classification_loss")
+
+    left = materialize_cross_entropy_inputs(case, dtype="float16", seed=123)
+    right = materialize_cross_entropy_inputs(case, dtype="float16", seed=123)
+
+    assert left["logits_shape"] == right["logits_shape"] == (32, 128, 64)
+    assert left["target_shape"] == right["target_shape"] == (32, 128)
+    assert left["targets"] == right["targets"]
+    assert left["logits"] == right["logits"]
+
+
+def test_materialized_cross_entropy_inputs_change_with_different_seed():
+    case = get_cross_entropy_case("smoke", "tiny_token_classification_loss")
+
+    left = materialize_cross_entropy_inputs(case, dtype="float16", seed=123)
+    right = materialize_cross_entropy_inputs(case, dtype="float16", seed=456)
+
+    assert left["targets"] != right["targets"] or left["logits"] != right["logits"]

@@ -1,0 +1,41 @@
+{
+  "name": "realistic",
+  "cases": [
+    {
+      "case_id": "bert_token_classification_loss",
+      "family": "token_classification",
+      "logits_shape": [16, 128, 30522],
+      "target_shape": [16, 128],
+      "num_classes": 30522,
+      "source_kind": "real_model",
+      "source_project": "TritonBench",
+      "source_model": "BERT_pytorch",
+      "source_file": "torchbench_train/BERT_pytorch_train.json",
+      "source_op": "torch.nn.functional.cross_entropy"
+    },
+    {
+      "case_id": "t5_decoder_language_loss",
+      "family": "seq2seq_language_model",
+      "logits_shape": [4, 512, 32128],
+      "target_shape": [4, 512],
+      "num_classes": 32128,
+      "source_kind": "real_model",
+      "source_project": "TritonBench",
+      "source_model": "T5Small",
+      "source_file": "hf_train/T5Small_train.json",
+      "source_op": "torch.nn.functional.cross_entropy"
+    },
+    {
+      "case_id": "opt_next_token_loss",
+      "family": "next_token",
+      "logits_shape": [8, 256, 50272],
+      "target_shape": [8, 256],
+      "num_classes": 50272,
+      "source_kind": "real_model",
+      "source_project": "TritonBench",
+      "source_model": "OPTForCausalLM",
+      "source_file": "hf_train/OPTForCausalLM_train.json",
+      "source_op": "torch.nn.functional.cross_entropy"
+    }
+  ]
+}

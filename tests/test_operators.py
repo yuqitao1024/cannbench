@@ -57,6 +57,15 @@ def test_masked_select_operator_spec_is_registered():
     assert spec.runner_name == "masked_select"
 
 
+def test_cross_entropy_operator_spec_is_registered():
+    spec = get_operator_spec("cross_entropy")
+
+    assert spec.name == "cross_entropy"
+    assert spec.supported_dtypes == ("float32", "float16", "bfloat16")
+    assert spec.dataset_namespace == "cross_entropy"
+    assert spec.runner_name == "cross_entropy"
+
+
 def test_list_operator_names_contains_softmax():
     assert "softmax" in list_operator_names()
     assert "embedding" in list_operator_names()
@@ -64,6 +73,7 @@ def test_list_operator_names_contains_softmax():
     assert "index_select" in list_operator_names()
     assert "take_along_dim" in list_operator_names()
     assert "masked_select" in list_operator_names()
+    assert "cross_entropy" in list_operator_names()
 
 
 def test_unknown_operator_spec_is_rejected():
@@ -105,6 +115,13 @@ def test_masked_select_dataset_is_registered():
 
     assert dataset.name == "masked_select"
     assert dataset.dataset_namespace == "masked_select"
+
+
+def test_cross_entropy_dataset_is_registered():
+    dataset = get_operator_dataset("cross_entropy")
+
+    assert dataset.name == "cross_entropy"
+    assert dataset.dataset_namespace == "cross_entropy"
 
 
 def test_softmax_dataset_is_registered():
