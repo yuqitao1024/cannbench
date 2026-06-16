@@ -706,6 +706,74 @@ def test_backend_runs_scatter_with_materialized_inputs(monkeypatch):
     assert captured["tensor_calls"][2]["dtype"] == "float16"
 
 
+def test_backend_runs_index_put_with_materialized_inputs(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeTensor:
+        def reshape(self, *shape):
+            captured.setdefault("reshapes", []).append(shape)
+            return self
+
+    class FakeTorch:
+        def __init__(self) -> None:
+            self.cuda = SimpleNamespace(
+                is_available=lambda: True,
+                synchronize=lambda: None,
+                get_device_name=lambda device: "Fake GPU",
+            )
+            self.device = lambda kind: kind
+            self.float16 = "float16"
+            self.long = "long"
+            self.tensor = self._tensor
+            self.softmax = lambda tensor, dim: tensor
+            self.nn = SimpleNamespace(
+                Embedding=lambda *args, **kwargs: None,
+                functional=SimpleNamespace(cross_entropy=lambda *args, **kwargs: None),
+            )
+
+        def _tensor(self, values, device=None, dtype=None):
+            captured.setdefault("tensor_calls", []).append(
+                {
+                    "values": values,
+                    "device": device,
+                    "dtype": dtype,
+                }
+            )
+            return FakeTensor()
+
+        def index_put(self, input_tensor, indices, values, accumulate=False):
+            captured["index_put_indices"] = indices
+            captured["index_put_values"] = values
+            captured["index_put_accumulate"] = accumulate
+            return input_tensor
+
+    monkeypatch.setitem(sys.modules, "torch", FakeTorch())
+
+    from cannbench.backends.pytorch_backend import NvidiaBackend
+
+    backend = NvidiaBackend()
+    request = OperatorBenchmarkRequest(
+        backend="nvidia",
+        op="index_put",
+        dtype="float16",
+        dataset="smoke",
+        case_id="tiny_rank2_index_put",
+        warmup=1,
+        iterations=1,
+        seed=7,
+    )
+
+    result = backend.run_operator(request)
+
+    assert result.op == "index_put"
+    assert len(captured["index_put_indices"]) == 2
+    assert captured["index_put_accumulate"] is False
+    assert captured["tensor_calls"][0]["dtype"] == "float16"
+    assert captured["tensor_calls"][1]["dtype"] == "long"
+    assert captured["tensor_calls"][2]["dtype"] == "long"
+    assert captured["tensor_calls"][3]["dtype"] == "float16"
+
+
 def test_backend_rejects_non_positive_iterations():
     with pytest.raises(ValueError, match="iterations must be > 0"):
         OperatorBenchmarkRequest(

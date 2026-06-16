@@ -16,6 +16,12 @@ from cannbench.datasets.index_add import (
     get_index_add_case,
     get_index_add_dataset,
 )
+from cannbench.datasets.index_put import (
+    IndexPutCase,
+    IndexPutDataset,
+    get_index_put_case,
+    get_index_put_dataset,
+)
 from cannbench.datasets.take_along_dim import (
     TakeAlongDimCase,
     TakeAlongDimDataset,
@@ -62,6 +68,7 @@ from cannbench.datasets.loader import get_operator_case, get_operator_dataset
 from cannbench.datasets.materialize import (
     materialize_gather_inputs,
     materialize_index_select_inputs,
+    materialize_index_put_inputs,
     materialize_masked_select_inputs,
     materialize_cross_entropy_inputs,
     materialize_scatter_add_inputs,
@@ -82,6 +89,8 @@ __all__ = [
     "IndexSelectDataset",
     "IndexAddCase",
     "IndexAddDataset",
+    "IndexPutCase",
+    "IndexPutDataset",
     "TakeAlongDimCase",
     "TakeAlongDimDataset",
     "MaskedSelectCase",
@@ -102,6 +111,8 @@ __all__ = [
     "get_index_select_dataset",
     "get_index_add_case",
     "get_index_add_dataset",
+    "get_index_put_case",
+    "get_index_put_dataset",
     "get_take_along_dim_case",
     "get_take_along_dim_dataset",
     "get_masked_select_case",
@@ -119,6 +130,7 @@ __all__ = [
     "materialize_gather_inputs",
     "materialize_index_select_inputs",
     "materialize_index_add_inputs",
+    "materialize_index_put_inputs",
     "materialize_masked_select_inputs",
     "materialize_cross_entropy_inputs",
     "materialize_scatter_add_inputs",

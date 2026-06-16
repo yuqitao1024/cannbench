@@ -195,6 +195,26 @@ def test_scatter_request_accepts_builtin_dataset_case():
     }
 
 
+def test_index_put_request_accepts_builtin_dataset_case():
+    request = OperatorBenchmarkRequest(
+        backend="nvidia",
+        op="index_put",
+        dtype="float16",
+        dataset="smoke",
+        case_id="tiny_rank2_index_put",
+        warmup=5,
+        iterations=10,
+    )
+
+    assert request.op == "index_put"
+    assert request.case_payload == {
+        "input_shape": (32, 64),
+        "index_shapes": ((16,), (16,)),
+        "values_shape": (16,),
+        "accumulate": False,
+    }
+
+
 def test_operator_request_rejects_unknown_dtype():
     with pytest.raises(ValueError, match="Unsupported dtype"):
         OperatorBenchmarkRequest(

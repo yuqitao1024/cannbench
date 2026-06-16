@@ -33,6 +33,12 @@ _OPERATOR_SPECS = {
         dataset_namespace="index_add",
         runner_name="index_add",
     ),
+    "index_put": OperatorSpec(
+        name="index_put",
+        supported_dtypes=("float32", "float16", "bfloat16"),
+        dataset_namespace="index_put",
+        runner_name="index_put",
+    ),
     "take_along_dim": OperatorSpec(
         name="take_along_dim",
         supported_dtypes=("float32", "float16", "bfloat16"),

@@ -1,0 +1,44 @@
+{
+  "name": "stress",
+  "cases": [
+    {
+      "case_id": "long_context_index_put",
+      "family": "long_context_update",
+      "input_shape": [2, 16, 4096, 512],
+      "index_shapes": [[2, 4096], [2, 4096]],
+      "values_shape": [2, 4096, 4096, 512],
+      "accumulate": false,
+      "source_kind": "synthetic_boundary",
+      "source_project": "cannbench",
+      "source_model": "index_put_long_context_boundary",
+      "source_file": "generated",
+      "source_op": "torch.index_put"
+    },
+    {
+      "case_id": "wide_vocab_index_put",
+      "family": "wide_vocab_update",
+      "input_shape": [4, 512, 128000],
+      "index_shapes": [[4, 512], [4, 512]],
+      "values_shape": [4, 512, 128000],
+      "accumulate": false,
+      "source_kind": "synthetic_boundary",
+      "source_project": "cannbench",
+      "source_model": "index_put_wide_vocab_boundary",
+      "source_file": "generated",
+      "source_op": "torch.index_put"
+    },
+    {
+      "case_id": "large_batch_index_put",
+      "family": "large_batch_update",
+      "input_shape": [64, 2048, 512],
+      "index_shapes": [[64, 2048], [64, 2048]],
+      "values_shape": [64, 2048, 512],
+      "accumulate": false,
+      "source_kind": "synthetic_boundary",
+      "source_project": "cannbench",
+      "source_model": "index_put_large_batch_boundary",
+      "source_file": "generated",
+      "source_op": "torch.index_put"
+    }
+  ]
+}
