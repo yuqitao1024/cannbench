@@ -81,6 +81,30 @@ def test_build_parser_accepts_embedding_operator():
     assert args.op == "embedding"
 
 
+def test_build_parser_exposes_prepare_subcommand():
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "prepare",
+            "--op",
+            "softmax",
+            "--dtype",
+            "float16",
+            "--dataset",
+            "smoke",
+            "--case-id",
+            "tiny_logits",
+            "--seed",
+            "7",
+            "--output",
+            "prepared.json",
+        ]
+    )
+
+    assert args.command == "prepare"
+    assert args.seed == 7
+
+
 def test_build_parser_rejects_ascend_backend():
     parser = build_parser()
 
@@ -159,6 +183,104 @@ def test_main_runs_operator_benchmark_and_writes_outputs(tmp_path, monkeypatch):
     assert captured["run_name"] == "softmax-run"
     assert captured["result"] is result
     assert captured["formats"] == ("json", "csv", "md")
+
+
+def test_main_prepare_writes_prepared_input_manifest(tmp_path):
+    output_path = tmp_path / "prepared-softmax.json"
+
+    exit_code = main(
+        [
+            "prepare",
+            "--op",
+            "softmax",
+            "--dtype",
+            "float16",
+            "--dataset",
+            "smoke",
+            "--case-id",
+            "tiny_logits",
+            "--seed",
+            "7",
+            "--output",
+            str(output_path),
+        ]
+    )
+
+    payload = output_path.read_text()
+    assert exit_code == 0
+    assert "\"schema_version\": 1" in payload
+    assert "\"case_id\": \"tiny_logits\"" in payload
+
+
+def test_main_runs_operator_benchmark_from_prepared_input(tmp_path, monkeypatch):
+    captured: dict[str, object] = {}
+    prepared_path = tmp_path / "prepared-softmax.json"
+    prepared_path.write_text(
+        """{
+  "schema_version": 1,
+  "op": "softmax",
+  "dtype": "float16",
+  "dataset": "smoke",
+  "seed": 7,
+  "case": {
+    "case_id": "tiny_logits",
+    "family": "lm_logits",
+    "source_kind": "synthetic_smoke",
+    "source_project": "cannbench",
+    "source_model": "smoke_fixture",
+    "source_file": "built-in",
+    "source_op": "softmax",
+    "payload": {
+      "dimensions": [32, 128],
+      "dim": -1
+    }
+  }
+}
+"""
+    )
+    result = sample_result()
+
+    class FakeBackend:
+        def run_operator(self, request):
+            captured["request"] = request
+            return result
+
+    monkeypatch.setattr("cannbench.cli.get_backend", lambda name: FakeBackend())
+
+    def fake_write_benchmark_outputs(output_dir, run_name, actual_result, formats):
+        captured["output_dir"] = output_dir
+        captured["run_name"] = run_name
+        captured["result"] = actual_result
+        captured["formats"] = formats
+        return {}
+
+    monkeypatch.setattr("cannbench.cli.write_benchmark_outputs", fake_write_benchmark_outputs)
+
+    exit_code = main(
+        [
+            "operator",
+            "--backend",
+            "nvidia",
+            "--prepared-input",
+            str(prepared_path),
+            "--warmup",
+            "2",
+            "--iterations",
+            "3",
+            "--output-dir",
+            str(tmp_path),
+            "--run-name",
+            "prepared-run",
+        ]
+    )
+
+    request = captured["request"]
+    assert exit_code == 0
+    assert request.dataset == "smoke"
+    assert request.case_id == "tiny_logits"
+    assert request.seed == 7
+    assert request.dimensions == (32, 128)
+    assert captured["run_name"] == "prepared-run"
 
 
 def test_main_rejects_zero_iterations():
