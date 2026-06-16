@@ -22,6 +22,44 @@ class NvidiaBackend(OperatorBackend):
     def __init__(self) -> None:
         super().__init__(name="nvidia", device_type="cuda")
 
+    def _summarize_metrics(
+        self, *, iterations: int, warmup: int, samples: list[float]
+    ) -> BenchmarkMetrics:
+        summary = summarize_timings_ms(samples)
+        return BenchmarkMetrics(
+            iterations=iterations,
+            warmup=warmup,
+            latency_ms_avg=summary["latency_ms_avg"],
+            latency_ms_p50=summary["latency_ms_p50"],
+            latency_ms_p95=summary["latency_ms_p95"],
+            latency_ms_p99=summary["latency_ms_p99"],
+            throughput_ops_per_sec=iterations / (sum(samples) / 1000.0),
+        )
+
+    def _build_result_case(self, request: OperatorBenchmarkRequest, case) -> OperatorCase:
+        if request.op == "softmax":
+            return build_softmax_case(
+                case_id=request.case_id,
+                family=request.family,
+                dimensions=request.dimensions,
+                dim=request.dim,
+                source_kind=request.source_kind,
+                source_project=request.source_project,
+                source_model=request.source_model,
+                source_file=request.source_file,
+                source_op=request.source_op,
+            )
+        return OperatorCase(
+            case_id=case.case_id,
+            family=case.family,
+            source_kind=case.source_kind,
+            source_project=case.source_project,
+            source_model=case.source_model,
+            source_file=case.source_file,
+            source_op=case.source_op,
+            payload=case.payload,
+        )
+
     def run_operator(self, request: OperatorBenchmarkRequest) -> OperatorBenchmarkResult:
         self.validate_request(request)
         spec = get_operator_spec(request.op)
@@ -63,33 +101,17 @@ class NvidiaBackend(OperatorBackend):
                 torch.softmax(tensor, dim=request.dim)
                 torch.cuda.synchronize()
                 samples.append((time.perf_counter() - started) * 1000.0)
-
-            summary = summarize_timings_ms(samples)
-            metrics = BenchmarkMetrics(
+            metrics = self._summarize_metrics(
                 iterations=request.iterations,
                 warmup=request.warmup,
-                latency_ms_avg=summary["latency_ms_avg"],
-                latency_ms_p50=summary["latency_ms_p50"],
-                latency_ms_p95=summary["latency_ms_p95"],
-                latency_ms_p99=summary["latency_ms_p99"],
-                throughput_ops_per_sec=request.iterations / (sum(samples) / 1000.0),
+                samples=samples,
             )
             return OperatorBenchmarkResult(
                 backend=self.name,
                 device_name=torch.cuda.get_device_name(device),
                 op=request.op,
                 dtype=request.dtype,
-                case=build_softmax_case(
-                    case_id=request.case_id,
-                    family=request.family,
-                    dimensions=request.dimensions,
-                    dim=request.dim,
-                    source_kind=request.source_kind,
-                    source_project=request.source_project,
-                    source_model=request.source_model,
-                    source_file=request.source_file,
-                    source_op=request.source_op,
-                ),
+                case=self._build_result_case(request, case),
                 metrics=metrics,
             )
 
@@ -127,32 +149,17 @@ class NvidiaBackend(OperatorBackend):
                 module(indices)
                 torch.cuda.synchronize()
                 samples.append((time.perf_counter() - started) * 1000.0)
-
-            summary = summarize_timings_ms(samples)
-            metrics = BenchmarkMetrics(
+            metrics = self._summarize_metrics(
                 iterations=request.iterations,
                 warmup=request.warmup,
-                latency_ms_avg=summary["latency_ms_avg"],
-                latency_ms_p50=summary["latency_ms_p50"],
-                latency_ms_p95=summary["latency_ms_p95"],
-                latency_ms_p99=summary["latency_ms_p99"],
-                throughput_ops_per_sec=request.iterations / (sum(samples) / 1000.0),
+                samples=samples,
             )
             return OperatorBenchmarkResult(
                 backend=self.name,
                 device_name=torch.cuda.get_device_name(device),
                 op=request.op,
                 dtype=request.dtype,
-                case=OperatorCase(
-                    case_id=case.case_id,
-                    family=case.family,
-                    source_kind=case.source_kind,
-                    source_project=case.source_project,
-                    source_model=case.source_model,
-                    source_file=case.source_file,
-                    source_op=case.source_op,
-                    payload=case.payload,
-                ),
+                case=self._build_result_case(request, case),
                 metrics=metrics,
             )
 

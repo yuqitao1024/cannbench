@@ -18,6 +18,7 @@ def test_embedding_operator_spec_is_registered():
     assert spec.name == "embedding"
     assert spec.supported_dtypes == ("float32", "float16", "bfloat16")
     assert spec.dataset_namespace == "embedding"
+    assert spec.runner_name == "embedding"
 
 
 def test_list_operator_names_contains_softmax():
@@ -36,3 +37,10 @@ def test_embedding_dataset_is_registered():
     assert dataset.name == "embedding"
     assert dataset.dataset_namespace == "embedding"
     assert len(dataset.get("smoke").cases) == 3
+
+
+def test_softmax_dataset_is_registered():
+    dataset = get_operator_dataset("softmax")
+
+    assert dataset.name == "softmax"
+    assert dataset.dataset_namespace == "softmax"

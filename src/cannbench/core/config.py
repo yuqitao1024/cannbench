@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 
-from cannbench.datasets import get_embedding_case, get_softmax_case
+from cannbench.datasets import get_operator_case
 from cannbench.core.output import SUPPORTED_OUTPUT_FORMATS
 from cannbench.core.result import SUPPORTED_SOFTMAX_DIMS
 
@@ -56,12 +56,7 @@ class OperatorBenchmarkRequest:
         if self.seed < 0:
             raise ValueError("seed must be >= 0")
 
-        if self.op == "softmax":
-            case = get_softmax_case(self.dataset, self.case_id)
-        elif self.op == "embedding":
-            case = get_embedding_case(self.dataset, self.case_id)
-        else:
-            raise ValueError(f"Unsupported operator: {self.op}")
+        case = get_operator_case(self.op, self.dataset, self.case_id)
         object.__setattr__(self, "case_payload", case.payload)
         object.__setattr__(self, "family", case.family)
         object.__setattr__(self, "source_kind", case.source_kind)
@@ -69,6 +64,6 @@ class OperatorBenchmarkRequest:
         object.__setattr__(self, "source_model", case.source_model)
         object.__setattr__(self, "source_file", case.source_file)
         object.__setattr__(self, "source_op", case.source_op)
-        if self.op == "softmax":
+        if "dimensions" in case.payload and "dim" in case.payload:
             object.__setattr__(self, "dimensions", tuple(case.payload["dimensions"]))
             object.__setattr__(self, "dim", int(case.payload["dim"]))
