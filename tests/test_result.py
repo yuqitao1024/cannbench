@@ -13,7 +13,17 @@ def _sample_result() -> OperatorBenchmarkResult:
         device_name="Fake GPU",
         op="softmax",
         dtype="float16",
-        shape=SoftmaxShape(rows=128, cols=128, dim=-1),
+        shape=SoftmaxShape(
+            dimensions=(128, 128),
+            dim=-1,
+            case_id="tiny_logits",
+            family="lm_logits",
+            source_kind="synthetic_smoke",
+            source_project="cannbench",
+            source_model="smoke_fixture",
+            source_file="tests/fixtures",
+            source_op="softmax",
+        ),
         metrics=BenchmarkMetrics(
             iterations=10,
             warmup=5,
@@ -32,7 +42,17 @@ def test_result_to_json_dict_contains_core_fields():
         device_name="Fake GPU",
         op="softmax",
         dtype="float16",
-        shape=SoftmaxShape(rows=128, cols=128, dim=-1),
+        shape=SoftmaxShape(
+            dimensions=(4, 8, 1024, 1024),
+            dim=-1,
+            case_id="t5_attention",
+            family="attention",
+            source_kind="real_model",
+            source_project="TritonBench",
+            source_model="T5Small",
+            source_file="tritonbench/models/t5.py",
+            source_op="softmax",
+        ),
         metrics=BenchmarkMetrics(
             iterations=10,
             warmup=5,
@@ -48,7 +68,17 @@ def test_result_to_json_dict_contains_core_fields():
 
     assert payload["backend"] == "nvidia"
     assert payload["metrics"]["latency_ms_avg"] == 1.2
-    assert payload["shape"] == {"rows": 128, "cols": 128, "dim": -1}
+    assert payload["shape"] == {
+        "dimensions": [4, 8, 1024, 1024],
+        "dim": -1,
+        "case_id": "t5_attention",
+        "family": "attention",
+        "source_kind": "real_model",
+        "source_project": "TritonBench",
+        "source_model": "T5Small",
+        "source_file": "tritonbench/models/t5.py",
+        "source_op": "softmax",
+    }
 
 
 def test_write_benchmark_outputs_creates_json_csv_and_markdown(tmp_path):
@@ -65,9 +95,11 @@ def test_write_benchmark_outputs_creates_json_csv_and_markdown(tmp_path):
         "device_name",
         "op",
         "dtype",
-        "rows",
-        "cols",
+        "case_id",
+        "family",
+        "dimensions",
         "dim",
+        "source_model",
         "latency_ms_avg",
         "latency_ms_p50",
         "latency_ms_p95",
@@ -79,16 +111,21 @@ def test_write_benchmark_outputs_creates_json_csv_and_markdown(tmp_path):
         "Fake GPU",
         "softmax",
         "float16",
-        "128",
-        "128",
+        "tiny_logits",
+        "lm_logits",
+        "128x128",
         "-1",
+        "smoke_fixture",
         "1.0",
         "1.0",
         "1.1",
         "1.2",
         "1000.0",
     ]
-    assert "| backend | nvidia |" in paths["md"].read_text()
+    markdown = paths["md"].read_text()
+    assert "| backend | nvidia |" in markdown
+    assert "| case_id | tiny_logits |" in markdown
+    assert "| source_model | smoke_fixture |" in markdown
 
 
 def test_write_benchmark_outputs_creates_only_requested_formats(tmp_path):
@@ -105,19 +142,33 @@ def test_write_benchmark_outputs_rejects_unsupported_formats(tmp_path):
         write_benchmark_outputs(tmp_path, "bad-run", _sample_result(), ("json", "yaml"))
 
 
-@pytest.mark.parametrize("rows", [0, -1])
-def test_softmax_shape_rejects_non_positive_rows(rows: int):
-    with pytest.raises(ValueError, match="rows must be > 0"):
-        SoftmaxShape(rows=rows, cols=128, dim=-1)
+@pytest.mark.parametrize("dimensions", [(), (0, 128), (128, -1)])
+def test_softmax_shape_rejects_invalid_dimensions(dimensions: tuple[int, ...]):
+    with pytest.raises(ValueError, match="dimensions must be"):
+        SoftmaxShape(
+            dimensions=dimensions,
+            dim=-1,
+            case_id="case",
+            family="attention",
+            source_kind="synthetic",
+            source_project="cannbench",
+            source_model="fixture",
+            source_file="tests/fixtures",
+            source_op="softmax",
+        )
 
 
-@pytest.mark.parametrize("cols", [0, -1])
-def test_softmax_shape_rejects_non_positive_cols(cols: int):
-    with pytest.raises(ValueError, match="cols must be > 0"):
-        SoftmaxShape(rows=128, cols=cols, dim=-1)
-
-
-@pytest.mark.parametrize("dim", [-3, 2, 3])
+@pytest.mark.parametrize("dim", [-4, 3])
 def test_softmax_shape_rejects_invalid_dim(dim: int):
-    with pytest.raises(ValueError, match="dim must be one of"):
-        SoftmaxShape(rows=128, cols=128, dim=dim)
+    with pytest.raises(ValueError, match="dim must address an axis"):
+        SoftmaxShape(
+            dimensions=(4, 8, 16),
+            dim=dim,
+            case_id="case",
+            family="attention",
+            source_kind="synthetic",
+            source_project="cannbench",
+            source_model="fixture",
+            source_file="tests/fixtures",
+            source_op="softmax",
+        )

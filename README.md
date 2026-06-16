@@ -30,6 +30,7 @@ Typical use cases:
 Representative test dimensions:
 
 - Operator type
+- Operator dataset and case selection
 - Input and output shapes
 - Data type
 - Batch size
@@ -142,14 +143,21 @@ cannbench operator \
   --backend nvidia \
   --op softmax \
   --dtype float16 \
-  --rows 1024 \
-  --cols 1024 \
-  --dim -1 \
+  --dataset realistic \
+  --case-id t5_attention \
   --warmup 10 \
   --iterations 50 \
   --output-dir results \
   --run-name nvidia-softmax-smoke
 ```
+
+The operator path now selects shapes from built-in softmax datasets instead of raw `rows` / `cols` CLI arguments:
+
+- `smoke`: small synthetic cases for functionality checks
+- `realistic`: TritonBench-derived model shapes with source metadata
+- `stress`: operator-specific softmax boundary cases
+
+The detailed softmax dataset catalog, case tables, TritonBench baseline commit, and curation rules are documented in [src/cannbench/datasets/data/softmax/README.md](/root/aiagent/cannbench/src/cannbench/datasets/data/softmax/README.md).
 
 This command writes:
 
@@ -162,7 +170,8 @@ This command writes:
 Implemented now:
 
 - Python CLI entrypoint
-- Softmax operator benchmark request/result schema
+- Manifest-driven softmax dataset selection
+- Softmax operator benchmark request/result schema with source metadata
 - Timing summaries with p50/p95/p99
 - JSON / CSV / Markdown report writers
 - NVIDIA PyTorch backend for single-card `softmax`

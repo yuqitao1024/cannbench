@@ -27,7 +27,7 @@ class NvidiaBackend(OperatorBackend):
 
         device = torch.device(self.device_type)
         dtype = getattr(torch, request.dtype)
-        tensor = torch.randn((request.rows, request.cols), device=device, dtype=dtype)
+        tensor = torch.randn(request.dimensions, device=device, dtype=dtype)
 
         for _ in range(request.warmup):
             torch.softmax(tensor, dim=request.dim)
@@ -55,7 +55,17 @@ class NvidiaBackend(OperatorBackend):
             device_name=torch.cuda.get_device_name(device),
             op=request.op,
             dtype=request.dtype,
-            shape=SoftmaxShape(rows=request.rows, cols=request.cols, dim=request.dim),
+            shape=SoftmaxShape(
+                dimensions=request.dimensions,
+                dim=request.dim,
+                case_id=request.case_id,
+                family=request.family,
+                source_kind=request.source_kind,
+                source_project=request.source_project,
+                source_model=request.source_model,
+                source_file=request.source_file,
+                source_op=request.source_op,
+            ),
             metrics=metrics,
         )
 

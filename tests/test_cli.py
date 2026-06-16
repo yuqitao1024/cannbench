@@ -6,6 +6,35 @@ from cannbench.cli import build_parser, main
 from cannbench.core.result import BenchmarkMetrics, OperatorBenchmarkResult, SoftmaxShape
 
 
+def sample_result() -> OperatorBenchmarkResult:
+    return OperatorBenchmarkResult(
+        backend="nvidia",
+        device_name="Fake GPU",
+        op="softmax",
+        dtype="float16",
+        shape=SoftmaxShape(
+            dimensions=(4, 8, 1024, 1024),
+            dim=-1,
+            case_id="t5_attention",
+            family="attention",
+            source_kind="real_model",
+            source_project="TritonBench",
+            source_model="T5Small",
+            source_file="tritonbench/tritonbench/data/input_configs/hf_train/T5Small_train.json",
+            source_op="softmax",
+        ),
+        metrics=BenchmarkMetrics(
+            iterations=3,
+            warmup=2,
+            latency_ms_avg=1.0,
+            latency_ms_p50=1.0,
+            latency_ms_p95=1.0,
+            latency_ms_p99=1.0,
+            throughput_ops_per_sec=1000.0,
+        ),
+    )
+
+
 def test_build_parser_exposes_operator_subcommand():
     parser = build_parser()
     args = parser.parse_args(
@@ -15,21 +44,18 @@ def test_build_parser_exposes_operator_subcommand():
             "nvidia",
             "--op",
             "softmax",
-            "--rows",
-            "256",
-            "--cols",
-            "256",
-            "--dim",
-            "-1",
+            "--dataset",
+            "realistic",
+            "--case-id",
+            "t5_attention",
         ]
     )
 
     assert args.command == "operator"
     assert args.backend == "nvidia"
     assert args.op == "softmax"
-    assert args.rows == 256
-    assert args.cols == 256
-    assert args.dim == -1
+    assert args.dataset == "realistic"
+    assert args.case_id == "t5_attention"
 
 
 def test_build_parser_rejects_ascend_backend():
@@ -43,32 +69,17 @@ def test_build_parser_rejects_ascend_backend():
                 "ascend",
                 "--op",
                 "softmax",
-                "--rows",
-                "256",
-                "--cols",
-                "256",
+                "--dataset",
+                "smoke",
+                "--case-id",
+                "tiny_logits",
             ]
         )
 
 
 def test_main_runs_operator_benchmark_and_writes_outputs(tmp_path, monkeypatch):
     captured: dict[str, object] = {}
-    result = OperatorBenchmarkResult(
-        backend="nvidia",
-        device_name="Fake GPU",
-        op="softmax",
-        dtype="float16",
-        shape=SoftmaxShape(rows=16, cols=32, dim=-1),
-        metrics=BenchmarkMetrics(
-            iterations=3,
-            warmup=2,
-            latency_ms_avg=1.0,
-            latency_ms_p50=1.0,
-            latency_ms_p95=1.0,
-            latency_ms_p99=1.0,
-            throughput_ops_per_sec=1000.0,
-        ),
-    )
+    result = sample_result()
 
     class FakeBackend:
         def run_softmax(self, request):
@@ -95,12 +106,10 @@ def test_main_runs_operator_benchmark_and_writes_outputs(tmp_path, monkeypatch):
             "softmax",
             "--dtype",
             "float16",
-            "--rows",
-            "16",
-            "--cols",
-            "32",
-            "--dim",
-            "-1",
+            "--dataset",
+            "realistic",
+            "--case-id",
+            "t5_attention",
             "--warmup",
             "2",
             "--iterations",
@@ -117,8 +126,9 @@ def test_main_runs_operator_benchmark_and_writes_outputs(tmp_path, monkeypatch):
     assert request.backend == "nvidia"
     assert request.op == "softmax"
     assert request.dtype == "float16"
-    assert request.rows == 16
-    assert request.cols == 32
+    assert request.dataset == "realistic"
+    assert request.case_id == "t5_attention"
+    assert request.dimensions == (4, 8, 1024, 1024)
     assert request.dim == -1
     assert request.warmup == 2
     assert request.iterations == 3
@@ -137,10 +147,10 @@ def test_main_rejects_zero_iterations():
                 "nvidia",
                 "--op",
                 "softmax",
-                "--rows",
-                "16",
-                "--cols",
-                "32",
+                "--dataset",
+                "smoke",
+                "--case-id",
+                "tiny_logits",
                 "--iterations",
                 "0",
             ]
@@ -156,10 +166,10 @@ def test_main_rejects_negative_warmup():
                 "nvidia",
                 "--op",
                 "softmax",
-                "--rows",
-                "16",
-                "--cols",
-                "32",
+                "--dataset",
+                "smoke",
+                "--case-id",
+                "tiny_logits",
                 "--warmup",
                 "-1",
             ]
@@ -181,10 +191,10 @@ def test_main_converts_backend_runtime_failure_to_cli_error(monkeypatch, capsys)
                 "nvidia",
                 "--op",
                 "softmax",
-                "--rows",
-                "16",
-                "--cols",
-                "32",
+                "--dataset",
+                "smoke",
+                "--case-id",
+                "tiny_logits",
             ]
         )
 

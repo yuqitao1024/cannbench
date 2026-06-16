@@ -22,5 +22,8 @@ package-dir = {"" = "src"}
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"cannbench.datasets.data.softmax" = ["*.json"]
+
 [tool.pytest.ini_options]
 pythonpath = ["src"]

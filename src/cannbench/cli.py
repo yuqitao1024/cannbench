@@ -28,9 +28,8 @@ def build_parser() -> argparse.ArgumentParser:
     operator.add_argument("--backend", choices=["nvidia"], required=True)
     operator.add_argument("--op", choices=["softmax"], required=True)
     operator.add_argument("--dtype", default="float16")
-    operator.add_argument("--rows", type=int, required=True)
-    operator.add_argument("--cols", type=int, required=True)
-    operator.add_argument("--dim", type=int, default=-1)
+    operator.add_argument("--dataset", choices=["smoke", "realistic", "stress"], default="realistic")
+    operator.add_argument("--case-id", required=True)
     operator.add_argument("--warmup", type=_non_negative_int, default=10)
     operator.add_argument("--iterations", type=_positive_int, default=50)
     operator.add_argument("--output-dir", type=Path, default=Path("results"))
@@ -49,9 +48,8 @@ def main(argv: list[str] | None = None) -> int:
                 backend=args.backend,
                 op=args.op,
                 dtype=args.dtype,
-                rows=args.rows,
-                cols=args.cols,
-                dim=args.dim,
+                dataset=args.dataset,
+                case_id=args.case_id,
                 warmup=args.warmup,
                 iterations=args.iterations,
             )

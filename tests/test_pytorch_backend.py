@@ -40,9 +40,8 @@ def test_backend_raises_clear_error_when_torch_is_missing(monkeypatch):
         backend="nvidia",
         op="softmax",
         dtype="float16",
-        rows=16,
-        cols=16,
-        dim=-1,
+        dataset="smoke",
+        case_id="tiny_logits",
         warmup=1,
         iterations=1,
     )
@@ -64,9 +63,8 @@ def test_backend_raises_clear_error_when_cuda_is_unavailable(monkeypatch):
         backend="nvidia",
         op="softmax",
         dtype="float16",
-        rows=16,
-        cols=16,
-        dim=-1,
+        dataset="smoke",
+        case_id="tiny_logits",
         warmup=1,
         iterations=1,
     )
@@ -76,38 +74,26 @@ def test_backend_raises_clear_error_when_cuda_is_unavailable(monkeypatch):
 
 
 def test_backend_rejects_non_positive_iterations():
-    from cannbench.backends.pytorch_backend import NvidiaBackend
-
-    backend = NvidiaBackend()
-    request = OperatorBenchmarkRequest(
-        backend="nvidia",
-        op="softmax",
-        dtype="float16",
-        rows=16,
-        cols=16,
-        dim=-1,
-        warmup=1,
-        iterations=0,
-    )
-
     with pytest.raises(ValueError, match="iterations must be > 0"):
-        backend.run_softmax(request)
+        OperatorBenchmarkRequest(
+            backend="nvidia",
+            op="softmax",
+            dtype="float16",
+            dataset="smoke",
+            case_id="tiny_logits",
+            warmup=1,
+            iterations=0,
+        )
 
 
 def test_backend_rejects_negative_warmup():
-    from cannbench.backends.pytorch_backend import NvidiaBackend
-
-    backend = NvidiaBackend()
-    request = OperatorBenchmarkRequest(
-        backend="nvidia",
-        op="softmax",
-        dtype="float16",
-        rows=16,
-        cols=16,
-        dim=-1,
-        warmup=-1,
-        iterations=1,
-    )
-
     with pytest.raises(ValueError, match="warmup must be >= 0"):
-        backend.run_softmax(request)
+        OperatorBenchmarkRequest(
+            backend="nvidia",
+            op="softmax",
+            dtype="float16",
+            dataset="smoke",
+            case_id="tiny_logits",
+            warmup=-1,
+            iterations=1,
+        )
