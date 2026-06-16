@@ -23,7 +23,7 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-"cannbench.datasets.data.softmax" = ["*.json"]
+"cannbench.datasets.data.*" = ["*.json"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
