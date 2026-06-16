@@ -24,6 +24,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "cannbench.datasets.data.*" = ["*.json"]
+"cannbench.datasets.data.*.custom_ops.ascend.default" = ["*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

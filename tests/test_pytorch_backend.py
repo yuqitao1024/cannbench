@@ -13,14 +13,14 @@ def test_get_backend_returns_nvidia_backend():
     assert backend.name == "nvidia"
 
 
+def test_get_backend_returns_ascend_backend():
+    backend = get_backend("ascend")
+    assert backend.name == "ascend"
+
+
 def test_get_backend_rejects_unknown_backend():
     with pytest.raises(ValueError, match="Unsupported backend"):
         get_backend("unknown")
-
-
-def test_get_backend_rejects_ascend_from_public_factory():
-    with pytest.raises(ValueError, match="Unsupported backend"):
-        get_backend("ascend")
 
 
 def test_backend_raises_clear_error_when_torch_is_missing(monkeypatch):
@@ -71,6 +71,218 @@ def test_backend_raises_clear_error_when_cuda_is_unavailable(monkeypatch):
 
     with pytest.raises(RuntimeError, match="CUDA is required"):
         backend.run_softmax(request)
+
+
+def test_ascend_backend_raises_clear_error_when_torch_npu_is_missing(monkeypatch):
+    original_import = builtins.__import__
+
+    def failing_import(name, *args, **kwargs):
+        if name == "torch_npu":
+            raise ModuleNotFoundError(name)
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", failing_import)
+
+    from cannbench.backends.pytorch_backend import AscendBackend
+
+    backend = AscendBackend()
+    request = OperatorBenchmarkRequest(
+        backend="ascend",
+        op="softmax",
+        dtype="float16",
+        dataset="smoke",
+        case_id="tiny_logits",
+        warmup=1,
+        iterations=1,
+    )
+
+    with pytest.raises(RuntimeError, match="torch_npu is required"):
+        backend.run_softmax(request)
+
+
+def test_ascend_backend_raises_clear_error_when_npu_is_unavailable(monkeypatch):
+    from cannbench.backends.pytorch_backend import AscendBackend
+
+    fake_torch = SimpleNamespace(
+        npu=SimpleNamespace(is_available=lambda: False),
+    )
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+    monkeypatch.setitem(sys.modules, "torch_npu", SimpleNamespace())
+
+    backend = AscendBackend()
+    request = OperatorBenchmarkRequest(
+        backend="ascend",
+        op="softmax",
+        dtype="float16",
+        dataset="smoke",
+        case_id="tiny_logits",
+        warmup=1,
+        iterations=1,
+    )
+
+    with pytest.raises(RuntimeError, match="Ascend NPU is required"):
+        backend.run_softmax(request)
+
+
+def test_ascend_backend_materializes_softmax_inputs_from_seed(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeTensor:
+        def reshape(self, shape):
+            captured["shape"] = shape
+            return self
+
+    class FakeTorch:
+        def __init__(self) -> None:
+            self.npu = SimpleNamespace(
+                is_available=lambda: True,
+                synchronize=lambda: captured.setdefault("synchronized", True),
+                get_device_name=lambda device: "Fake Ascend",
+            )
+            self.device = lambda kind: kind
+            self.float16 = "float16"
+            self.tensor = self._tensor
+            self.softmax = lambda tensor, dim: tensor
+
+        def _tensor(self, values, device=None, dtype=None):
+            captured["values"] = values
+            captured["device"] = device
+            captured["dtype"] = dtype
+            return FakeTensor()
+
+    monkeypatch.setitem(sys.modules, "torch", FakeTorch())
+    monkeypatch.setitem(sys.modules, "torch_npu", SimpleNamespace())
+
+    from cannbench.backends.pytorch_backend import AscendBackend
+
+    backend = AscendBackend()
+    request = OperatorBenchmarkRequest(
+        backend="ascend",
+        op="softmax",
+        dtype="float16",
+        dataset="smoke",
+        case_id="tiny_logits",
+        warmup=1,
+        iterations=1,
+        seed=7,
+    )
+
+    result = backend.run_softmax(request)
+
+    assert result.backend == "ascend"
+    assert result.device_name == "Fake Ascend"
+    assert captured["shape"] == (32, 128)
+    assert captured["device"] == "npu"
+    assert captured["dtype"] == "float16"
+    assert captured["synchronized"] is True
+    assert captured["values"]
+
+
+def test_ascend_backend_skips_custom_op_deployment_when_disabled(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeTensor:
+        def reshape(self, shape):
+            del shape
+            return self
+
+    class FakeTorch:
+        def __init__(self) -> None:
+            self.npu = SimpleNamespace(
+                is_available=lambda: True,
+                synchronize=lambda: None,
+                get_device_name=lambda device: "Fake Ascend",
+            )
+            self.device = lambda kind: kind
+            self.float16 = "float16"
+            self.tensor = lambda *args, **kwargs: FakeTensor()
+            self.softmax = lambda tensor, dim: tensor
+
+    monkeypatch.setitem(sys.modules, "torch", FakeTorch())
+    monkeypatch.setitem(sys.modules, "torch_npu", SimpleNamespace())
+
+    from cannbench.backends.pytorch_backend import AscendBackend
+
+    backend = AscendBackend()
+    monkeypatch.setattr(
+        backend,
+        "_deploy_custom_op",
+        lambda request, op_name: captured.setdefault("called", True),
+    )
+
+    request = OperatorBenchmarkRequest(
+        backend="ascend",
+        op="softmax",
+        dtype="float16",
+        dataset="smoke",
+        case_id="tiny_logits",
+        warmup=1,
+        iterations=1,
+        seed=7,
+    )
+
+    backend.run_softmax(request)
+
+    assert "called" not in captured
+
+
+def test_ascend_backend_deploys_default_custom_op_when_enabled(monkeypatch, tmp_path):
+    captured: dict[str, object] = {}
+    op_dir = (
+        tmp_path
+        / "src"
+        / "cannbench"
+        / "datasets"
+        / "data"
+        / "softmax"
+        / "custom_ops"
+        / "ascend"
+        / "default"
+    )
+    op_dir.mkdir(parents=True)
+    install_script = op_dir / "install.sh"
+    install_script.write_text("#!/bin/sh\nexit 0\n")
+
+    class FakeTorch:
+        def __init__(self) -> None:
+            self.npu = SimpleNamespace(
+                is_available=lambda: True,
+                synchronize=lambda: None,
+                get_device_name=lambda device: "Fake Ascend",
+            )
+            self.device = lambda kind: kind
+            self.float16 = "float16"
+            self.tensor = lambda *args, **kwargs: SimpleNamespace(reshape=lambda shape: SimpleNamespace())
+            self.softmax = lambda tensor, dim: tensor
+
+    monkeypatch.setitem(sys.modules, "torch", FakeTorch())
+    monkeypatch.setitem(sys.modules, "torch_npu", SimpleNamespace())
+
+    from cannbench.backends.pytorch_backend import AscendBackend
+
+    backend = AscendBackend()
+    monkeypatch.setattr(backend, "_custom_op_base_dir", lambda op_name: op_dir)
+    monkeypatch.setattr(
+        backend,
+        "_run_custom_op_install",
+        lambda script: captured.setdefault("script", script),
+    )
+
+    request = OperatorBenchmarkRequest(
+        backend="ascend",
+        op="softmax",
+        dtype="float16",
+        dataset="smoke",
+        case_id="tiny_logits",
+        warmup=1,
+        iterations=1,
+        seed=7,
+        deploy_custom_op=True,
+    )
+
+    backend.run_softmax(request)
+
+    assert captured["script"] == install_script
 
 
 def test_backend_materializes_softmax_inputs_from_seed(monkeypatch):

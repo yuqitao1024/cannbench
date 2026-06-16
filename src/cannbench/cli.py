@@ -31,12 +31,13 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     operator = subparsers.add_parser("operator")
-    operator.add_argument("--backend", choices=["nvidia"], required=True)
+    operator.add_argument("--backend", choices=["nvidia", "ascend"], required=True)
     operator.add_argument("--op", choices=list_operator_names())
     operator.add_argument("--dtype", default="float16")
     operator.add_argument("--dataset", choices=["smoke", "realistic", "stress"], default="realistic")
     operator.add_argument("--case-id")
     operator.add_argument("--prepared-input", type=Path)
+    operator.add_argument("--deploy-custom-op", action="store_true", default=False)
     operator.add_argument("--warmup", type=_non_negative_int, default=10)
     operator.add_argument("--iterations", type=_positive_int, default=50)
     operator.add_argument("--output-dir", type=Path, default=Path("results"))
@@ -70,6 +71,7 @@ def main(argv: list[str] | None = None) -> int:
                     warmup=args.warmup,
                     iterations=args.iterations,
                     seed=prepared.seed,
+                    deploy_custom_op=args.deploy_custom_op,
                 )
             else:
                 if not args.op or not args.case_id:
@@ -82,6 +84,7 @@ def main(argv: list[str] | None = None) -> int:
                     case_id=args.case_id,
                     warmup=args.warmup,
                     iterations=args.iterations,
+                    deploy_custom_op=args.deploy_custom_op,
                 )
             backend = get_backend(args.backend)
             result = backend.run_operator(request)

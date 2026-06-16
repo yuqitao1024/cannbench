@@ -1,4 +1,5 @@
 import runpy
+import tomllib
 
 import pytest
 
@@ -105,23 +106,43 @@ def test_build_parser_exposes_prepare_subcommand():
     assert args.seed == 7
 
 
-def test_build_parser_rejects_ascend_backend():
+def test_build_parser_accepts_ascend_backend():
     parser = build_parser()
+    args = parser.parse_args(
+        [
+            "operator",
+            "--backend",
+            "ascend",
+            "--op",
+            "softmax",
+            "--dataset",
+            "smoke",
+            "--case-id",
+            "tiny_logits",
+        ]
+    )
 
-    with pytest.raises(SystemExit):
-        parser.parse_args(
-            [
-                "operator",
-                "--backend",
-                "ascend",
-                "--op",
-                "softmax",
-                "--dataset",
-                "smoke",
-                "--case-id",
-                "tiny_logits",
-            ]
-        )
+    assert args.backend == "ascend"
+
+
+def test_build_parser_exposes_boolean_custom_op_deployment_flag():
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "operator",
+            "--backend",
+            "ascend",
+            "--op",
+            "softmax",
+            "--dataset",
+            "smoke",
+            "--case-id",
+            "tiny_logits",
+            "--deploy-custom-op",
+        ]
+    )
+
+    assert args.deploy_custom_op is True
 
 
 def test_main_runs_operator_benchmark_and_writes_outputs(tmp_path, monkeypatch):
@@ -179,10 +200,50 @@ def test_main_runs_operator_benchmark_and_writes_outputs(tmp_path, monkeypatch):
     assert request.dim == -1
     assert request.warmup == 2
     assert request.iterations == 3
+    assert request.deploy_custom_op is False
     assert captured["output_dir"] == tmp_path
     assert captured["run_name"] == "softmax-run"
     assert captured["result"] is result
     assert captured["formats"] == ("json", "csv", "md")
+
+
+def test_main_passes_custom_op_deployment_flag_to_request(tmp_path, monkeypatch):
+    captured: dict[str, object] = {}
+    result = sample_result()
+
+    class FakeBackend:
+        def run_operator(self, request):
+            captured["request"] = request
+            return result
+
+    monkeypatch.setattr("cannbench.cli.get_backend", lambda name: FakeBackend())
+    monkeypatch.setattr(
+        "cannbench.cli.write_benchmark_outputs",
+        lambda output_dir, run_name, actual_result, formats: {},
+    )
+
+    exit_code = main(
+        [
+            "operator",
+            "--backend",
+            "ascend",
+            "--op",
+            "softmax",
+            "--dtype",
+            "float16",
+            "--dataset",
+            "smoke",
+            "--case-id",
+            "tiny_logits",
+            "--deploy-custom-op",
+            "--output-dir",
+            str(tmp_path),
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured["request"].backend == "ascend"
+    assert captured["request"].deploy_custom_op is True
 
 
 def test_main_prepare_writes_prepared_input_manifest(tmp_path):
@@ -271,6 +332,7 @@ def test_main_runs_operator_benchmark_from_prepared_input(tmp_path, monkeypatch)
             str(tmp_path),
             "--run-name",
             "prepared-run",
+            "--deploy-custom-op",
         ]
     )
 
@@ -280,6 +342,7 @@ def test_main_runs_operator_benchmark_from_prepared_input(tmp_path, monkeypatch)
     assert request.case_id == "tiny_logits"
     assert request.seed == 7
     assert request.dimensions == (32, 128)
+    assert request.deploy_custom_op is True
     assert captured["run_name"] == "prepared-run"
 
 
@@ -355,3 +418,12 @@ def test_python_m_cannbench_exits_with_main_return_code(monkeypatch):
         runpy.run_module("cannbench", run_name="__main__")
 
     assert excinfo.value.code == 7
+
+
+def test_package_data_includes_ascend_custom_op_defaults():
+    with open("pyproject.toml", "rb") as config:
+        payload = tomllib.load(config)
+
+    package_data = payload["tool"]["setuptools"]["package-data"]
+
+    assert "cannbench.datasets.data.*.custom_ops.ascend.default" in package_data
