@@ -159,6 +159,36 @@ cannbench model \
 - Standardize result schema
 - Add benchmark reports and comparison scripts
 
+## References
+
+The following projects and documents are useful references for CannBench design and implementation:
+
+### Model-Level Benchmarking
+
+- vLLM Benchmarks README
+  https://github.com/vllm-project/vllm/blob/main/benchmarks/README.md
+
+  Useful as a reference for serving benchmarks, latency and throughput testing, benchmark dataset handling, and benchmark CLI organization.
+
+### Operator-Level Benchmarking
+
+- TritonBench
+  https://github.com/meta-pytorch/tritonbench
+
+  Useful as a reference for operator-focused benchmarking, example inputs, and performance comparison workflows for PyTorch custom operators.
+
+- DeepSpeedExamples Benchmarks
+  https://github.com/deepspeedai/DeepSpeedExamples/tree/master/benchmarks
+
+  Useful as a reference for practical benchmarking layouts and performance evaluation examples around training and inference workloads.
+
+### NVIDIA Performance Guidance
+
+- NVIDIA CUDA C++ Best Practices Guide
+  https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html
+
+  Useful as a reference for measurement methodology, CUDA performance analysis, optimization principles, and benchmarking discipline on NVIDIA platforms.
+
 ## Status
 
 This repository is currently in the setup stage. The initial scope is:
@@ -169,4 +199,4 @@ This repository is currently in the setup stage. The initial scope is:
 
 ## License
 
-License information has not been added yet.
+This project is licensed under the Apache License 2.0. See [LICENSE](LICENSE) for details.
