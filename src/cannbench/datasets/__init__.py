@@ -10,6 +10,12 @@ from cannbench.datasets.index_select import (
     get_index_select_case,
     get_index_select_dataset,
 )
+from cannbench.datasets.take_along_dim import (
+    TakeAlongDimCase,
+    TakeAlongDimDataset,
+    get_take_along_dim_case,
+    get_take_along_dim_dataset,
+)
 from cannbench.datasets.embedding import (
     EmbeddingCase,
     EmbeddingDataset,
@@ -28,6 +34,7 @@ from cannbench.datasets.materialize import (
     materialize_index_select_inputs,
     materialize_embedding_inputs,
     materialize_softmax_inputs,
+    materialize_take_along_dim_inputs,
     materialized_values_to_buffer,
 )
 from cannbench.datasets.synthetic import (
@@ -40,6 +47,8 @@ __all__ = [
     "GatherDataset",
     "IndexSelectCase",
     "IndexSelectDataset",
+    "TakeAlongDimCase",
+    "TakeAlongDimDataset",
     "SoftmaxCase",
     "SoftmaxDataset",
     "EmbeddingCase",
@@ -48,6 +57,8 @@ __all__ = [
     "get_gather_dataset",
     "get_index_select_case",
     "get_index_select_dataset",
+    "get_take_along_dim_case",
+    "get_take_along_dim_dataset",
     "get_embedding_case",
     "get_embedding_dataset",
     "get_operator_case",
@@ -56,6 +67,7 @@ __all__ = [
     "materialize_index_select_inputs",
     "materialize_embedding_inputs",
     "materialize_softmax_inputs",
+    "materialize_take_along_dim_inputs",
     "materialized_values_to_buffer",
     "build_softmax_smoke_case",
     "build_softmax_stress_case",

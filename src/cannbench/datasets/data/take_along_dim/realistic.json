@@ -1,0 +1,41 @@
+{
+  "name": "realistic",
+  "cases": [
+    {
+      "case_id": "t5_attention_topk_values",
+      "family": "attention_topk",
+      "input_shape": [4, 8, 1024, 1024],
+      "index_shape": [4, 8, 1024, 64],
+      "dim": -1,
+      "source_kind": "real_model",
+      "source_project": "TritonBench",
+      "source_model": "T5Small",
+      "source_file": "hf_train/T5Small_train.json",
+      "source_op": "torch.take_along_dim"
+    },
+    {
+      "case_id": "bert_token_score_select",
+      "family": "token_scores",
+      "input_shape": [16, 128, 30522],
+      "index_shape": [16, 128, 64],
+      "dim": -1,
+      "source_kind": "real_model",
+      "source_project": "TritonBench",
+      "source_model": "BERT_pytorch",
+      "source_file": "torchbench_train/BERT_pytorch_train.json",
+      "source_op": "torch.take_along_dim"
+    },
+    {
+      "case_id": "opt_vocab_topk_values",
+      "family": "lm_logits_topk",
+      "input_shape": [8, 256, 50272],
+      "index_shape": [8, 256, 50],
+      "dim": -1,
+      "source_kind": "real_model",
+      "source_project": "TritonBench",
+      "source_model": "OPTForCausalLM",
+      "source_file": "hf_train/OPTForCausalLM_train.json",
+      "source_op": "torch.take_along_dim"
+    }
+  ]
+}

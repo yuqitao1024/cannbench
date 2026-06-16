@@ -317,6 +317,68 @@ def test_backend_runs_index_select_with_materialized_inputs(monkeypatch):
     assert captured["tensor_calls"][1]["dtype"] == "long"
 
 
+def test_backend_runs_take_along_dim_with_materialized_inputs(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeTensor:
+        def reshape(self, *shape):
+            captured.setdefault("reshapes", []).append(shape)
+            return self
+
+    class FakeTorch:
+        def __init__(self) -> None:
+            self.cuda = SimpleNamespace(
+                is_available=lambda: True,
+                synchronize=lambda: None,
+                get_device_name=lambda device: "Fake GPU",
+            )
+            self.device = lambda kind: kind
+            self.float16 = "float16"
+            self.long = "long"
+            self.tensor = self._tensor
+            self.softmax = lambda tensor, dim: tensor
+            self.nn = SimpleNamespace(Embedding=lambda *args, **kwargs: None)
+
+        def _tensor(self, values, device=None, dtype=None):
+            captured.setdefault("tensor_calls", []).append(
+                {
+                    "values": values,
+                    "device": device,
+                    "dtype": dtype,
+                }
+            )
+            return FakeTensor()
+
+        def take_along_dim(self, input_tensor, indices, dim):
+            captured["take_along_dim_dim"] = dim
+            captured["take_along_dim_input"] = input_tensor
+            captured["take_along_dim_indices"] = indices
+            return input_tensor
+
+    monkeypatch.setitem(sys.modules, "torch", FakeTorch())
+
+    from cannbench.backends.pytorch_backend import NvidiaBackend
+
+    backend = NvidiaBackend()
+    request = OperatorBenchmarkRequest(
+        backend="nvidia",
+        op="take_along_dim",
+        dtype="float16",
+        dataset="smoke",
+        case_id="tiny_rank2_take_along_dim",
+        warmup=1,
+        iterations=1,
+        seed=7,
+    )
+
+    result = backend.run_operator(request)
+
+    assert result.op == "take_along_dim"
+    assert captured["take_along_dim_dim"] == 1
+    assert captured["tensor_calls"][0]["dtype"] == "float16"
+    assert captured["tensor_calls"][1]["dtype"] == "long"
+
+
 def test_backend_rejects_non_positive_iterations():
     with pytest.raises(ValueError, match="iterations must be > 0"):
         OperatorBenchmarkRequest(

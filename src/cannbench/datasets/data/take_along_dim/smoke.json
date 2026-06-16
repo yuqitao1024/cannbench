@@ -1,0 +1,41 @@
+{
+  "name": "smoke",
+  "cases": [
+    {
+      "case_id": "tiny_rank2_take_along_dim",
+      "family": "topk_axis",
+      "input_shape": [32, 64],
+      "index_shape": [32, 16],
+      "dim": 1,
+      "source_kind": "synthetic_smoke",
+      "source_project": "cannbench",
+      "source_model": "take_along_dim_rank2_fixture",
+      "source_file": "built-in",
+      "source_op": "torch.take_along_dim"
+    },
+    {
+      "case_id": "tiny_rank3_take_along_dim",
+      "family": "batched_topk",
+      "input_shape": [4, 16, 32],
+      "index_shape": [4, 16, 8],
+      "dim": -1,
+      "source_kind": "synthetic_smoke",
+      "source_project": "cannbench",
+      "source_model": "take_along_dim_rank3_fixture",
+      "source_file": "built-in",
+      "source_op": "torch.take_along_dim"
+    },
+    {
+      "case_id": "tiny_sequence_reorder",
+      "family": "sequence_reorder",
+      "input_shape": [2, 32, 64],
+      "index_shape": [2, 12, 64],
+      "dim": 1,
+      "source_kind": "synthetic_smoke",
+      "source_project": "cannbench",
+      "source_model": "take_along_dim_sequence_fixture",
+      "source_file": "built-in",
+      "source_op": "torch.take_along_dim"
+    }
+  ]
+}

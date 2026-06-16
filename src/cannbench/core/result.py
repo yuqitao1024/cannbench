@@ -40,8 +40,9 @@ def _payload_key_order(key: str) -> tuple[int, str]:
     preferred = {
         "dimensions": 0,
         "dim": 1,
-        "embedding_dim": 0,
+        "input_shape": 0,
         "index_shape": 1,
+        "embedding_dim": 0,
         "num_embeddings": 2,
     }
     return (preferred.get(key, 100), key)

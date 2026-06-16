@@ -1,0 +1,41 @@
+{
+  "name": "stress",
+  "cases": [
+    {
+      "case_id": "long_context_attention_topk",
+      "family": "long_context_topk",
+      "input_shape": [2, 16, 4096, 4096],
+      "index_shape": [2, 16, 4096, 128],
+      "dim": -1,
+      "source_kind": "synthetic_boundary",
+      "source_project": "cannbench",
+      "source_model": "take_along_dim_long_context_boundary",
+      "source_file": "generated",
+      "source_op": "torch.take_along_dim"
+    },
+    {
+      "case_id": "wide_vocab_topk",
+      "family": "wide_vocab_topk",
+      "input_shape": [4, 512, 128000],
+      "index_shape": [4, 512, 100],
+      "dim": -1,
+      "source_kind": "synthetic_boundary",
+      "source_project": "cannbench",
+      "source_model": "take_along_dim_wide_vocab_boundary",
+      "source_file": "generated",
+      "source_op": "torch.take_along_dim"
+    },
+    {
+      "case_id": "large_batch_sequence_reorder",
+      "family": "sequence_reorder",
+      "input_shape": [64, 2048, 512],
+      "index_shape": [64, 512, 512],
+      "dim": 1,
+      "source_kind": "synthetic_boundary",
+      "source_project": "cannbench",
+      "source_model": "take_along_dim_large_batch_boundary",
+      "source_file": "generated",
+      "source_op": "torch.take_along_dim"
+    }
+  ]
+}
