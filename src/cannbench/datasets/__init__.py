@@ -10,6 +10,12 @@ from cannbench.datasets.index_select import (
     get_index_select_case,
     get_index_select_dataset,
 )
+from cannbench.datasets.index_add import (
+    IndexAddCase,
+    IndexAddDataset,
+    get_index_add_case,
+    get_index_add_dataset,
+)
 from cannbench.datasets.take_along_dim import (
     TakeAlongDimCase,
     TakeAlongDimDataset,
@@ -68,6 +74,8 @@ __all__ = [
     "GatherDataset",
     "IndexSelectCase",
     "IndexSelectDataset",
+    "IndexAddCase",
+    "IndexAddDataset",
     "TakeAlongDimCase",
     "TakeAlongDimDataset",
     "MaskedSelectCase",
@@ -84,6 +92,8 @@ __all__ = [
     "get_gather_dataset",
     "get_index_select_case",
     "get_index_select_dataset",
+    "get_index_add_case",
+    "get_index_add_dataset",
     "get_take_along_dim_case",
     "get_take_along_dim_dataset",
     "get_masked_select_case",
@@ -98,6 +108,7 @@ __all__ = [
     "get_operator_dataset",
     "materialize_gather_inputs",
     "materialize_index_select_inputs",
+    "materialize_index_add_inputs",
     "materialize_masked_select_inputs",
     "materialize_cross_entropy_inputs",
     "materialize_scatter_add_inputs",

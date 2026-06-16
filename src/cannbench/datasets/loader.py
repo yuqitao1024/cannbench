@@ -7,6 +7,10 @@ from cannbench.datasets.index_select import (
     get_index_select_case,
     get_index_select_dataset,
 )
+from cannbench.datasets.index_add import (
+    get_index_add_case,
+    get_index_add_dataset,
+)
 from cannbench.datasets.take_along_dim import (
     get_take_along_dim_case,
     get_take_along_dim_dataset,
@@ -41,6 +45,8 @@ class OperatorDataset:
             return get_gather_dataset(split)
         if self.dataset_namespace == "index_select":
             return get_index_select_dataset(split)
+        if self.dataset_namespace == "index_add":
+            return get_index_add_dataset(split)
         if self.dataset_namespace == "take_along_dim":
             return get_take_along_dim_dataset(split)
         if self.dataset_namespace == "masked_select":
@@ -61,6 +67,8 @@ def get_operator_dataset(name: str) -> OperatorDataset:
         return OperatorDataset(name="gather", dataset_namespace="gather")
     if name == "index_select":
         return OperatorDataset(name="index_select", dataset_namespace="index_select")
+    if name == "index_add":
+        return OperatorDataset(name="index_add", dataset_namespace="index_add")
     if name == "take_along_dim":
         return OperatorDataset(
             name="take_along_dim", dataset_namespace="take_along_dim"
@@ -83,6 +91,8 @@ def get_operator_case(op_name: str, dataset_name: str, case_id: str):
         return get_gather_case(dataset_name, case_id)
     if op_name == "index_select":
         return get_index_select_case(dataset_name, case_id)
+    if op_name == "index_add":
+        return get_index_add_case(dataset_name, case_id)
     if op_name == "take_along_dim":
         return get_take_along_dim_case(dataset_name, case_id)
     if op_name == "masked_select":

@@ -14,6 +14,7 @@ from cannbench.datasets.materialize import (
     materialize_embedding_inputs,
     materialize_gather_inputs,
     materialize_index_select_inputs,
+    materialize_index_add_inputs,
     materialize_masked_select_inputs,
     materialize_cross_entropy_inputs,
     materialize_scatter_add_inputs,
@@ -235,6 +236,52 @@ class NvidiaBackend(OperatorBackend):
             for _ in range(request.iterations):
                 started = time.perf_counter()
                 torch.index_select(input_tensor, payload["dim"], index_tensor)
+                torch.cuda.synchronize()
+                samples.append((time.perf_counter() - started) * 1000.0)
+            metrics = self._summarize_metrics(
+                iterations=request.iterations,
+                warmup=request.warmup,
+                samples=samples,
+            )
+            return OperatorBenchmarkResult(
+                backend=self.name,
+                device_name=torch.cuda.get_device_name(device),
+                op=request.op,
+                dtype=request.dtype,
+                case=self._build_result_case(request, case),
+                metrics=metrics,
+            )
+
+        if request.op == "index_add":
+            payload = materialize_index_add_inputs(
+                case,
+                dtype=request.dtype,
+                seed=request.seed,
+            )
+            input_tensor = torch.tensor(
+                materialized_values_to_buffer(payload["values"]),
+                device=device,
+                dtype=dtype,
+            ).reshape(payload["input_shape"])
+            index_tensor = torch.tensor(
+                payload["indices"],
+                device=device,
+                dtype=torch.long,
+            ).reshape(payload["index_shape"])
+            src_tensor = torch.tensor(
+                materialized_values_to_buffer(payload["src"]),
+                device=device,
+                dtype=dtype,
+            ).reshape(payload["src_shape"])
+
+            for _ in range(request.warmup):
+                torch.index_add(input_tensor, payload["dim"], index_tensor, src_tensor)
+            torch.cuda.synchronize()
+
+            samples: list[float] = []
+            for _ in range(request.iterations):
+                started = time.perf_counter()
+                torch.index_add(input_tensor, payload["dim"], index_tensor, src_tensor)
                 torch.cuda.synchronize()
                 samples.append((time.perf_counter() - started) * 1000.0)
             metrics = self._summarize_metrics(

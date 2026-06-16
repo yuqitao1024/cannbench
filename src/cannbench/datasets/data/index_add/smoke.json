@@ -1,0 +1,44 @@
+{
+  "name": "smoke",
+  "cases": [
+    {
+      "case_id": "tiny_rank2_index_add",
+      "family": "token_accumulation",
+      "input_shape": [32, 64],
+      "index_shape": [16],
+      "src_shape": [32, 16],
+      "dim": 1,
+      "source_kind": "synthetic_smoke",
+      "source_project": "cannbench",
+      "source_model": "index_add_smoke_fixture",
+      "source_file": "built-in",
+      "source_op": "torch.index_add"
+    },
+    {
+      "case_id": "tiny_rank3_index_add",
+      "family": "batched_accumulation",
+      "input_shape": [4, 16, 32],
+      "index_shape": [8],
+      "src_shape": [4, 8, 32],
+      "dim": 1,
+      "source_kind": "synthetic_smoke",
+      "source_project": "cannbench",
+      "source_model": "index_add_rank3_fixture",
+      "source_file": "built-in",
+      "source_op": "torch.index_add"
+    },
+    {
+      "case_id": "tiny_sequence_index_add",
+      "family": "sequence_accumulation",
+      "input_shape": [2, 32, 64],
+      "index_shape": [12],
+      "src_shape": [2, 12, 64],
+      "dim": 1,
+      "source_kind": "synthetic_smoke",
+      "source_project": "cannbench",
+      "source_model": "index_add_sequence_fixture",
+      "source_file": "built-in",
+      "source_op": "torch.index_add"
+    }
+  ]
+}

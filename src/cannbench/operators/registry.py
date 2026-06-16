@@ -27,6 +27,12 @@ _OPERATOR_SPECS = {
         dataset_namespace="index_select",
         runner_name="index_select",
     ),
+    "index_add": OperatorSpec(
+        name="index_add",
+        supported_dtypes=("float32", "float16", "bfloat16"),
+        dataset_namespace="index_add",
+        runner_name="index_add",
+    ),
     "take_along_dim": OperatorSpec(
         name="take_along_dim",
         supported_dtypes=("float32", "float16", "bfloat16"),

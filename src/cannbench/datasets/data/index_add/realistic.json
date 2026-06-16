@@ -1,0 +1,44 @@
+{
+  "name": "realistic",
+  "cases": [
+    {
+      "case_id": "bert_hidden_index_add",
+      "family": "hidden_accumulation",
+      "input_shape": [16, 128, 768],
+      "index_shape": [128],
+      "src_shape": [16, 128, 768],
+      "dim": 1,
+      "source_kind": "real_model",
+      "source_project": "TritonBench",
+      "source_model": "BERT_pytorch",
+      "source_file": "torchbench_train/BERT_pytorch_train.json",
+      "source_op": "torch.index_add"
+    },
+    {
+      "case_id": "t5_hidden_index_add",
+      "family": "hidden_accumulation",
+      "input_shape": [4, 8, 1024],
+      "index_shape": [1024],
+      "src_shape": [4, 1024, 1024],
+      "dim": 1,
+      "source_kind": "real_model",
+      "source_project": "TritonBench",
+      "source_model": "T5Small",
+      "source_file": "hf_train/T5Small_train.json",
+      "source_op": "torch.index_add"
+    },
+    {
+      "case_id": "opt_hidden_index_add",
+      "family": "hidden_accumulation",
+      "input_shape": [8, 256, 2048],
+      "index_shape": [256],
+      "src_shape": [8, 256, 2048],
+      "dim": 1,
+      "source_kind": "real_model",
+      "source_project": "TritonBench",
+      "source_model": "OPTForCausalLM",
+      "source_file": "hf_train/OPTForCausalLM_train.json",
+      "source_op": "torch.index_add"
+    }
+  ]
+}

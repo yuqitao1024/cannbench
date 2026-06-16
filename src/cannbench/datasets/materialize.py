@@ -5,6 +5,7 @@ from array import array
 
 from cannbench.datasets.gather import GatherCase
 from cannbench.datasets.index_select import IndexSelectCase
+from cannbench.datasets.index_add import IndexAddCase
 from cannbench.datasets.embedding import EmbeddingCase
 from cannbench.datasets.masked_select import MaskedSelectCase
 from cannbench.datasets.cross_entropy import CrossEntropyCase
@@ -100,6 +101,35 @@ def materialize_index_select_inputs(
         "dtype": dtype,
         "values": values,
         "indices": indices,
+    }
+
+
+def materialize_index_add_inputs(
+    case: IndexAddCase, *, dtype: str, seed: int
+) -> dict[str, object]:
+    generator = random.Random(seed)
+    input_size = 1
+    for dim in case.input_shape:
+        input_size *= dim
+    index_size = 1
+    for dim in case.index_shape:
+        index_size *= dim
+    src_size = 1
+    for dim in case.src_shape:
+        src_size *= dim
+
+    values = tuple(round(generator.uniform(-1.0, 1.0), 6) for _ in range(input_size))
+    indices = tuple(generator.randrange(case.input_shape[case.dim]) for _ in range(index_size))
+    src = tuple(round(generator.uniform(-1.0, 1.0), 6) for _ in range(src_size))
+    return {
+        "input_shape": case.input_shape,
+        "index_shape": case.index_shape,
+        "src_shape": case.src_shape,
+        "dim": case.dim,
+        "dtype": dtype,
+        "values": values,
+        "indices": indices,
+        "src": src,
     }
 
 

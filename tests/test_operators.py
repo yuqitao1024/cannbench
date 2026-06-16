@@ -75,6 +75,15 @@ def test_scatter_add_operator_spec_is_registered():
     assert spec.runner_name == "scatter_add"
 
 
+def test_index_add_operator_spec_is_registered():
+    spec = get_operator_spec("index_add")
+
+    assert spec.name == "index_add"
+    assert spec.supported_dtypes == ("float32", "float16", "bfloat16")
+    assert spec.dataset_namespace == "index_add"
+    assert spec.runner_name == "index_add"
+
+
 def test_list_operator_names_contains_softmax():
     assert "softmax" in list_operator_names()
     assert "embedding" in list_operator_names()
@@ -84,6 +93,7 @@ def test_list_operator_names_contains_softmax():
     assert "masked_select" in list_operator_names()
     assert "cross_entropy" in list_operator_names()
     assert "scatter_add" in list_operator_names()
+    assert "index_add" in list_operator_names()
 
 
 def test_unknown_operator_spec_is_rejected():
@@ -139,6 +149,13 @@ def test_scatter_add_dataset_is_registered():
 
     assert dataset.name == "scatter_add"
     assert dataset.dataset_namespace == "scatter_add"
+
+
+def test_index_add_dataset_is_registered():
+    dataset = get_operator_dataset("index_add")
+
+    assert dataset.name == "index_add"
+    assert dataset.dataset_namespace == "index_add"
 
 
 def test_softmax_dataset_is_registered():
