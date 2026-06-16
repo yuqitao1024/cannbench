@@ -1,7 +1,15 @@
 import pytest
 
-from cannbench.datasets import get_softmax_case, get_softmax_dataset
-from cannbench.datasets.materialize import materialize_softmax_inputs
+from cannbench.datasets import (
+    get_embedding_case,
+    get_embedding_dataset,
+    get_softmax_case,
+    get_softmax_dataset,
+)
+from cannbench.datasets.materialize import (
+    materialize_embedding_inputs,
+    materialize_softmax_inputs,
+)
 from cannbench.datasets.synthetic import (
     build_softmax_smoke_case,
     build_softmax_stress_case,
@@ -168,3 +176,44 @@ def test_materialized_softmax_inputs_change_with_different_seed():
     right = materialize_softmax_inputs(case, dtype="float16", seed=456)
 
     assert left["values"] != right["values"]
+
+
+def test_get_embedding_case_preserves_realistic_source_metadata():
+    case = get_embedding_case("realistic", "t5_token_embeddings")
+
+    assert case.case_id == "t5_token_embeddings"
+    assert case.embedding_dim == 512
+    assert case.index_shape == (8, 512)
+    assert case.source_project == "TritonBench"
+    assert case.source_model == "T5Small"
+
+
+def test_get_embedding_dataset_loads_builtin_splits():
+    smoke = get_embedding_dataset("smoke")
+    realistic = get_embedding_dataset("realistic")
+    stress = get_embedding_dataset("stress")
+
+    assert smoke.name == "smoke"
+    assert realistic.cases
+    assert len(stress.cases) == 3
+
+
+def test_materialized_embedding_inputs_are_deterministic_for_same_seed():
+    case = get_embedding_case("smoke", "tiny_token_lookup")
+
+    left = materialize_embedding_inputs(case, dtype="float16", seed=123)
+    right = materialize_embedding_inputs(case, dtype="float16", seed=123)
+
+    assert left["dtype"] == right["dtype"] == "float16"
+    assert left["index_shape"] == right["index_shape"] == (32,)
+    assert left["indices"] == right["indices"]
+    assert left["weights"] == right["weights"]
+
+
+def test_materialized_embedding_inputs_change_with_different_seed():
+    case = get_embedding_case("smoke", "tiny_token_lookup")
+
+    left = materialize_embedding_inputs(case, dtype="float16", seed=123)
+    right = materialize_embedding_inputs(case, dtype="float16", seed=456)
+
+    assert left["indices"] != right["indices"] or left["weights"] != right["weights"]

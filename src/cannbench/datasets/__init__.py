@@ -12,6 +12,7 @@ from cannbench.datasets.softmax import (
 )
 from cannbench.datasets.loader import get_operator_case, get_operator_dataset
 from cannbench.datasets.materialize import (
+    materialize_embedding_inputs,
     materialize_softmax_inputs,
     materialized_values_to_buffer,
 )
@@ -29,6 +30,7 @@ __all__ = [
     "get_embedding_dataset",
     "get_operator_case",
     "get_operator_dataset",
+    "materialize_embedding_inputs",
     "materialize_softmax_inputs",
     "materialized_values_to_buffer",
     "build_softmax_smoke_case",

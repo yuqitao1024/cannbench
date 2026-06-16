@@ -1,0 +1,41 @@
+{
+  "name": "stress",
+  "cases": [
+    {
+      "case_id": "wide_table_lookup",
+      "family": "wide_embedding_table",
+      "num_embeddings": 262144,
+      "embedding_dim": 4096,
+      "index_shape": [8, 128],
+      "source_kind": "synthetic_boundary",
+      "source_project": "cannbench",
+      "source_model": "embedding_wide_table_boundary",
+      "source_file": "generated",
+      "source_op": "torch.nn.Embedding"
+    },
+    {
+      "case_id": "long_sequence_lookup",
+      "family": "long_sequence_tokens",
+      "num_embeddings": 65536,
+      "embedding_dim": 1024,
+      "index_shape": [4, 4096],
+      "source_kind": "synthetic_boundary",
+      "source_project": "cannbench",
+      "source_model": "embedding_long_sequence_boundary",
+      "source_file": "generated",
+      "source_op": "torch.nn.Embedding"
+    },
+    {
+      "case_id": "micro_batch_large_hidden",
+      "family": "micro_batch_hidden_width",
+      "num_embeddings": 50000,
+      "embedding_dim": 8192,
+      "index_shape": [1, 64],
+      "source_kind": "synthetic_boundary",
+      "source_project": "cannbench",
+      "source_model": "embedding_hidden_width_boundary",
+      "source_file": "generated",
+      "source_op": "torch.nn.Embedding"
+    }
+  ]
+}

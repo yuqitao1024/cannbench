@@ -1,0 +1,65 @@
+{
+  "name": "realistic",
+  "cases": [
+    {
+      "case_id": "bert_word_embeddings",
+      "family": "encoder_tokens",
+      "num_embeddings": 30522,
+      "embedding_dim": 768,
+      "index_shape": [16, 128],
+      "source_kind": "real_model",
+      "source_project": "TritonBench",
+      "source_model": "BERT_pytorch",
+      "source_file": "torchbench_train/BERT_pytorch_train.json",
+      "source_op": "torch.nn.Embedding"
+    },
+    {
+      "case_id": "t5_token_embeddings",
+      "family": "seq2seq_tokens",
+      "num_embeddings": 32128,
+      "embedding_dim": 512,
+      "index_shape": [8, 512],
+      "source_kind": "real_model",
+      "source_project": "TritonBench",
+      "source_model": "T5Small",
+      "source_file": "hf_train/T5Small_train.json",
+      "source_op": "torch.nn.Embedding"
+    },
+    {
+      "case_id": "gptj_token_embeddings",
+      "family": "decoder_tokens",
+      "num_embeddings": 50400,
+      "embedding_dim": 4096,
+      "index_shape": [4, 128],
+      "source_kind": "real_model",
+      "source_project": "TritonBench",
+      "source_model": "GPTJForCausalLM",
+      "source_file": "hf_train/GPTJForCausalLM_train.json",
+      "source_op": "torch.nn.Embedding"
+    },
+    {
+      "case_id": "mobilebert_token_embeddings",
+      "family": "mobile_encoder_tokens",
+      "num_embeddings": 30522,
+      "embedding_dim": 512,
+      "index_shape": [32, 128],
+      "source_kind": "real_model",
+      "source_project": "TritonBench",
+      "source_model": "MobileBertForMaskedLM",
+      "source_file": "hf_train/MobileBertForMaskedLM_train.json",
+      "source_op": "torch.nn.Embedding"
+    },
+    {
+      "case_id": "opt_token_embeddings",
+      "family": "llm_tokens",
+      "num_embeddings": 50272,
+      "embedding_dim": 2048,
+      "index_shape": [8, 256],
+      "source_kind": "real_model",
+      "source_project": "TritonBench",
+      "source_model": "OPTForCausalLM",
+      "source_file": "hf_train/OPTForCausalLM_train.json",
+      "source_op": "torch.nn.Embedding"
+    }
+  ]
+}

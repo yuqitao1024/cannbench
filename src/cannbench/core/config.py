@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 
-from cannbench.datasets import get_softmax_case, get_softmax_dataset
+from cannbench.datasets import get_embedding_case, get_softmax_case
 from cannbench.core.output import SUPPORTED_OUTPUT_FORMATS
 from cannbench.core.result import SUPPORTED_SOFTMAX_DIMS
 
@@ -34,7 +34,7 @@ class OperatorBenchmarkRequest:
         if self.dtype not in SUPPORTED_DTYPES:
             raise ValueError(f"Unsupported dtype: {self.dtype}")
         if self.dataset not in {"smoke", "realistic", "stress"}:
-            raise ValueError(f"Unknown softmax dataset: {self.dataset}")
+            raise ValueError(f"Unknown operator dataset: {self.dataset}")
         if not self.case_id.strip():
             raise ValueError("case_id must not be empty")
         if self.output_formats and any(
@@ -56,13 +56,19 @@ class OperatorBenchmarkRequest:
         if self.seed < 0:
             raise ValueError("seed must be >= 0")
 
-        case = get_softmax_case(self.dataset, self.case_id)
+        if self.op == "softmax":
+            case = get_softmax_case(self.dataset, self.case_id)
+        elif self.op == "embedding":
+            case = get_embedding_case(self.dataset, self.case_id)
+        else:
+            raise ValueError(f"Unsupported operator: {self.op}")
         object.__setattr__(self, "case_payload", case.payload)
-        object.__setattr__(self, "dimensions", tuple(case.payload["dimensions"]))
-        object.__setattr__(self, "dim", int(case.payload["dim"]))
         object.__setattr__(self, "family", case.family)
         object.__setattr__(self, "source_kind", case.source_kind)
         object.__setattr__(self, "source_project", case.source_project)
         object.__setattr__(self, "source_model", case.source_model)
         object.__setattr__(self, "source_file", case.source_file)
         object.__setattr__(self, "source_op", case.source_op)
+        if self.op == "softmax":
+            object.__setattr__(self, "dimensions", tuple(case.payload["dimensions"]))
+            object.__setattr__(self, "dim", int(case.payload["dim"]))
