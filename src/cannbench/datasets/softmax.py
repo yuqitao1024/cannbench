@@ -26,6 +26,13 @@ class SoftmaxCase:
             raise ValueError("shape must contain only positive integers")
         object.__setattr__(self, "shape", shape)
 
+    @property
+    def payload(self) -> dict[str, object]:
+        return {
+            "dimensions": self.shape,
+            "dim": self.dim,
+        }
+
 
 @dataclass(frozen=True)
 class SoftmaxDataset:

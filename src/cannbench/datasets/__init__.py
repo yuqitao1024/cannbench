@@ -1,3 +1,9 @@
+from cannbench.datasets.embedding import (
+    EmbeddingCase,
+    EmbeddingDataset,
+    get_embedding_case,
+    get_embedding_dataset,
+)
 from cannbench.datasets.softmax import (
     SoftmaxCase,
     SoftmaxDataset,
@@ -17,6 +23,10 @@ from cannbench.datasets.synthetic import (
 __all__ = [
     "SoftmaxCase",
     "SoftmaxDataset",
+    "EmbeddingCase",
+    "EmbeddingDataset",
+    "get_embedding_case",
+    "get_embedding_dataset",
     "get_operator_case",
     "get_operator_dataset",
     "materialize_softmax_inputs",

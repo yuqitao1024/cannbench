@@ -20,6 +20,7 @@ class OperatorBenchmarkRequest:
     output_formats: tuple[str, ...] = field(
         default_factory=lambda: ("json", "csv", "md")
     )
+    case_payload: dict[str, object] = field(init=False)
     dimensions: tuple[int, ...] = field(init=False)
     dim: int = field(init=False)
     family: str = field(init=False)
@@ -56,8 +57,9 @@ class OperatorBenchmarkRequest:
             raise ValueError("seed must be >= 0")
 
         case = get_softmax_case(self.dataset, self.case_id)
-        object.__setattr__(self, "dimensions", case.shape)
-        object.__setattr__(self, "dim", case.dim)
+        object.__setattr__(self, "case_payload", case.payload)
+        object.__setattr__(self, "dimensions", tuple(case.payload["dimensions"]))
+        object.__setattr__(self, "dim", int(case.payload["dim"]))
         object.__setattr__(self, "family", case.family)
         object.__setattr__(self, "source_kind", case.source_kind)
         object.__setattr__(self, "source_project", case.source_project)

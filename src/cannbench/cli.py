@@ -4,6 +4,7 @@ from pathlib import Path
 from cannbench.backends import get_backend
 from cannbench.core.config import OperatorBenchmarkRequest
 from cannbench.core.output import write_benchmark_outputs
+from cannbench.operators import list_operator_names
 
 
 def _non_negative_int(value: str) -> int:
@@ -26,7 +27,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     operator = subparsers.add_parser("operator")
     operator.add_argument("--backend", choices=["nvidia"], required=True)
-    operator.add_argument("--op", choices=["softmax"], required=True)
+    operator.add_argument("--op", choices=list_operator_names(), required=True)
     operator.add_argument("--dtype", default="float16")
     operator.add_argument("--dataset", choices=["smoke", "realistic", "stress"], default="realistic")
     operator.add_argument("--case-id", required=True)

@@ -4,7 +4,12 @@ from csv import reader
 import pytest
 
 from cannbench.core.output import write_benchmark_outputs
-from cannbench.core.result import BenchmarkMetrics, OperatorBenchmarkResult, SoftmaxShape
+from cannbench.core.result import (
+    BenchmarkMetrics,
+    OperatorBenchmarkResult,
+    OperatorCase,
+    build_softmax_case,
+)
 
 
 def _sample_result() -> OperatorBenchmarkResult:
@@ -13,11 +18,11 @@ def _sample_result() -> OperatorBenchmarkResult:
         device_name="Fake GPU",
         op="softmax",
         dtype="float16",
-        shape=SoftmaxShape(
-            dimensions=(128, 128),
-            dim=-1,
+        case=build_softmax_case(
             case_id="tiny_logits",
             family="lm_logits",
+            dimensions=(128, 128),
+            dim=-1,
             source_kind="synthetic_smoke",
             source_project="cannbench",
             source_model="smoke_fixture",
@@ -42,11 +47,11 @@ def test_result_to_json_dict_contains_core_fields():
         device_name="Fake GPU",
         op="softmax",
         dtype="float16",
-        shape=SoftmaxShape(
-            dimensions=(4, 8, 1024, 1024),
-            dim=-1,
+        case=build_softmax_case(
             case_id="t5_attention",
             family="attention",
+            dimensions=(4, 8, 1024, 1024),
+            dim=-1,
             source_kind="real_model",
             source_project="TritonBench",
             source_model="T5Small",
@@ -68,9 +73,7 @@ def test_result_to_json_dict_contains_core_fields():
 
     assert payload["backend"] == "nvidia"
     assert payload["metrics"]["latency_ms_avg"] == 1.2
-    assert payload["shape"] == {
-        "dimensions": [4, 8, 1024, 1024],
-        "dim": -1,
+    assert payload["case"] == {
         "case_id": "t5_attention",
         "family": "attention",
         "source_kind": "real_model",
@@ -78,6 +81,10 @@ def test_result_to_json_dict_contains_core_fields():
         "source_model": "T5Small",
         "source_file": "tritonbench/models/t5.py",
         "source_op": "softmax",
+        "payload": {
+            "dimensions": [4, 8, 1024, 1024],
+            "dim": -1,
+        },
     }
 
 
@@ -97,8 +104,7 @@ def test_write_benchmark_outputs_creates_json_csv_and_markdown(tmp_path):
         "dtype",
         "case_id",
         "family",
-        "dimensions",
-        "dim",
+        "payload",
         "source_model",
         "latency_ms_avg",
         "latency_ms_p50",
@@ -113,8 +119,7 @@ def test_write_benchmark_outputs_creates_json_csv_and_markdown(tmp_path):
         "float16",
         "tiny_logits",
         "lm_logits",
-        "128x128",
-        "-1",
+        "dimensions=128x128, dim=-1",
         "smoke_fixture",
         "1.0",
         "1.0",
@@ -143,13 +148,13 @@ def test_write_benchmark_outputs_rejects_unsupported_formats(tmp_path):
 
 
 @pytest.mark.parametrize("dimensions", [(), (0, 128), (128, -1)])
-def test_softmax_shape_rejects_invalid_dimensions(dimensions: tuple[int, ...]):
+def test_build_softmax_case_rejects_invalid_dimensions(dimensions: tuple[int, ...]):
     with pytest.raises(ValueError, match="dimensions must be"):
-        SoftmaxShape(
-            dimensions=dimensions,
-            dim=-1,
+        build_softmax_case(
             case_id="case",
             family="attention",
+            dimensions=dimensions,
+            dim=-1,
             source_kind="synthetic",
             source_project="cannbench",
             source_model="fixture",
@@ -159,16 +164,31 @@ def test_softmax_shape_rejects_invalid_dimensions(dimensions: tuple[int, ...]):
 
 
 @pytest.mark.parametrize("dim", [-4, 3])
-def test_softmax_shape_rejects_invalid_dim(dim: int):
+def test_build_softmax_case_rejects_invalid_dim(dim: int):
     with pytest.raises(ValueError, match="dim must address an axis"):
-        SoftmaxShape(
-            dimensions=(4, 8, 16),
-            dim=dim,
+        build_softmax_case(
             case_id="case",
             family="attention",
+            dimensions=(4, 8, 16),
+            dim=dim,
             source_kind="synthetic",
             source_project="cannbench",
             source_model="fixture",
             source_file="tests/fixtures",
             source_op="softmax",
         )
+
+
+def test_operator_case_payload_summary_is_stable():
+    case = OperatorCase(
+        case_id="tiny_token_lookup",
+        family="token_lookup",
+        source_kind="synthetic_smoke",
+        source_project="cannbench",
+        source_model="fixture",
+        source_file="built-in",
+        source_op="torch.nn.Embedding",
+        payload={"num_embeddings": 128, "embedding_dim": 64, "index_shape": (32,)},
+    )
+
+    assert case.payload_summary == "embedding_dim=64, index_shape=32, num_embeddings=128"

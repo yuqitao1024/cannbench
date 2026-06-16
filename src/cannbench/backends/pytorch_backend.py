@@ -5,7 +5,7 @@ from cannbench.core.config import OperatorBenchmarkRequest
 from cannbench.core.result import (
     BenchmarkMetrics,
     OperatorBenchmarkResult,
-    SoftmaxShape,
+    build_softmax_case,
 )
 from cannbench.core.timing import summarize_timings_ms
 from cannbench.datasets import get_operator_case
@@ -75,11 +75,11 @@ class NvidiaBackend(OperatorBackend):
             device_name=torch.cuda.get_device_name(device),
             op=request.op,
             dtype=request.dtype,
-            shape=SoftmaxShape(
-                dimensions=request.dimensions,
-                dim=request.dim,
+            case=build_softmax_case(
                 case_id=request.case_id,
                 family=request.family,
+                dimensions=request.dimensions,
+                dim=request.dim,
                 source_kind=request.source_kind,
                 source_project=request.source_project,
                 source_model=request.source_model,

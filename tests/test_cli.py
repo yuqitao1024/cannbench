@@ -3,7 +3,11 @@ import runpy
 import pytest
 
 from cannbench.cli import build_parser, main
-from cannbench.core.result import BenchmarkMetrics, OperatorBenchmarkResult, SoftmaxShape
+from cannbench.core.result import (
+    BenchmarkMetrics,
+    OperatorBenchmarkResult,
+    build_softmax_case,
+)
 
 
 def sample_result() -> OperatorBenchmarkResult:
@@ -12,11 +16,11 @@ def sample_result() -> OperatorBenchmarkResult:
         device_name="Fake GPU",
         op="softmax",
         dtype="float16",
-        shape=SoftmaxShape(
-            dimensions=(4, 8, 1024, 1024),
-            dim=-1,
+        case=build_softmax_case(
             case_id="t5_attention",
             family="attention",
+            dimensions=(4, 8, 1024, 1024),
+            dim=-1,
             source_kind="real_model",
             source_project="TritonBench",
             source_model="T5Small",
@@ -56,6 +60,25 @@ def test_build_parser_exposes_operator_subcommand():
     assert args.op == "softmax"
     assert args.dataset == "realistic"
     assert args.case_id == "t5_attention"
+
+
+def test_build_parser_accepts_embedding_operator():
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "operator",
+            "--backend",
+            "nvidia",
+            "--op",
+            "embedding",
+            "--dataset",
+            "smoke",
+            "--case-id",
+            "tiny_token_lookup",
+        ]
+    )
+
+    assert args.op == "embedding"
 
 
 def test_build_parser_rejects_ascend_backend():

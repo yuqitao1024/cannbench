@@ -9,6 +9,12 @@ _OPERATOR_SPECS = {
         dataset_namespace="softmax",
         runner_name="softmax",
     ),
+    "embedding": OperatorSpec(
+        name="embedding",
+        supported_dtypes=("float32", "float16", "bfloat16"),
+        dataset_namespace="embedding",
+        runner_name="embedding",
+    ),
 }
 
 
@@ -21,4 +27,3 @@ def get_operator_spec(name: str) -> OperatorSpec:
 
 def list_operator_names() -> tuple[str, ...]:
     return tuple(_OPERATOR_SPECS)
-
