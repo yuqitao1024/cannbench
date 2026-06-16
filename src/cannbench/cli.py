@@ -54,7 +54,7 @@ def main(argv: list[str] | None = None) -> int:
                 iterations=args.iterations,
             )
             backend = get_backend(args.backend)
-            result = backend.run_softmax(request)
+            result = backend.run_operator(request)
             write_benchmark_outputs(
                 args.output_dir, args.run_name, result, request.output_formats
             )

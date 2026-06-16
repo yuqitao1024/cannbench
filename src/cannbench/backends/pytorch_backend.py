@@ -8,19 +8,21 @@ from cannbench.core.result import (
     SoftmaxShape,
 )
 from cannbench.core.timing import summarize_timings_ms
-from cannbench.datasets import get_softmax_case
+from cannbench.datasets import get_operator_case
 from cannbench.datasets.materialize import (
     materialize_softmax_inputs,
     materialized_values_to_buffer,
 )
+from cannbench.operators import get_operator_spec
 
 
 class NvidiaBackend(OperatorBackend):
     def __init__(self) -> None:
         super().__init__(name="nvidia", device_type="cuda")
 
-    def run_softmax(self, request: OperatorBenchmarkRequest) -> OperatorBenchmarkResult:
+    def run_operator(self, request: OperatorBenchmarkRequest) -> OperatorBenchmarkResult:
         self.validate_request(request)
+        spec = get_operator_spec(request.op)
 
         try:
             import torch
@@ -32,8 +34,11 @@ class NvidiaBackend(OperatorBackend):
 
         device = torch.device(self.device_type)
         dtype = getattr(torch, request.dtype)
+        if request.dtype not in spec.supported_dtypes:
+            raise RuntimeError(f"Unsupported dtype for {request.op}: {request.dtype}")
+        case = get_operator_case(request.op, request.dataset, request.case_id)
         payload = materialize_softmax_inputs(
-            get_softmax_case(request.dataset, request.case_id),
+            case,
             dtype=request.dtype,
             seed=request.seed,
         )
@@ -89,7 +94,7 @@ class AscendBackend(OperatorBackend):
     def __init__(self) -> None:
         super().__init__(name="ascend", device_type="npu")
 
-    def run_softmax(self, request: OperatorBenchmarkRequest) -> OperatorBenchmarkResult:
+    def run_operator(self, request: OperatorBenchmarkRequest) -> OperatorBenchmarkResult:
         self.validate_request(request)
         raise RuntimeError(
             "Ascend backend implementation comes from the same PyTorch path and should be "

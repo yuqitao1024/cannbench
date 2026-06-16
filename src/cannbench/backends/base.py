@@ -15,5 +15,8 @@ class OperatorBackend:
         if request.iterations <= 0:
             raise ValueError("iterations must be > 0")
 
-    def run_softmax(self, request: OperatorBenchmarkRequest) -> OperatorBenchmarkResult:
+    def run_operator(self, request: OperatorBenchmarkRequest) -> OperatorBenchmarkResult:
         raise NotImplementedError
+
+    def run_softmax(self, request: OperatorBenchmarkRequest) -> OperatorBenchmarkResult:
+        return self.run_operator(request)

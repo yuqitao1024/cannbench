@@ -82,7 +82,7 @@ def test_main_runs_operator_benchmark_and_writes_outputs(tmp_path, monkeypatch):
     result = sample_result()
 
     class FakeBackend:
-        def run_softmax(self, request):
+        def run_operator(self, request):
             captured["request"] = request
             return result
 
@@ -178,7 +178,7 @@ def test_main_rejects_negative_warmup():
 
 def test_main_converts_backend_runtime_failure_to_cli_error(monkeypatch, capsys):
     class FailingBackend:
-        def run_softmax(self, request):
+        def run_operator(self, request):
             raise RuntimeError("CUDA is required for the nvidia backend")
 
     monkeypatch.setattr("cannbench.cli.get_backend", lambda name: FailingBackend())
