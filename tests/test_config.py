@@ -135,6 +135,26 @@ def test_cross_entropy_request_accepts_builtin_dataset_case():
     }
 
 
+def test_scatter_add_request_accepts_builtin_dataset_case():
+    request = OperatorBenchmarkRequest(
+        backend="nvidia",
+        op="scatter_add",
+        dtype="float16",
+        dataset="smoke",
+        case_id="tiny_rank2_scatter_add",
+        warmup=5,
+        iterations=10,
+    )
+
+    assert request.op == "scatter_add"
+    assert request.case_payload == {
+        "input_shape": (32, 64),
+        "index_shape": (32, 64),
+        "src_shape": (32, 64),
+        "dim": 1,
+    }
+
+
 def test_operator_request_rejects_unknown_dtype():
     with pytest.raises(ValueError, match="Unsupported dtype"):
         OperatorBenchmarkRequest(

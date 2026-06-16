@@ -1,0 +1,44 @@
+{
+  "name": "realistic",
+  "cases": [
+    {
+      "case_id": "bert_token_scatter_add",
+      "family": "token_accumulation",
+      "input_shape": [16, 128, 30522],
+      "index_shape": [16, 128, 30522],
+      "src_shape": [16, 128, 30522],
+      "dim": -1,
+      "source_kind": "real_model",
+      "source_project": "TritonBench",
+      "source_model": "BERT_pytorch",
+      "source_file": "torchbench_train/BERT_pytorch_train.json",
+      "source_op": "torch.scatter_add"
+    },
+    {
+      "case_id": "t5_attention_scatter_add",
+      "family": "attention_accumulation",
+      "input_shape": [4, 8, 1024, 1024],
+      "index_shape": [4, 8, 1024, 1024],
+      "src_shape": [4, 8, 1024, 1024],
+      "dim": -1,
+      "source_kind": "real_model",
+      "source_project": "TritonBench",
+      "source_model": "T5Small",
+      "source_file": "hf_train/T5Small_train.json",
+      "source_op": "torch.scatter_add"
+    },
+    {
+      "case_id": "opt_vocab_scatter_add",
+      "family": "lm_logits_accumulation",
+      "input_shape": [8, 256, 50272],
+      "index_shape": [8, 256, 50272],
+      "src_shape": [8, 256, 50272],
+      "dim": -1,
+      "source_kind": "real_model",
+      "source_project": "TritonBench",
+      "source_model": "OPTForCausalLM",
+      "source_file": "hf_train/OPTForCausalLM_train.json",
+      "source_op": "torch.scatter_add"
+    }
+  ]
+}

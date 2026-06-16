@@ -28,6 +28,12 @@ from cannbench.datasets.cross_entropy import (
     get_cross_entropy_case,
     get_cross_entropy_dataset,
 )
+from cannbench.datasets.scatter_add import (
+    ScatterAddCase,
+    ScatterAddDataset,
+    get_scatter_add_case,
+    get_scatter_add_dataset,
+)
 from cannbench.datasets.embedding import (
     EmbeddingCase,
     EmbeddingDataset,
@@ -46,6 +52,7 @@ from cannbench.datasets.materialize import (
     materialize_index_select_inputs,
     materialize_masked_select_inputs,
     materialize_cross_entropy_inputs,
+    materialize_scatter_add_inputs,
     materialize_embedding_inputs,
     materialize_softmax_inputs,
     materialize_take_along_dim_inputs,
@@ -67,6 +74,8 @@ __all__ = [
     "MaskedSelectDataset",
     "CrossEntropyCase",
     "CrossEntropyDataset",
+    "ScatterAddCase",
+    "ScatterAddDataset",
     "SoftmaxCase",
     "SoftmaxDataset",
     "EmbeddingCase",
@@ -81,6 +90,8 @@ __all__ = [
     "get_masked_select_dataset",
     "get_cross_entropy_case",
     "get_cross_entropy_dataset",
+    "get_scatter_add_case",
+    "get_scatter_add_dataset",
     "get_embedding_case",
     "get_embedding_dataset",
     "get_operator_case",
@@ -89,6 +100,7 @@ __all__ = [
     "materialize_index_select_inputs",
     "materialize_masked_select_inputs",
     "materialize_cross_entropy_inputs",
+    "materialize_scatter_add_inputs",
     "materialize_embedding_inputs",
     "materialize_softmax_inputs",
     "materialize_take_along_dim_inputs",

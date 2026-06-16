@@ -8,6 +8,7 @@ from cannbench.datasets.index_select import IndexSelectCase
 from cannbench.datasets.embedding import EmbeddingCase
 from cannbench.datasets.masked_select import MaskedSelectCase
 from cannbench.datasets.cross_entropy import CrossEntropyCase
+from cannbench.datasets.scatter_add import ScatterAddCase
 from cannbench.datasets.softmax import SoftmaxCase
 from cannbench.datasets.take_along_dim import TakeAlongDimCase
 
@@ -168,4 +169,30 @@ def materialize_cross_entropy_inputs(
         "dtype": dtype,
         "logits": logits,
         "targets": targets,
+    }
+
+
+def materialize_scatter_add_inputs(
+    case: ScatterAddCase, *, dtype: str, seed: int
+) -> dict[str, object]:
+    generator = random.Random(seed)
+    input_size = 1
+    for dim in case.input_shape:
+        input_size *= dim
+    index_size = 1
+    for dim in case.index_shape:
+        index_size *= dim
+
+    values = tuple(round(generator.uniform(-1.0, 1.0), 6) for _ in range(input_size))
+    indices = tuple(generator.randrange(case.input_shape[case.dim]) for _ in range(index_size))
+    src = tuple(round(generator.uniform(-1.0, 1.0), 6) for _ in range(index_size))
+    return {
+        "input_shape": case.input_shape,
+        "index_shape": case.index_shape,
+        "src_shape": case.src_shape,
+        "dim": case.dim,
+        "dtype": dtype,
+        "values": values,
+        "indices": indices,
+        "src": src,
     }

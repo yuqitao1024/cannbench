@@ -45,6 +45,12 @@ _OPERATOR_SPECS = {
         dataset_namespace="cross_entropy",
         runner_name="cross_entropy",
     ),
+    "scatter_add": OperatorSpec(
+        name="scatter_add",
+        supported_dtypes=("float32", "float16", "bfloat16"),
+        dataset_namespace="scatter_add",
+        runner_name="scatter_add",
+    ),
 }
 
 

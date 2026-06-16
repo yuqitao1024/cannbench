@@ -11,6 +11,8 @@ from cannbench.datasets import (
     get_masked_select_dataset,
     get_cross_entropy_case,
     get_cross_entropy_dataset,
+    get_scatter_add_case,
+    get_scatter_add_dataset,
     get_softmax_case,
     get_softmax_dataset,
     get_take_along_dim_case,
@@ -22,6 +24,7 @@ from cannbench.datasets.materialize import (
     materialize_index_select_inputs,
     materialize_masked_select_inputs,
     materialize_cross_entropy_inputs,
+    materialize_scatter_add_inputs,
     materialize_softmax_inputs,
     materialize_take_along_dim_inputs,
 )
@@ -446,3 +449,50 @@ def test_materialized_cross_entropy_inputs_change_with_different_seed():
     right = materialize_cross_entropy_inputs(case, dtype="float16", seed=456)
 
     assert left["targets"] != right["targets"] or left["logits"] != right["logits"]
+
+
+def test_get_scatter_add_case_preserves_source_metadata():
+    case = get_scatter_add_case("realistic", "bert_token_scatter_add")
+
+    assert case.case_id == "bert_token_scatter_add"
+    assert case.input_shape == (16, 128, 30522)
+    assert case.index_shape == (16, 128, 30522)
+    assert case.src_shape == (16, 128, 30522)
+    assert case.dim == -1
+    assert case.source_project == "TritonBench"
+    assert case.source_model == "BERT_pytorch"
+    assert case.source_op == "torch.scatter_add"
+
+
+def test_get_scatter_add_dataset_loads_builtin_splits():
+    smoke = get_scatter_add_dataset("smoke")
+    realistic = get_scatter_add_dataset("realistic")
+    stress = get_scatter_add_dataset("stress")
+
+    assert smoke.name == "smoke"
+    assert len(smoke.cases) == 3
+    assert len(realistic.cases) >= 3
+    assert len(stress.cases) >= 3
+
+
+def test_materialized_scatter_add_inputs_are_deterministic_for_same_seed():
+    case = get_scatter_add_case("smoke", "tiny_rank2_scatter_add")
+
+    left = materialize_scatter_add_inputs(case, dtype="float16", seed=123)
+    right = materialize_scatter_add_inputs(case, dtype="float16", seed=123)
+
+    assert left["input_shape"] == right["input_shape"] == (32, 64)
+    assert left["index_shape"] == right["index_shape"] == (32, 64)
+    assert left["src_shape"] == right["src_shape"] == (32, 64)
+    assert left["indices"] == right["indices"]
+    assert left["values"] == right["values"]
+    assert left["src"] == right["src"]
+
+
+def test_materialized_scatter_add_inputs_change_with_different_seed():
+    case = get_scatter_add_case("smoke", "tiny_rank2_scatter_add")
+
+    left = materialize_scatter_add_inputs(case, dtype="float16", seed=123)
+    right = materialize_scatter_add_inputs(case, dtype="float16", seed=456)
+
+    assert left["indices"] != right["indices"] or left["src"] != right["src"] or left["values"] != right["values"]
