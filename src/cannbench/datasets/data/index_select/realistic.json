@@ -1,0 +1,17 @@
+{
+  "name": "realistic",
+  "cases": [
+    {
+      "case_id": "bert_hidden_token_select",
+      "family": "hidden_states",
+      "input_shape": [16, 128, 768],
+      "index_shape": [128],
+      "dim": 1,
+      "source_kind": "real_model",
+      "source_project": "TritonBench",
+      "source_model": "BERT_pytorch",
+      "source_file": "torchbench_train/BERT_pytorch_train.json",
+      "source_op": "torch.index_select"
+    }
+  ]
+}

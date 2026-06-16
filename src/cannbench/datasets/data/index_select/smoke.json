@@ -1,0 +1,17 @@
+{
+  "name": "smoke",
+  "cases": [
+    {
+      "case_id": "tiny_rank2_index_select",
+      "family": "token_lookup",
+      "input_shape": [32, 64],
+      "index_shape": [16],
+      "dim": 1,
+      "source_kind": "synthetic_smoke",
+      "source_project": "cannbench",
+      "source_model": "index_select_smoke_fixture",
+      "source_file": "built-in",
+      "source_op": "torch.index_select"
+    }
+  ]
+}

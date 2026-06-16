@@ -30,10 +30,20 @@ def test_gather_operator_spec_is_registered():
     assert spec.runner_name == "gather"
 
 
+def test_index_select_operator_spec_is_registered():
+    spec = get_operator_spec("index_select")
+
+    assert spec.name == "index_select"
+    assert spec.supported_dtypes == ("float32", "float16", "bfloat16")
+    assert spec.dataset_namespace == "index_select"
+    assert spec.runner_name == "index_select"
+
+
 def test_list_operator_names_contains_softmax():
     assert "softmax" in list_operator_names()
     assert "embedding" in list_operator_names()
     assert "gather" in list_operator_names()
+    assert "index_select" in list_operator_names()
 
 
 def test_unknown_operator_spec_is_rejected():
@@ -54,6 +64,13 @@ def test_gather_dataset_is_registered():
 
     assert dataset.name == "gather"
     assert dataset.dataset_namespace == "gather"
+
+
+def test_index_select_dataset_is_registered():
+    dataset = get_operator_dataset("index_select")
+
+    assert dataset.name == "index_select"
+    assert dataset.dataset_namespace == "index_select"
 
 
 def test_softmax_dataset_is_registered():

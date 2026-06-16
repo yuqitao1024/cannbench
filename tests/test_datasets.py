@@ -5,12 +5,15 @@ from cannbench.datasets import (
     get_embedding_dataset,
     get_gather_case,
     get_gather_dataset,
+    get_index_select_case,
+    get_index_select_dataset,
     get_softmax_case,
     get_softmax_dataset,
 )
 from cannbench.datasets.materialize import (
     materialize_embedding_inputs,
     materialize_gather_inputs,
+    materialize_index_select_inputs,
     materialize_softmax_inputs,
 )
 from cannbench.datasets.synthetic import (
@@ -259,5 +262,46 @@ def test_materialized_gather_inputs_change_with_different_seed():
 
     left = materialize_gather_inputs(case, dtype="float16", seed=123)
     right = materialize_gather_inputs(case, dtype="float16", seed=456)
+
+    assert left["indices"] != right["indices"] or left["values"] != right["values"]
+
+
+def test_get_index_select_case_preserves_source_metadata():
+    case = get_index_select_case("realistic", "bert_hidden_token_select")
+
+    assert case.case_id == "bert_hidden_token_select"
+    assert case.input_shape == (16, 128, 768)
+    assert case.index_shape == (128,)
+    assert case.dim == 1
+    assert case.source_model == "BERT_pytorch"
+
+
+def test_get_index_select_dataset_loads_builtin_splits():
+    smoke = get_index_select_dataset("smoke")
+    realistic = get_index_select_dataset("realistic")
+    stress = get_index_select_dataset("stress")
+
+    assert smoke.name == "smoke"
+    assert realistic.cases
+    assert stress.cases
+
+
+def test_materialized_index_select_inputs_are_deterministic_for_same_seed():
+    case = get_index_select_case("smoke", "tiny_rank2_index_select")
+
+    left = materialize_index_select_inputs(case, dtype="float16", seed=123)
+    right = materialize_index_select_inputs(case, dtype="float16", seed=123)
+
+    assert left["input_shape"] == right["input_shape"] == (32, 64)
+    assert left["index_shape"] == right["index_shape"] == (16,)
+    assert left["indices"] == right["indices"]
+    assert left["values"] == right["values"]
+
+
+def test_materialized_index_select_inputs_change_with_different_seed():
+    case = get_index_select_case("smoke", "tiny_rank2_index_select")
+
+    left = materialize_index_select_inputs(case, dtype="float16", seed=123)
+    right = materialize_index_select_inputs(case, dtype="float16", seed=456)
 
     assert left["indices"] != right["indices"] or left["values"] != right["values"]

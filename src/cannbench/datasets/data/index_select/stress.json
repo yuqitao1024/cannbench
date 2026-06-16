@@ -1,0 +1,17 @@
+{
+  "name": "stress",
+  "cases": [
+    {
+      "case_id": "wide_hidden_index_select",
+      "family": "wide_hidden",
+      "input_shape": [64, 4096, 256],
+      "index_shape": [4096],
+      "dim": 1,
+      "source_kind": "synthetic_boundary",
+      "source_project": "cannbench",
+      "source_model": "index_select_wide_hidden_boundary",
+      "source_file": "generated",
+      "source_op": "torch.index_select"
+    }
+  ]
+}

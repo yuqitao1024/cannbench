@@ -21,6 +21,12 @@ _OPERATOR_SPECS = {
         dataset_namespace="gather",
         runner_name="gather",
     ),
+    "index_select": OperatorSpec(
+        name="index_select",
+        supported_dtypes=("float32", "float16", "bfloat16"),
+        dataset_namespace="index_select",
+        runner_name="index_select",
+    ),
 }
 
 
