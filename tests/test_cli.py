@@ -200,6 +200,24 @@ def test_build_parser_exposes_report_subcommand():
     assert args.output.name == "report.md"
 
 
+def test_build_parser_exposes_summarize_profile_subcommand():
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "summarize-profile",
+            "--backend",
+            "ascend",
+            "--profile-dir",
+            "results/ascend/profile",
+            "--output",
+            "results/ascend/profile-summary.json",
+        ]
+    )
+
+    assert args.command == "summarize-profile"
+    assert args.backend == "ascend"
+
+
 def test_build_parser_accepts_ascend_backend():
     parser = build_parser()
     args = parser.parse_args(
@@ -556,6 +574,42 @@ def test_main_report_writes_local_report(tmp_path, monkeypatch):
     assert captured["ascend_dir"] == tmp_path / "ascend"
     assert captured["accuracy_path"] == tmp_path / "accuracy.json"
     assert captured["output_path"] == tmp_path / "report.md"
+
+
+def test_main_summarize_profile_writes_summary(tmp_path, monkeypatch):
+    captured: dict[str, object] = {}
+    summary = object()
+
+    monkeypatch.setattr(
+        "cannbench.cli.read_device_profile",
+        lambda profile_dir, backend: captured.setdefault("summary", summary),
+    )
+
+    def fake_write_device_profile_summary(path, actual_summary):
+        captured["output_path"] = path
+        captured["actual_summary"] = actual_summary
+        return path
+
+    monkeypatch.setattr(
+        "cannbench.cli.write_device_profile_summary",
+        fake_write_device_profile_summary,
+    )
+
+    exit_code = main(
+        [
+            "summarize-profile",
+            "--backend",
+            "ascend",
+            "--profile-dir",
+            str(tmp_path / "profile"),
+            "--output",
+            str(tmp_path / "profile-summary.json"),
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured["output_path"] == tmp_path / "profile-summary.json"
+    assert captured["actual_summary"] is summary
 
 
 def test_main_runs_operator_benchmark_from_prepared_input(tmp_path, monkeypatch):

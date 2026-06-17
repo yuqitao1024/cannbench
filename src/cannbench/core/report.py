@@ -21,6 +21,13 @@ def _perf_row(result: dict[str, object]) -> str:
     )
 
 
+def _read_profile_summary(run_dir: Path) -> dict[str, object] | None:
+    path = run_dir / "profile-summary.json"
+    if not path.is_file():
+        return None
+    return json.loads(path.read_text())
+
+
 def write_local_report(
     *,
     output_path: Path,
@@ -30,6 +37,8 @@ def write_local_report(
 ) -> Path:
     nvidia = _read_perf_result(nvidia_dir)
     ascend = _read_perf_result(ascend_dir)
+    nvidia_profile = _read_profile_summary(nvidia_dir)
+    ascend_profile = _read_profile_summary(ascend_dir)
     accuracy = json.loads(accuracy_path.read_text())
 
     lines = [
@@ -57,6 +66,15 @@ def write_local_report(
         f"| rmse | {accuracy['rmse']} |",
         f"| rtol | {accuracy['rtol']} |",
         f"| atol | {accuracy['atol']} |",
+        "",
+        "## Device Profile Summary",
+        "",
+        "| field | value |",
+        "| --- | --- |",
+        f"| nvidia_device_latency_ms_avg | {nvidia_profile['latency_ms_avg'] if nvidia_profile else 'missing'} |",
+        f"| ascend_device_latency_ms_avg | {ascend_profile['latency_ms_avg'] if ascend_profile else 'missing'} |",
+        f"| nvidia_profile_samples | {nvidia_profile['sample_count'] if nvidia_profile else 'missing'} |",
+        f"| ascend_profile_samples | {ascend_profile['sample_count'] if ascend_profile else 'missing'} |",
         "",
         "## Artifacts",
         "",

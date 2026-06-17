@@ -37,6 +37,20 @@ def _write_perf(path, *, backend, avg):
         + "\n"
     )
     (path / "profile").mkdir()
+    (path / "profile-summary.json").write_text(
+        json.dumps(
+            {
+                "backend": backend,
+                "sample_count": 2,
+                "latency_ms_avg": avg + 0.1,
+                "latency_ms_p50": avg + 0.1,
+                "latency_ms_p95": avg + 0.2,
+                "latency_ms_p99": avg + 0.3,
+                "source_files": ["profile.csv"],
+            }
+        )
+        + "\n"
+    )
 
 
 def test_write_local_report_summarizes_perf_accuracy_and_profile_paths(tmp_path):
@@ -79,3 +93,5 @@ def test_write_local_report_summarizes_perf_accuracy_and_profile_paths(tmp_path)
     assert "| ascend | Fake ascend | softmax | tiny_logits | float16 | 1.5 |" in report
     assert "| passed | True |" in report
     assert f"| nvidia_profile | {nvidia_dir / 'profile'} |" in report
+    assert "| nvidia_device_latency_ms_avg | 1.3 |" in report
+    assert "| ascend_device_latency_ms_avg | 1.6 |" in report

@@ -139,6 +139,8 @@ def collect_remote_artifacts(
         elif endpoint.backend == "nvidia":
             profiled_operator = (
                 "ncu --target-processes all --force-overwrite "
+                "--csv "
+                f"--log-file {shlex.quote(remote_profile + '/ncu.csv')} "
                 f"--export {shlex.quote(remote_profile + '/ncu-report')} "
                 f"{base_operator}"
             )

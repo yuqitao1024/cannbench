@@ -180,5 +180,5 @@ def test_collect_remote_artifacts_runs_nvidia_ncu_profile(tmp_path):
     assert commands[2] == [
         "ssh",
         "user@nvidia-host",
-        "cd /opt/cannbench && CUDA_VISIBLE_DEVICES=0 ncu --target-processes all --force-overwrite --export /opt/cannbench/.cannbench-runs/softmax-run/profile/ncu-report python3 -m cannbench operator --backend nvidia --prepared-input .cannbench-runs/softmax-run/prepared.json --warmup 3 --iterations 5 --output-dir .cannbench-runs/softmax-run/perf --run-name benchmark",
+        "cd /opt/cannbench && CUDA_VISIBLE_DEVICES=0 ncu --target-processes all --force-overwrite --csv --log-file /opt/cannbench/.cannbench-runs/softmax-run/profile/ncu.csv --export /opt/cannbench/.cannbench-runs/softmax-run/profile/ncu-report python3 -m cannbench operator --backend nvidia --prepared-input .cannbench-runs/softmax-run/prepared.json --warmup 3 --iterations 5 --output-dir .cannbench-runs/softmax-run/perf --run-name benchmark",
     ]

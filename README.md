@@ -318,6 +318,22 @@ results/ascend-softmax/perf/
 
 For NVIDIA endpoints, CannBench wraps the remote operator command with `ncu` and downloads the same local artifact directories. Output capture and profiling can be requested in the same `collect` call by passing both `--capture-output` and `--profile-device-time`; internally they still run as separate phases.
 
+Summarize profiler CSV artifacts locally:
+
+```bash
+cannbench summarize-profile \
+  --backend ascend \
+  --profile-dir results/ascend-softmax/profile \
+  --output results/ascend-softmax/profile-summary.json
+```
+
+```bash
+cannbench summarize-profile \
+  --backend nvidia \
+  --profile-dir results/nvidia-softmax/profile \
+  --output results/nvidia-softmax/profile-summary.json
+```
+
 ### Current Scope
 
 Implemented now:
@@ -332,6 +348,7 @@ Implemented now:
 - SSH/SCP-based remote output collection from backend hosts
 - Remote device-side profiler artifact collection for Ascend and NVIDIA
 - Local Markdown report generation across NVIDIA, Ascend, and accuracy artifacts
+- Local profiler CSV summarization into normalized device-side latency metrics
 - NVIDIA PyTorch backend for single-card operator tests
 - Ascend PyTorch backend adapter with optional default custom-op deployment hook
 - Built-in operator datasets and dispatch for:
@@ -349,7 +366,7 @@ Implemented now:
 
 Planned next:
 
-- Parse profiler artifacts into normalized device-side latency metrics
+- Harden profiler parsers against real `msprof op` and `ncu` output variants from target machines
 - Built-in Ascend custom operator projects under each operator dataset directory
 - Real-hardware validation on NVIDIA CUDA and Ascend NPU hosts
 - Model-level TTFS / TPS benchmarks

@@ -9,6 +9,7 @@ from cannbench.core.operator_output import (
     write_operator_output,
     write_output_comparison,
 )
+from cannbench.core.profile import read_device_profile, write_device_profile_summary
 from cannbench.core.prepared_input import (
     build_prepared_operator_input,
     read_prepared_operator_input,
@@ -100,6 +101,11 @@ def build_parser() -> argparse.ArgumentParser:
     report.add_argument("--ascend", type=Path, required=True)
     report.add_argument("--accuracy", type=Path, required=True)
     report.add_argument("--output", type=Path, required=True)
+
+    summarize_profile = subparsers.add_parser("summarize-profile")
+    summarize_profile.add_argument("--backend", choices=["nvidia", "ascend"], required=True)
+    summarize_profile.add_argument("--profile-dir", type=Path, required=True)
+    summarize_profile.add_argument("--output", type=Path, required=True)
 
     return parser
 
@@ -222,6 +228,12 @@ def main(argv: list[str] | None = None) -> int:
                 ascend_dir=args.ascend,
                 accuracy_path=args.accuracy,
             )
+        except (RuntimeError, ValueError) as exc:
+            parser.error(str(exc))
+    elif args.command == "summarize-profile":
+        try:
+            summary = read_device_profile(args.profile_dir, backend=args.backend)
+            write_device_profile_summary(args.output, summary)
         except (RuntimeError, ValueError) as exc:
             parser.error(str(exc))
 
