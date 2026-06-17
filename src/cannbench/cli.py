@@ -92,6 +92,7 @@ def build_parser() -> argparse.ArgumentParser:
     collect.add_argument("--run-id")
     collect.add_argument("--capture-output", action="store_true", default=False)
     collect.add_argument("--profile-device-time", action="store_true", default=False)
+    collect.add_argument("--summarize-profile", action="store_true", default=False)
     collect.add_argument("--warmup", type=_non_negative_int, default=10)
     collect.add_argument("--iterations", type=_positive_int, default=50)
     collect.add_argument("--deploy-custom-op", action="store_true", default=False)
@@ -214,6 +215,7 @@ def main(argv: list[str] | None = None) -> int:
                 run_id=args.run_id,
                 capture_output=args.capture_output,
                 profile_device_time=args.profile_device_time,
+                summarize_profile=args.summarize_profile,
                 warmup=args.warmup,
                 iterations=args.iterations,
                 deploy_custom_op=args.deploy_custom_op,

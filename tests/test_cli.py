@@ -164,6 +164,7 @@ def test_build_parser_exposes_collect_subcommand():
             "softmax-run",
             "--capture-output",
             "--profile-device-time",
+            "--summarize-profile",
             "--warmup",
             "3",
             "--iterations",
@@ -175,6 +176,7 @@ def test_build_parser_exposes_collect_subcommand():
     assert args.command == "collect"
     assert args.capture_output is True
     assert args.profile_device_time is True
+    assert args.summarize_profile is True
     assert args.warmup == 3
     assert args.iterations == 5
     assert args.deploy_custom_op is True
@@ -527,6 +529,7 @@ def test_main_collect_invokes_remote_collection(tmp_path, monkeypatch):
             "softmax-run",
             "--capture-output",
             "--profile-device-time",
+            "--summarize-profile",
             "--warmup",
             "3",
             "--iterations",
@@ -541,6 +544,7 @@ def test_main_collect_invokes_remote_collection(tmp_path, monkeypatch):
     assert captured["run_id"] == "softmax-run"
     assert captured["capture_output"] is True
     assert captured["profile_device_time"] is True
+    assert captured["summarize_profile"] is True
     assert captured["warmup"] == 3
     assert captured["iterations"] == 5
     assert captured["deploy_custom_op"] is False

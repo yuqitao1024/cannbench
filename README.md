@@ -305,6 +305,7 @@ cannbench collect \
   --output-dir results/ascend-softmax \
   --run-id softmax-run \
   --profile-device-time \
+  --summarize-profile \
   --warmup 10 \
   --iterations 50
 ```
@@ -317,6 +318,12 @@ results/ascend-softmax/perf/
 ```
 
 For NVIDIA endpoints, CannBench wraps the remote operator command with `ncu` and downloads the same local artifact directories. Output capture and profiling can be requested in the same `collect` call by passing both `--capture-output` and `--profile-device-time`; internally they still run as separate phases.
+
+When `--summarize-profile` is provided, CannBench also parses the downloaded profiler CSV artifacts on the local controller and writes:
+
+```text
+results/<run>/profile-summary.json
+```
 
 Summarize profiler CSV artifacts locally:
 

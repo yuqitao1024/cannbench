@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
+from cannbench.core.profile import read_device_profile, write_device_profile_summary
+
 
 CommandRunner = Callable[[list[str]], None]
 
@@ -66,6 +68,7 @@ def collect_remote_artifacts(
     output_dir: Path,
     capture_output: bool,
     profile_device_time: bool = False,
+    summarize_profile: bool = False,
     warmup: int = 10,
     iterations: int = 50,
     deploy_custom_op: bool = False,
@@ -156,6 +159,9 @@ def collect_remote_artifacts(
             ["scp", "-r", f"{endpoint.host}:{remote_profile}", str(output_dir / "profile")]
         )
         runner(["scp", "-r", f"{endpoint.host}:{remote_perf}", str(output_dir / "perf")])
+        if summarize_profile:
+            summary = read_device_profile(output_dir / "profile", backend=endpoint.backend)
+            write_device_profile_summary(output_dir / "profile-summary.json", summary)
 
     return RemoteCollectionResult(
         endpoint=endpoint,

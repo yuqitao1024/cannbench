@@ -182,3 +182,39 @@ def test_collect_remote_artifacts_runs_nvidia_ncu_profile(tmp_path):
         "user@nvidia-host",
         "cd /opt/cannbench && CUDA_VISIBLE_DEVICES=0 ncu --target-processes all --force-overwrite --csv --log-file /opt/cannbench/.cannbench-runs/softmax-run/profile/ncu.csv --export /opt/cannbench/.cannbench-runs/softmax-run/profile/ncu-report python3 -m cannbench operator --backend nvidia --prepared-input .cannbench-runs/softmax-run/prepared.json --warmup 3 --iterations 5 --output-dir .cannbench-runs/softmax-run/perf --run-name benchmark",
     ]
+
+
+def test_collect_remote_artifacts_can_summarize_downloaded_profile(tmp_path):
+    def fake_runner(command):
+        if command[:2] == ["scp", "-r"] and command[-1].endswith("/profile"):
+            profile_dir = tmp_path / "results" / "profile"
+            profile_dir.mkdir(parents=True)
+            (profile_dir / "op_summary.csv").write_text(
+                "Op Name,Task Duration(us)\nsoftmax,1000\n"
+            )
+
+    endpoint = RemoteEndpoint(
+        name="ascend-a2",
+        backend="ascend",
+        host="user@ascend-host",
+        workdir="/opt/cannbench",
+        python="python3",
+        env={},
+    )
+    prepared_input = tmp_path / "prepared.json"
+    prepared_input.write_text("{}")
+
+    collect_remote_artifacts(
+        endpoint=endpoint,
+        prepared_input=prepared_input,
+        output_dir=tmp_path / "results",
+        run_id="softmax-run",
+        capture_output=False,
+        profile_device_time=True,
+        summarize_profile=True,
+        runner=fake_runner,
+    )
+
+    summary = tmp_path / "results" / "profile-summary.json"
+    assert summary.is_file()
+    assert '"latency_ms_avg": 1.0' in summary.read_text()
