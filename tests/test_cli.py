@@ -180,6 +180,26 @@ def test_build_parser_exposes_collect_subcommand():
     assert args.deploy_custom_op is True
 
 
+def test_build_parser_exposes_report_subcommand():
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "report",
+            "--nvidia",
+            "results/nvidia-softmax",
+            "--ascend",
+            "results/ascend-softmax",
+            "--accuracy",
+            "results/accuracy.json",
+            "--output",
+            "results/report.md",
+        ]
+    )
+
+    assert args.command == "report"
+    assert args.output.name == "report.md"
+
+
 def test_build_parser_accepts_ascend_backend():
     parser = build_parser()
     args = parser.parse_args(
@@ -506,6 +526,36 @@ def test_main_collect_invokes_remote_collection(tmp_path, monkeypatch):
     assert captured["warmup"] == 3
     assert captured["iterations"] == 5
     assert captured["deploy_custom_op"] is False
+
+
+def test_main_report_writes_local_report(tmp_path, monkeypatch):
+    captured: dict[str, object] = {}
+
+    def fake_write_local_report(**kwargs):
+        captured.update(kwargs)
+        return kwargs["output_path"]
+
+    monkeypatch.setattr("cannbench.cli.write_local_report", fake_write_local_report)
+
+    exit_code = main(
+        [
+            "report",
+            "--nvidia",
+            str(tmp_path / "nvidia"),
+            "--ascend",
+            str(tmp_path / "ascend"),
+            "--accuracy",
+            str(tmp_path / "accuracy.json"),
+            "--output",
+            str(tmp_path / "report.md"),
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured["nvidia_dir"] == tmp_path / "nvidia"
+    assert captured["ascend_dir"] == tmp_path / "ascend"
+    assert captured["accuracy_path"] == tmp_path / "accuracy.json"
+    assert captured["output_path"] == tmp_path / "report.md"
 
 
 def test_main_runs_operator_benchmark_from_prepared_input(tmp_path, monkeypatch):

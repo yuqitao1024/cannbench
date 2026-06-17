@@ -15,6 +15,7 @@ from cannbench.core.prepared_input import (
     write_prepared_operator_input,
 )
 from cannbench.core.remote import collect_remote_artifacts
+from cannbench.core.report import write_local_report
 from cannbench.core.output import write_benchmark_outputs
 from cannbench.operators import list_operator_names
 
@@ -93,6 +94,12 @@ def build_parser() -> argparse.ArgumentParser:
     collect.add_argument("--warmup", type=_non_negative_int, default=10)
     collect.add_argument("--iterations", type=_positive_int, default=50)
     collect.add_argument("--deploy-custom-op", action="store_true", default=False)
+
+    report = subparsers.add_parser("report")
+    report.add_argument("--nvidia", type=Path, required=True)
+    report.add_argument("--ascend", type=Path, required=True)
+    report.add_argument("--accuracy", type=Path, required=True)
+    report.add_argument("--output", type=Path, required=True)
 
     return parser
 
@@ -204,6 +211,16 @@ def main(argv: list[str] | None = None) -> int:
                 warmup=args.warmup,
                 iterations=args.iterations,
                 deploy_custom_op=args.deploy_custom_op,
+            )
+        except (RuntimeError, ValueError) as exc:
+            parser.error(str(exc))
+    elif args.command == "report":
+        try:
+            write_local_report(
+                output_path=args.output,
+                nvidia_dir=args.nvidia,
+                ascend_dir=args.ascend,
+                accuracy_path=args.accuracy,
             )
         except (RuntimeError, ValueError) as exc:
             parser.error(str(exc))

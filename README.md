@@ -254,6 +254,16 @@ cannbench compare-output \
 
 Output capture is not part of the performance sampling window. It runs as a separate correctness phase so CPU transfers and comparison work do not pollute device-side profiling results.
 
+Generate a local Markdown report from collected NVIDIA and Ascend run directories:
+
+```bash
+cannbench report \
+  --nvidia results/nvidia-softmax \
+  --ascend results/ascend-softmax \
+  --accuracy results/softmax-accuracy.json \
+  --output results/softmax-report.md
+```
+
 ### Remote Collection
 
 CannBench can also run output capture on a remote backend host over SSH and copy the artifact back to the local controller machine.
@@ -321,6 +331,7 @@ Implemented now:
 - Output artifact capture and CPU-side output comparison
 - SSH/SCP-based remote output collection from backend hosts
 - Remote device-side profiler artifact collection for Ascend and NVIDIA
+- Local Markdown report generation across NVIDIA, Ascend, and accuracy artifacts
 - NVIDIA PyTorch backend for single-card operator tests
 - Ascend PyTorch backend adapter with optional default custom-op deployment hook
 - Built-in operator datasets and dispatch for:
