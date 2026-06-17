@@ -149,6 +149,29 @@ def test_build_parser_exposes_compare_output_subcommand():
     assert args.atol == 0.001
 
 
+def test_build_parser_exposes_collect_subcommand():
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "collect",
+            "--endpoint",
+            "configs/ascend.json",
+            "--prepared-input",
+            "prepared-softmax.json",
+            "--output-dir",
+            "results/ascend-softmax",
+            "--run-id",
+            "softmax-run",
+            "--capture-output",
+            "--deploy-custom-op",
+        ]
+    )
+
+    assert args.command == "collect"
+    assert args.capture_output is True
+    assert args.deploy_custom_op is True
+
+
 def test_build_parser_accepts_ascend_backend():
     parser = build_parser()
     args = parser.parse_args(
@@ -430,6 +453,43 @@ def test_main_compare_output_writes_report(tmp_path, monkeypatch):
     assert exit_code == 0
     assert captured["report_path"] == tmp_path / "accuracy.json"
     assert captured["comparison"] is comparison
+
+
+def test_main_collect_invokes_remote_collection(tmp_path, monkeypatch):
+    captured: dict[str, object] = {}
+    endpoint_path = tmp_path / "ascend.json"
+    prepared_path = tmp_path / "prepared.json"
+    output_dir = tmp_path / "results"
+
+    def fake_collect_remote_artifacts(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(
+        "cannbench.cli.collect_remote_artifacts", fake_collect_remote_artifacts
+    )
+
+    exit_code = main(
+        [
+            "collect",
+            "--endpoint",
+            str(endpoint_path),
+            "--prepared-input",
+            str(prepared_path),
+            "--output-dir",
+            str(output_dir),
+            "--run-id",
+            "softmax-run",
+            "--capture-output",
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured["endpoint_path"] == endpoint_path
+    assert captured["prepared_input"] == prepared_path
+    assert captured["output_dir"] == output_dir
+    assert captured["run_id"] == "softmax-run"
+    assert captured["capture_output"] is True
+    assert captured["deploy_custom_op"] is False
 
 
 def test_main_runs_operator_benchmark_from_prepared_input(tmp_path, monkeypatch):

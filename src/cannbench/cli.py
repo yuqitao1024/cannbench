@@ -14,6 +14,7 @@ from cannbench.core.prepared_input import (
     read_prepared_operator_input,
     write_prepared_operator_input,
 )
+from cannbench.core.remote import collect_remote_artifacts
 from cannbench.core.output import write_benchmark_outputs
 from cannbench.operators import list_operator_names
 
@@ -81,6 +82,14 @@ def build_parser() -> argparse.ArgumentParser:
     compare.add_argument("--rtol", type=_non_negative_float, default=0.001)
     compare.add_argument("--atol", type=_non_negative_float, default=0.001)
     compare.add_argument("--output", type=Path, required=True)
+
+    collect = subparsers.add_parser("collect")
+    collect.add_argument("--endpoint", type=Path, required=True)
+    collect.add_argument("--prepared-input", type=Path, required=True)
+    collect.add_argument("--output-dir", type=Path, required=True)
+    collect.add_argument("--run-id")
+    collect.add_argument("--capture-output", action="store_true", default=False)
+    collect.add_argument("--deploy-custom-op", action="store_true", default=False)
 
     return parser
 
@@ -178,6 +187,18 @@ def main(argv: list[str] | None = None) -> int:
                 atol=args.atol,
             )
             write_output_comparison(args.output, result)
+        except (RuntimeError, ValueError) as exc:
+            parser.error(str(exc))
+    elif args.command == "collect":
+        try:
+            collect_remote_artifacts(
+                endpoint_path=args.endpoint,
+                prepared_input=args.prepared_input,
+                output_dir=args.output_dir,
+                run_id=args.run_id,
+                capture_output=args.capture_output,
+                deploy_custom_op=args.deploy_custom_op,
+            )
         except (RuntimeError, ValueError) as exc:
             parser.error(str(exc))
 

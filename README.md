@@ -254,6 +254,40 @@ cannbench compare-output \
 
 Output capture is not part of the performance sampling window. It runs as a separate correctness phase so CPU transfers and comparison work do not pollute device-side profiling results.
 
+### Remote Collection
+
+CannBench can also run output capture on a remote backend host over SSH and copy the artifact back to the local controller machine.
+
+Example endpoint config:
+
+```json
+{
+  "name": "ascend-a2",
+  "backend": "ascend",
+  "host": "user@ascend-host",
+  "workdir": "/opt/cannbench",
+  "python": "python3",
+  "env": {
+    "ASCEND_VISIBLE_DEVICES": "0"
+  }
+}
+```
+
+Collect an output artifact from the remote host:
+
+```bash
+cannbench collect \
+  --endpoint configs/ascend.json \
+  --prepared-input prepared-softmax.json \
+  --output-dir results/ascend-softmax \
+  --run-id softmax-run \
+  --capture-output
+```
+
+The remote host must already have CannBench installed in `workdir`. The local controller copies the prepared input to the remote run directory, runs `cannbench capture-output` remotely, and downloads the resulting `output` artifact directory to `output-dir`.
+
+Device-side profiler collection over `msprof op` and NVIDIA profiling tools is planned as the next collection phase.
+
 ### Current Scope
 
 Implemented now:
@@ -265,6 +299,7 @@ Implemented now:
 - JSON / CSV / Markdown report writers
 - Prepared-input generation for cross-machine backend comparisons
 - Output artifact capture and CPU-side output comparison
+- SSH/SCP-based remote output collection from backend hosts
 - NVIDIA PyTorch backend for single-card operator tests
 - Ascend PyTorch backend adapter with optional default custom-op deployment hook
 - Built-in operator datasets and dispatch for:
@@ -282,8 +317,7 @@ Implemented now:
 
 Planned next:
 
-- Local controller workflow for SSH-based remote collection from NVIDIA and Ascend hosts
-- Device-side profiler integration: Ascend `msprof op` and NVIDIA profiling tooling
+- Remote device-side profiler collection: Ascend `msprof op` and NVIDIA profiling tooling
 - Built-in Ascend custom operator projects under each operator dataset directory
 - Real-hardware validation on NVIDIA CUDA and Ascend NPU hosts
 - Model-level TTFS / TPS benchmarks
