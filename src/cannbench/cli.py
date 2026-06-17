@@ -55,7 +55,7 @@ def build_parser() -> argparse.ArgumentParser:
     operator.add_argument("--prepared-input", type=Path)
     operator.add_argument("--deploy-custom-op", action="store_true", default=False)
     operator.add_argument("--warmup", type=_non_negative_int, default=10)
-    operator.add_argument("--iterations", type=_positive_int, default=50)
+    operator.add_argument("--iterations", type=_positive_int, default=1)
     operator.add_argument("--output-dir", type=Path, default=Path("results"))
     operator.add_argument("--run-name", default="operator-benchmark")
 
@@ -94,7 +94,7 @@ def build_parser() -> argparse.ArgumentParser:
     collect.add_argument("--profile-device-time", action="store_true", default=False)
     collect.add_argument("--summarize-profile", action="store_true", default=False)
     collect.add_argument("--warmup", type=_non_negative_int, default=10)
-    collect.add_argument("--iterations", type=_positive_int, default=50)
+    collect.add_argument("--iterations", type=_positive_int, default=1)
     collect.add_argument("--deploy-custom-op", action="store_true", default=False)
 
     report = subparsers.add_parser("report")

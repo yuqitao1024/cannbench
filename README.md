@@ -147,7 +147,7 @@ cannbench operator \
   --dataset realistic \
   --case-id t5_attention \
   --warmup 10 \
-  --iterations 50 \
+  --iterations 1 \
   --output-dir results \
   --run-name nvidia-softmax-smoke
 ```
@@ -187,7 +187,7 @@ cannbench operator \
   --backend nvidia \
   --prepared-input prepared-softmax.json \
   --warmup 10 \
-  --iterations 50 \
+  --iterations 1 \
   --output-dir results \
   --run-name nvidia-softmax-prepared
 ```
@@ -310,7 +310,7 @@ cannbench collect \
   --profile-device-time \
   --summarize-profile \
   --warmup 10 \
-  --iterations 50
+  --iterations 1
 ```
 
 For Ascend endpoints, CannBench wraps the remote operator command with `msprof op` and downloads:

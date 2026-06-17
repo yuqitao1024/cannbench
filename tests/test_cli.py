@@ -174,6 +174,43 @@ def test_build_parser_exposes_collect_subcommand():
     assert args.deploy_custom_op is True
 
 
+def test_build_parser_defaults_operator_iterations_to_one():
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "operator",
+            "--backend",
+            "nvidia",
+            "--op",
+            "softmax",
+            "--dataset",
+            "smoke",
+            "--case-id",
+            "tiny_logits",
+        ]
+    )
+
+    assert args.iterations == 1
+
+
+def test_build_parser_defaults_collect_iterations_to_one():
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "collect",
+            "--endpoint",
+            "configs/ascend.json",
+            "--prepared-input",
+            "prepared-softmax.json",
+            "--output-dir",
+            "results/ascend-softmax",
+            "--profile-device-time",
+        ]
+    )
+
+    assert args.iterations == 1
+
+
 def test_build_parser_exposes_report_subcommand():
     parser = build_parser()
     args = parser.parse_args(

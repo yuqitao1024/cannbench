@@ -116,7 +116,7 @@ def collect_remote_artifacts(
     profile_device_time: bool = False,
     summarize_profile: bool = False,
     warmup: int = 10,
-    iterations: int = 50,
+    iterations: int = 1,
     deploy_custom_op: bool = False,
     run_id: str | None = None,
     endpoint: RemoteEndpoint | None = None,
