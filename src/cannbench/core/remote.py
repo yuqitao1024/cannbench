@@ -20,6 +20,7 @@ class RemoteEndpoint:
     backend: str
     host: str
     workdir: str
+    port: int | None = None
     python: str = "python3"
     env: dict[str, str] = field(default_factory=dict)
 
@@ -39,10 +40,18 @@ def read_remote_endpoint(path: Path) -> RemoteEndpoint:
     if missing:
         raise ValueError(f"remote endpoint missing required fields: {', '.join(missing)}")
     env = {str(key): str(value) for key, value in payload.get("env", {}).items()}
+    host = str(payload["host"])
+    port = payload.get("port")
+    if port is None and host.rsplit(":", 1)[-1].isdigit():
+        host, port_text = host.rsplit(":", 1)
+        port = int(port_text)
+    elif port is not None:
+        port = int(port)
     return RemoteEndpoint(
         name=str(payload["name"]),
         backend=str(payload["backend"]),
-        host=str(payload["host"]),
+        host=host,
+        port=port,
         workdir=str(payload["workdir"]).rstrip("/"),
         python=str(payload.get("python", "python3")),
         env=env,
@@ -60,6 +69,34 @@ def _remote_command_env(env: dict[str, str]) -> str:
         f"{shlex.quote(key)}={shlex.quote(value)}"
         for key, value in sorted(env.items())
     ) + " "
+
+
+def _ssh_command(endpoint: RemoteEndpoint, remote_command: str) -> list[str]:
+    command = ["ssh"]
+    if endpoint.port is not None:
+        command.extend(["-p", str(endpoint.port)])
+    command.extend([endpoint.host, remote_command])
+    return command
+
+
+def _scp_upload_command(
+    endpoint: RemoteEndpoint, local_path: Path, remote_path: str
+) -> list[str]:
+    command = ["scp"]
+    if endpoint.port is not None:
+        command.extend(["-P", str(endpoint.port)])
+    command.extend([str(local_path), f"{endpoint.host}:{remote_path}"])
+    return command
+
+
+def _scp_download_command(
+    endpoint: RemoteEndpoint, remote_path: str, local_path: Path
+) -> list[str]:
+    command = ["scp"]
+    if endpoint.port is not None:
+        command.extend(["-P", str(endpoint.port)])
+    command.extend(["-r", f"{endpoint.host}:{remote_path}", str(local_path)])
+    return command
 
 
 def collect_remote_artifacts(
@@ -99,13 +136,12 @@ def collect_remote_artifacts(
     if profile_device_time:
         mkdir_targets.append(remote_profile)
     runner(
-        [
-            "ssh",
-            endpoint.host,
+        _ssh_command(
+            endpoint,
             "mkdir -p " + " ".join(shlex.quote(target) for target in mkdir_targets),
-        ]
+        )
     )
-    runner(["scp", str(prepared_input), f"{endpoint.host}:{remote_prepared}"])
+    runner(_scp_upload_command(endpoint, prepared_input, remote_prepared))
 
     if capture_output:
         command = (
@@ -118,9 +154,9 @@ def collect_remote_artifacts(
         )
         if deploy_custom_op:
             command = f"{command} --deploy-custom-op"
-        runner(["ssh", endpoint.host, command])
+        runner(_ssh_command(endpoint, command))
         runner(
-            ["scp", "-r", f"{endpoint.host}:{remote_output}", str(output_dir / "output")]
+            _scp_download_command(endpoint, remote_output, output_dir / "output")
         )
 
     if profile_device_time:
@@ -154,11 +190,11 @@ def collect_remote_artifacts(
             f"{_remote_command_env(endpoint.env)}"
             f"{profiled_operator}"
         )
-        runner(["ssh", endpoint.host, command])
+        runner(_ssh_command(endpoint, command))
         runner(
-            ["scp", "-r", f"{endpoint.host}:{remote_profile}", str(output_dir / "profile")]
+            _scp_download_command(endpoint, remote_profile, output_dir / "profile")
         )
-        runner(["scp", "-r", f"{endpoint.host}:{remote_perf}", str(output_dir / "perf")])
+        runner(_scp_download_command(endpoint, remote_perf, output_dir / "perf"))
         if summarize_profile:
             summary = read_device_profile(output_dir / "profile", backend=endpoint.backend)
             write_device_profile_summary(output_dir / "profile-summary.json", summary)

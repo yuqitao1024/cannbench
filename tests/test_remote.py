@@ -28,10 +28,30 @@ def test_read_remote_endpoint_config(tmp_path):
         name="ascend-a2",
         backend="ascend",
         host="user@ascend-host",
+        port=None,
         workdir="/opt/cannbench",
         python="python3",
         env={"ASCEND_VISIBLE_DEVICES": "0"},
     )
+
+
+def test_read_remote_endpoint_parses_host_port_suffix(tmp_path):
+    path = tmp_path / "ascend.json"
+    path.write_text(
+        json.dumps(
+            {
+                "name": "ascend-a2",
+                "backend": "ascend",
+                "host": "root@121.41.199.170:20002",
+                "workdir": "/home/y00621698/cannbench",
+            }
+        )
+    )
+
+    endpoint = read_remote_endpoint(path)
+
+    assert endpoint.host == "root@121.41.199.170"
+    assert endpoint.port == 20002
 
 
 def test_collect_remote_artifacts_runs_capture_and_downloads_output(tmp_path):
@@ -44,6 +64,7 @@ def test_collect_remote_artifacts_runs_capture_and_downloads_output(tmp_path):
         name="ascend-a2",
         backend="ascend",
         host="user@ascend-host",
+        port=None,
         workdir="/opt/cannbench",
         python="python3",
         env={"ASCEND_VISIBLE_DEVICES": "0"},
@@ -98,6 +119,7 @@ def test_collect_remote_artifacts_runs_ascend_profile_and_downloads_profile(tmp_
         name="ascend-a2",
         backend="ascend",
         host="user@ascend-host",
+        port=None,
         workdir="/opt/cannbench",
         python="python3",
         env={"ASCEND_VISIBLE_DEVICES": "0"},
@@ -158,6 +180,7 @@ def test_collect_remote_artifacts_runs_nvidia_ncu_profile(tmp_path):
         name="nvidia-h100",
         backend="nvidia",
         host="user@nvidia-host",
+        port=None,
         workdir="/opt/cannbench",
         python="python3",
         env={"CUDA_VISIBLE_DEVICES": "0"},
@@ -197,6 +220,7 @@ def test_collect_remote_artifacts_can_summarize_downloaded_profile(tmp_path):
         name="ascend-a2",
         backend="ascend",
         host="user@ascend-host",
+        port=None,
         workdir="/opt/cannbench",
         python="python3",
         env={},
@@ -218,3 +242,36 @@ def test_collect_remote_artifacts_can_summarize_downloaded_profile(tmp_path):
     summary = tmp_path / "results" / "profile-summary.json"
     assert summary.is_file()
     assert '"latency_ms_avg": 1.0' in summary.read_text()
+
+
+def test_collect_remote_artifacts_uses_ssh_and_scp_port(tmp_path):
+    commands: list[list[str]] = []
+
+    def fake_runner(command):
+        commands.append(command)
+
+    endpoint = RemoteEndpoint(
+        name="ascend-a2",
+        backend="ascend",
+        host="root@121.41.199.170",
+        port=20002,
+        workdir="/home/y00621698/cannbench",
+        python="python3",
+        env={},
+    )
+    prepared_input = tmp_path / "prepared.json"
+    prepared_input.write_text("{}")
+
+    collect_remote_artifacts(
+        endpoint=endpoint,
+        prepared_input=prepared_input,
+        output_dir=tmp_path / "results",
+        run_id="softmax-run",
+        capture_output=True,
+        runner=fake_runner,
+    )
+
+    assert commands[0][:4] == ["ssh", "-p", "20002", "root@121.41.199.170"]
+    assert commands[1][:3] == ["scp", "-P", "20002"]
+    assert commands[2][:4] == ["ssh", "-p", "20002", "root@121.41.199.170"]
+    assert commands[3][:4] == ["scp", "-P", "20002", "-r"]
