@@ -275,6 +275,7 @@ Example endpoint config:
   "name": "ascend-a2",
   "backend": "ascend",
   "host": "user@ascend-host",
+  "port": 22,
   "workdir": "/opt/cannbench",
   "python": "python3",
   "env": {
@@ -295,6 +296,8 @@ cannbench collect \
 ```
 
 The remote host must already have CannBench installed in `workdir`. The local controller copies the prepared input to the remote run directory, runs `cannbench capture-output` remotely, and downloads the resulting `output` artifact directory to `output-dir`.
+
+The `port` field is optional and defaults to the SSH client default when omitted.
 
 Collect device-side profiler artifacts from the remote host:
 
