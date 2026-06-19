@@ -4,6 +4,7 @@ import tomllib
 import pytest
 
 from cannbench.cli import build_parser, main
+from cannbench.core.cuda_events import CudaEventProfileResult
 from cannbench.core.operator_output import CapturedOperatorOutput, OutputComparisonResult
 from cannbench.core.result import (
     OperatorBenchmarkResult,
@@ -247,6 +248,33 @@ def test_build_parser_exposes_summarize_profile_subcommand():
 
     assert args.command == "summarize-profile"
     assert args.backend == "ascend"
+
+
+def test_build_parser_exposes_cuda_event_profile_subcommand():
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "cuda-event-profile",
+            "--backend",
+            "nvidia",
+            "--prepared-input",
+            "prepared-softmax.json",
+            "--warmup",
+            "2",
+            "--iterations",
+            "3",
+            "--profile-dir",
+            "results/profile",
+            "--output-dir",
+            "results/perf",
+            "--run-name",
+            "benchmark",
+        ]
+    )
+
+    assert args.command == "cuda-event-profile"
+    assert args.backend == "nvidia"
+    assert args.iterations == 3
 
 
 def test_build_parser_accepts_ascend_backend():
@@ -643,6 +671,82 @@ def test_main_summarize_profile_writes_summary(tmp_path, monkeypatch):
     assert exit_code == 0
     assert captured["output_path"] == tmp_path / "profile-summary.json"
     assert captured["actual_summary"] is summary
+
+
+def test_main_cuda_event_profile_writes_csv_and_outputs(tmp_path, monkeypatch):
+    captured: dict[str, object] = {}
+    result = sample_result()
+    prepared_path = tmp_path / "prepared.json"
+    prepared_path.write_text(
+        """{
+  "schema_version": 1,
+  "op": "softmax",
+  "dtype": "float16",
+  "dataset": "smoke",
+  "seed": 7,
+  "case": {
+    "case_id": "tiny_logits",
+    "family": "lm_logits",
+    "source_kind": "synthetic_smoke",
+    "source_project": "cannbench",
+    "source_model": "smoke_fixture",
+    "source_file": "built-in",
+    "source_op": "softmax",
+    "payload": {
+      "dimensions": [32, 128],
+      "dim": -1
+    }
+  }
+}
+"""
+    )
+
+    class FakeBackend:
+        def profile_operator_with_cuda_events(self, request):
+            captured["request"] = request
+            return CudaEventProfileResult(
+                benchmark_result=result,
+                durations_ms=(0.1, 0.2),
+            )
+
+    monkeypatch.setattr("cannbench.cli.get_backend", lambda name: FakeBackend())
+
+    def fake_write_benchmark_outputs(output_dir, run_name, actual_result, formats):
+        captured["output_dir"] = output_dir
+        captured["run_name"] = run_name
+        captured["result"] = actual_result
+        captured["formats"] = formats
+        return {}
+
+    monkeypatch.setattr("cannbench.cli.write_benchmark_outputs", fake_write_benchmark_outputs)
+
+    exit_code = main(
+        [
+            "cuda-event-profile",
+            "--backend",
+            "nvidia",
+            "--prepared-input",
+            str(prepared_path),
+            "--warmup",
+            "2",
+            "--iterations",
+            "3",
+            "--profile-dir",
+            str(tmp_path / "profile"),
+            "--output-dir",
+            str(tmp_path / "perf"),
+            "--run-name",
+            "benchmark",
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured["request"].iterations == 3
+    assert captured["output_dir"] == tmp_path / "perf"
+    assert captured["run_name"] == "benchmark"
+    assert (tmp_path / "profile" / "cuda-events.csv").read_text() == (
+        "Name,Duration(ms)\nsoftmax,0.1\nsoftmax,0.2\n"
+    )
 
 
 def test_main_runs_operator_benchmark_from_prepared_input(tmp_path, monkeypatch):

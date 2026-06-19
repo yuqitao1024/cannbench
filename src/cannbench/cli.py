@@ -3,6 +3,7 @@ from pathlib import Path
 
 from cannbench.backends import get_backend
 from cannbench.core.config import OperatorBenchmarkRequest
+from cannbench.core.cuda_events import write_cuda_event_profile_csv
 from cannbench.core.operator_output import (
     compare_operator_outputs,
     read_operator_output,
@@ -107,6 +108,15 @@ def build_parser() -> argparse.ArgumentParser:
     summarize_profile.add_argument("--backend", choices=["nvidia", "ascend"], required=True)
     summarize_profile.add_argument("--profile-dir", type=Path, required=True)
     summarize_profile.add_argument("--output", type=Path, required=True)
+
+    cuda_event = subparsers.add_parser("cuda-event-profile")
+    cuda_event.add_argument("--backend", choices=["nvidia"], required=True)
+    cuda_event.add_argument("--prepared-input", type=Path, required=True)
+    cuda_event.add_argument("--warmup", type=_non_negative_int, default=10)
+    cuda_event.add_argument("--iterations", type=_positive_int, default=1)
+    cuda_event.add_argument("--profile-dir", type=Path, required=True)
+    cuda_event.add_argument("--output-dir", type=Path, required=True)
+    cuda_event.add_argument("--run-name", default="benchmark")
 
     return parser
 
@@ -236,6 +246,30 @@ def main(argv: list[str] | None = None) -> int:
         try:
             summary = read_device_profile(args.profile_dir, backend=args.backend)
             write_device_profile_summary(args.output, summary)
+        except (RuntimeError, ValueError) as exc:
+            parser.error(str(exc))
+    elif args.command == "cuda-event-profile":
+        try:
+            prepared = read_prepared_operator_input(args.prepared_input)
+            request = OperatorBenchmarkRequest(
+                backend=args.backend,
+                op=prepared.op,
+                dtype=prepared.dtype,
+                dataset=prepared.dataset,
+                case_id=prepared.case.case_id,
+                warmup=args.warmup,
+                iterations=args.iterations,
+                seed=prepared.seed,
+            )
+            backend = get_backend(args.backend)
+            event_result = backend.profile_operator_with_cuda_events(request)
+            write_cuda_event_profile_csv(args.profile_dir, event_result)
+            write_benchmark_outputs(
+                args.output_dir,
+                args.run_name,
+                event_result.benchmark_result,
+                request.output_formats,
+            )
         except (RuntimeError, ValueError) as exc:
             parser.error(str(exc))
 

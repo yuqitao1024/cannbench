@@ -320,7 +320,7 @@ results/ascend-softmax/profile/
 results/ascend-softmax/perf/
 ```
 
-For NVIDIA endpoints, CannBench wraps the remote operator command with `ncu` and downloads the same local artifact directories. Output capture and profiling can be requested in the same `collect` call by passing both `--capture-output` and `--profile-device-time`; internally they still run as separate phases.
+For NVIDIA endpoints, CannBench prefers `ncu` when the GPU architecture is supported. On pre-Volta devices such as Tesla P100, where modern Nsight Compute does not support kernel profiling, CannBench falls back to CUDA Event timing and writes a profiler-compatible `cuda-events.csv`. Output capture and profiling can be requested in the same `collect` call by passing both `--capture-output` and `--profile-device-time`; internally they still run as separate phases.
 
 When `--summarize-profile` is provided, CannBench also parses the downloaded profiler CSV artifacts on the local controller and writes:
 

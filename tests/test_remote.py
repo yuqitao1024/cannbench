@@ -220,11 +220,17 @@ def test_collect_remote_artifacts_runs_nvidia_ncu_profile(tmp_path):
         runner=fake_runner,
     )
 
-    assert commands[2] == [
+    assert commands[2][0:2] == [
         "ssh",
         "user@nvidia-host",
-        "cd /opt/cannbench && CUDA_VISIBLE_DEVICES=0 ncu --target-processes all --force-overwrite --csv --log-file /opt/cannbench/.cannbench-runs/softmax-run/profile/ncu.csv --export /opt/cannbench/.cannbench-runs/softmax-run/profile/ncu-report python3 -m cannbench operator --backend nvidia --prepared-input .cannbench-runs/softmax-run/prepared.json --warmup 3 --iterations 5 --output-dir .cannbench-runs/softmax-run/perf --run-name benchmark",
     ]
+    command = commands[2][2]
+    assert "torch.cuda.get_device_capability(0)[0]" in command
+    assert 'if [ "$major" -ge 7 ] && command -v ncu' in command
+    assert "ncu --target-processes all --force-overwrite --csv" in command
+    assert "python3 -m cannbench cuda-event-profile --backend nvidia" in command
+    assert "--profile-dir /opt/cannbench/.cannbench-runs/softmax-run/profile" in command
+    assert "--output-dir .cannbench-runs/softmax-run/perf" in command
 
 
 def test_collect_remote_artifacts_can_summarize_downloaded_profile(tmp_path):

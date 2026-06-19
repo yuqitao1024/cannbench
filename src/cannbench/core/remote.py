@@ -184,21 +184,46 @@ def collect_remote_artifacts(
             profiled_operator = (
                 f"msprof op --output={shlex.quote(remote_profile)} {base_operator}"
             )
+            command = (
+                f"{_remote_command_prefix(endpoint)}"
+                f"{_remote_command_env(endpoint.env)}"
+                f"{profiled_operator}"
+            )
         elif endpoint.backend == "nvidia":
-            profiled_operator = (
+            env_prefix = _remote_command_env(endpoint.env)
+            capability_probe = (
+                f"{env_prefix}{shlex.quote(endpoint.python)} -c "
+                f"{shlex.quote('import torch; print(torch.cuda.get_device_capability(0)[0])')}"
+            )
+            ncu_operator = (
+                f"{env_prefix}"
                 "ncu --target-processes all --force-overwrite "
                 "--csv "
                 f"--log-file {shlex.quote(remote_profile + '/ncu.csv')} "
                 f"--export {shlex.quote(remote_profile + '/ncu-report')} "
                 f"{base_operator}"
             )
+            cuda_event_operator = (
+                f"{env_prefix}"
+                f"{shlex.quote(endpoint.python)} -m cannbench cuda-event-profile "
+                "--backend nvidia "
+                f"--prepared-input {shlex.quote(relative_prepared)} "
+                f"--warmup {warmup} "
+                f"--iterations {iterations} "
+                f"--profile-dir {shlex.quote(remote_profile)} "
+                f"--output-dir {shlex.quote(relative_perf)} "
+                "--run-name benchmark"
+            )
+            profiled_operator = (
+                f"major=$({capability_probe}); "
+                'if [ "$major" -ge 7 ] && command -v ncu >/dev/null 2>&1; '
+                f"then {ncu_operator}; "
+                f"else {cuda_event_operator}; "
+                "fi"
+            )
+            command = f"{_remote_command_prefix(endpoint)}{profiled_operator}"
         else:
             raise ValueError(f"unsupported profiler backend: {endpoint.backend}")
-        command = (
-            f"{_remote_command_prefix(endpoint)}"
-            f"{_remote_command_env(endpoint.env)}"
-            f"{profiled_operator}"
-        )
         runner(_ssh_command(endpoint, command))
         runner(
             _scp_download_command(endpoint, remote_profile, output_dir / "profile")

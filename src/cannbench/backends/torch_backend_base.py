@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from cannbench.backends.base import OperatorBackend
 from cannbench.core.config import OperatorBenchmarkRequest
+from cannbench.core.cuda_events import CudaEventProfileResult
 from cannbench.core.operator_output import CapturedOperatorOutput
 from cannbench.core.result import (
     OperatorBenchmarkResult,
@@ -788,3 +789,64 @@ class TorchOperatorBackend(OperatorBackend):
             )
 
         raise RuntimeError(f"Unsupported operator for {self.name} backend: {request.op}")
+
+    def profile_operator_with_cuda_events(
+        self, request: OperatorBenchmarkRequest
+    ) -> CudaEventProfileResult:
+        if self.device_type != "cuda":
+            raise RuntimeError("CUDA event profiling is only supported for CUDA backends")
+        self.validate_request(request)
+        self._before_run_operator(request)
+        spec = get_operator_spec(request.op)
+        torch = self._torch_module()
+        if not self._is_available(torch):
+            raise RuntimeError(self._availability_error())
+
+        device = self._device(torch)
+        dtype = getattr(torch, request.dtype)
+        if request.dtype not in spec.supported_dtypes:
+            raise RuntimeError(f"Unsupported dtype for {request.op}: {request.dtype}")
+        case = get_operator_case(request.op, request.dataset, request.case_id)
+        if request.op != "softmax":
+            raise RuntimeError(
+                f"CUDA event profiling is not implemented for {request.op}"
+            )
+
+        payload = materialize_softmax_inputs(case, dtype=request.dtype, seed=request.seed)
+        tensor = self._tensor(
+            torch,
+            materialized_values_to_buffer(payload["values"]),
+            device=device,
+            dtype=dtype,
+        ).reshape(payload["shape"])
+
+        output = None
+        for _ in range(request.warmup):
+            output = torch.softmax(tensor, dim=request.dim)
+        self._synchronize(torch)
+
+        durations: list[float] = []
+        for _ in range(request.iterations):
+            start = torch.cuda.Event(enable_timing=True)
+            end = torch.cuda.Event(enable_timing=True)
+            start.record()
+            output = torch.softmax(tensor, dim=request.dim)
+            end.record()
+            self._synchronize(torch)
+            durations.append(float(start.elapsed_time(end)))
+
+        # Keep the final output live until after synchronization.
+        del output
+        benchmark_result = OperatorBenchmarkResult(
+            backend=self.name,
+            device_name=self._device_name(torch, device),
+            op=request.op,
+            dtype=request.dtype,
+            case=self._build_result_case(request, case),
+            warmup=request.warmup,
+            iterations=request.iterations,
+        )
+        return CudaEventProfileResult(
+            benchmark_result=benchmark_result,
+            durations_ms=tuple(durations),
+        )
