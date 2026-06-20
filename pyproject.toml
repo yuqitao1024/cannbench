@@ -24,7 +24,14 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "cannbench.datasets.data.*" = ["*.json"]
-"cannbench.datasets.data.*.custom_ops.ascend.default" = ["*"]
+"cannbench.datasets.data.*.custom_ops.ascend.default" = [
+  "*",
+  "aten_softmax/*",
+  "aten_softmax/csrc/*",
+  "aten_softmax/csrc/simt/*",
+  "scripts/*",
+]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
+testpaths = ["tests"]
