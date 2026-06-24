@@ -164,7 +164,8 @@ h1 {
 .chart-panel,
 .table-panel,
 .trace-rail,
-.diff-panel {
+.diff-panel,
+.upload-panel {
   border: 1px solid var(--line);
   background: var(--panel);
   box-shadow: 0 18px 60px rgba(0, 0, 0, 0.24);
@@ -340,7 +341,8 @@ h1 {
 
 .chart-panel,
 .table-panel,
-.diff-panel {
+.diff-panel,
+.upload-panel {
   overflow: hidden;
   border-radius: 18px;
 }
@@ -533,6 +535,82 @@ tbody tr.is-selected {
 .diff-line--delete .diff-prefix,
 .diff-line--delete code {
   color: var(--danger);
+}
+
+.upload-panel {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+
+.upload-panel h3 {
+  margin: 6px 0 8px;
+  font-family: var(--font-display);
+  font-size: 1.35rem;
+}
+
+.upload-policy {
+  margin: 0;
+  color: var(--muted);
+}
+
+.file-input {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+
+.file-input input {
+  width: 100%;
+  padding: 12px;
+  border: 1px dashed rgba(45, 241, 255, 0.42);
+  border-radius: 14px;
+  color: var(--muted);
+  background: rgba(5, 8, 10, 0.42);
+}
+
+.validation-summary {
+  padding: 12px 14px;
+  border: 1px solid rgba(143, 166, 173, 0.14);
+  border-radius: 14px;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+
+.validation-summary--ok {
+  border-color: rgba(114, 240, 162, 0.42);
+  color: var(--ok);
+}
+
+.validation-summary--blocked {
+  color: var(--muted);
+}
+
+.validation-summary ul {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+.upload-button {
+  justify-self: start;
+  padding: 10px 16px;
+  border: 1px solid rgba(45, 241, 255, 0.42);
+  border-radius: 999px;
+  color: var(--bg);
+  font-family: var(--font-mono);
+  background: var(--cyan);
+  cursor: pointer;
+}
+
+.upload-button:disabled {
+  border-color: rgba(143, 166, 173, 0.14);
+  color: var(--faint);
+  background: rgba(143, 166, 173, 0.12);
+  cursor: not-allowed;
 }
 
 @media (max-width: 720px) {

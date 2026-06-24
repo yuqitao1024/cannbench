@@ -3,6 +3,7 @@ import rawRecords from "../public/data/benchmark-results.json";
 import { BenchmarkChart } from "./components/BenchmarkChart";
 import { CaseTable } from "./components/CaseTable";
 import { CodeDiffPanel } from "./components/CodeDiffPanel";
+import { GpuBenchmarkImport } from "./components/GpuBenchmarkImport";
 import { KernelTraceRail } from "./components/KernelTraceRail";
 import { OperatorRail } from "./components/OperatorRail";
 import { RunFilters } from "./components/RunFilters";
@@ -104,6 +105,7 @@ export function App() {
           <BenchmarkChart series={series} caseIds={cases.map((item) => item.caseId)} />
           <CaseTable cases={cases} selectedCaseId={selectedCaseId} onSelectCase={setSelectedCaseId} />
           <CodeDiffPanel diffRef={selectedDiffRef} />
+          <GpuBenchmarkImport uploadEnabled={false} />
         </section>
       </div>
     </main>
