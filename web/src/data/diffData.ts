@@ -1,21 +1,9 @@
-export interface DiffLine {
-  type: "context" | "add" | "delete";
-  oldNumber: number | null;
-  newNumber: number | null;
-  text: string;
-}
-
-export interface DiffFile {
-  path: string;
-  hunks: DiffLine[];
-}
-
 export interface RepositoryDiff {
   ref: string;
   title: string;
   baselineLabel: string;
   customLabel: string;
-  files: DiffFile[];
+  patch: string;
 }
 
 export const repositoryDiffs: Record<string, RepositoryDiff> = {
@@ -24,38 +12,34 @@ export const repositoryDiffs: Record<string, RepositoryDiff> = {
     title: "aten_softmax dynamic UB reduction",
     baselineLabel: "Ascend operator library",
     customLabel: "custom dynamic-ubuf",
-    files: [
-      {
-        path: "src/cannbench/datasets/data/softmax/custom_ops/ascend/default/aten_softmax/csrc/simt/spatial_softmax.asc",
-        hunks: [
-          { type: "context", oldNumber: 73, newNumber: 73, text: "for (int64_t row = block_idx; row < rows; row += block_num) {" },
-          { type: "delete", oldNumber: 74, newNumber: null, text: "  float max_value = input[row * cols];" },
-          { type: "delete", oldNumber: 75, newNumber: null, text: "  for (int64_t col = 1; col < cols; ++col) {" },
-          { type: "add", oldNumber: null, newNumber: 74, text: "  float max_value = ReduceMax(input + row * cols, cols, ubuf);" },
-          { type: "add", oldNumber: null, newNumber: 75, text: "  for (int64_t col = 0; col < cols; ++col) {" },
-          { type: "context", oldNumber: 76, newNumber: 76, text: "    float shifted = input[row * cols + col] - max_value;" },
-          { type: "add", oldNumber: null, newNumber: 77, text: "    ubuf[col] = exp(shifted);" },
-          { type: "context", oldNumber: 77, newNumber: 78, text: "  }" }
-        ]
-      }
-    ]
+    patch: `diff --git a/src/cannbench/datasets/data/softmax/custom_ops/ascend/default/aten_softmax/csrc/simt/spatial_softmax.asc b/src/cannbench/datasets/data/softmax/custom_ops/ascend/default/aten_softmax/csrc/simt/spatial_softmax.asc
+index 91b0f00..f6c1a74 100644
+--- a/src/cannbench/datasets/data/softmax/custom_ops/ascend/default/aten_softmax/csrc/simt/spatial_softmax.asc
++++ b/src/cannbench/datasets/data/softmax/custom_ops/ascend/default/aten_softmax/csrc/simt/spatial_softmax.asc
+@@ -73,8 +73,9 @@ for (int64_t row = block_idx; row < rows; row += block_num) {
+-  float max_value = input[row * cols];
+-  for (int64_t col = 1; col < cols; ++col) {
++  float max_value = ReduceMax(input + row * cols, cols, ubuf);
++  for (int64_t col = 0; col < cols; ++col) {
+     float shifted = input[row * cols + col] - max_value;
++    ubuf[col] = exp(shifted);
+   }
+`
   },
   "softmax/custom/tiled-v2": {
     ref: "softmax/custom/tiled-v2",
     title: "aten_softmax tiled v2 sketch",
     baselineLabel: "custom dynamic-ubuf",
     customLabel: "custom tiled-v2",
-    files: [
-      {
-        path: "src/cannbench/datasets/data/softmax/custom_ops/ascend/default/aten_softmax/csrc/simt/spatial_softmax.asc",
-        hunks: [
-          { type: "context", oldNumber: 91, newNumber: 91, text: "for (int64_t col = 0; col < cols; col += tile_cols) {" },
-          { type: "delete", oldNumber: 92, newNumber: null, text: "  int64_t tile_cols = cols;" },
-          { type: "add", oldNumber: null, newNumber: 92, text: "  int64_t tile_cols = Min(cols - col, kSoftmaxTile);" },
-          { type: "context", oldNumber: 93, newNumber: 93, text: "  ComputeTile(input, output, row, col, tile_cols);" }
-        ]
-      }
-    ]
+    patch: `diff --git a/src/cannbench/datasets/data/softmax/custom_ops/ascend/default/aten_softmax/csrc/simt/spatial_softmax.asc b/src/cannbench/datasets/data/softmax/custom_ops/ascend/default/aten_softmax/csrc/simt/spatial_softmax.asc
+index f6c1a74..a18b742 100644
+--- a/src/cannbench/datasets/data/softmax/custom_ops/ascend/default/aten_softmax/csrc/simt/spatial_softmax.asc
++++ b/src/cannbench/datasets/data/softmax/custom_ops/ascend/default/aten_softmax/csrc/simt/spatial_softmax.asc
+@@ -91,3 +91,3 @@ for (int64_t col = 0; col < cols; col += tile_cols) {
+-  int64_t tile_cols = cols;
++  int64_t tile_cols = Min(cols - col, kSoftmaxTile);
+   ComputeTile(input, output, row, col, tile_cols);
+`
   }
 };
 

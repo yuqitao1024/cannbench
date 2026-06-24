@@ -1,82 +1,99 @@
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import { validateGpuBenchmarkUpload, type ValidationResult } from "../data/validation";
 
 interface GpuBenchmarkImportProps {
   uploadEnabled: boolean;
+  open: boolean;
+  onClose: () => void;
 }
 
 const initialResult: ValidationResult = {
   ok: false,
   acceptedCount: 0,
   errors: [],
-  warnings: ["Select a normalized GPU benchmark JSON file to validate locally."]
+  warnings: ["Paste normalized GPU benchmark JSON to validate locally."]
 };
 
-export function GpuBenchmarkImport({ uploadEnabled }: GpuBenchmarkImportProps) {
+export function GpuBenchmarkImport({ uploadEnabled, open, onClose }: GpuBenchmarkImportProps) {
   const [result, setResult] = useState<ValidationResult>(initialResult);
+  const [jsonText, setJsonText] = useState("");
 
-  async function handleFile(file: File | undefined): Promise<void> {
-    if (!file) {
+  function validateText(value: string): void {
+    setJsonText(value);
+    if (!value.trim()) {
       setResult(initialResult);
       return;
     }
-    if (file.size > 4 * 1024 * 1024) {
+    if (value.length > 4 * 1024 * 1024) {
       setResult({
         ok: false,
         acceptedCount: 0,
-        errors: ["file size must not exceed 4 MiB"],
+        errors: ["JSON text must not exceed 4 MiB"],
         warnings: []
       });
       return;
     }
 
     try {
-      setResult(validateGpuBenchmarkUpload(JSON.parse(await file.text())));
+      setResult(validateGpuBenchmarkUpload(JSON.parse(value)));
     } catch {
       setResult({
         ok: false,
         acceptedCount: 0,
-        errors: ["file must be valid JSON"],
+        errors: ["text must be valid JSON"],
         warnings: []
       });
     }
   }
 
-  return (
-    <section className="upload-panel" aria-label="GPU benchmark import">
-      <div>
-        <p className="panel-kicker">Import GPU benchmark</p>
-        <h3>GPU Benchmark Import</h3>
-        <p className="upload-policy">
-          {uploadEnabled
-            ? "Upload enabled by server policy. Backend validation is still required."
-            : "Upload disabled by server policy."}
-        </p>
-      </div>
-      <label className="file-input">
-        <span>Select GPU benchmark JSON</span>
-        <input
-          type="file"
-          accept="application/json,.json"
-          aria-label="Select GPU benchmark JSON"
-          onChange={(event) => void handleFile(event.target.files?.[0])}
-        />
-      </label>
-      <div className={`validation-summary validation-summary--${result.ok ? "ok" : "blocked"}`}>
-        <strong>{result.ok ? `${result.acceptedCount} records accepted locally` : "Local validation required"}</strong>
-        <ul>
-          {result.errors.map((error) => (
-            <li key={error}>{error}</li>
-          ))}
-          {result.warnings.map((warning) => (
-            <li key={warning}>{warning}</li>
-          ))}
-          {result.ok && <li>schema passed; sensitive fields not detected</li>}
-        </ul>
-      </div>
-      <button type="button" className="upload-button" disabled={!uploadEnabled || !result.ok}>
-        Upload
-      </button>
-    </section>
+  if (!open) {
+    return null;
+  }
+
+  return createPortal(
+    <div className="modal-backdrop upload-backdrop" role="presentation">
+      <section className="upload-panel" role="dialog" aria-modal="true" aria-label="GPU benchmark import">
+        <header className="upload-header">
+          <div>
+            <p className="panel-kicker">Import GPU benchmark</p>
+            <h3>GPU Benchmark Import</h3>
+            <p className="upload-policy">
+              {uploadEnabled
+                ? "Upload enabled by server policy. Backend validation is still required."
+                : "Upload disabled by server policy."}
+            </p>
+          </div>
+          <button type="button" className="modal-close" aria-label="Close GPU benchmark import" onClick={onClose}>
+            close
+          </button>
+        </header>
+        <label className="json-input">
+          <span>Paste GPU benchmark JSON</span>
+          <textarea
+            aria-label="Paste GPU benchmark JSON"
+            value={jsonText}
+            placeholder='{"records":[...]}'
+            onChange={(event) => validateText(event.target.value)}
+          />
+        </label>
+        <div className={`validation-summary validation-summary--${result.ok ? "ok" : "blocked"}`}>
+          <strong>{result.ok ? `${result.acceptedCount} records accepted locally` : "Local validation required"}</strong>
+          <ul>
+            {result.errors.map((error) => (
+              <li key={error}>{error}</li>
+            ))}
+            {result.warnings.map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+            {result.ok && <li>schema passed; sensitive fields not detected</li>}
+          </ul>
+        </div>
+        <button type="button" className="upload-button" disabled={!uploadEnabled || !result.ok}>
+          Submit JSON
+        </button>
+      </section>
+    </div>,
+    document.body
   );
 }

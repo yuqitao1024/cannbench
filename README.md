@@ -232,10 +232,10 @@ npm run dev
 The first version loads sample data from:
 
 ```text
-web/public/data/benchmark-results.json
+web/src/data/sample/benchmark-results.json
 ```
 
-GPU result upload is represented as a local validation flow and is disabled by policy until a server upload endpoint is intentionally enabled in a later milestone. The frontend validator accepts only normalized GPU benchmark performance records and rejects sensitive fields such as hostnames, environment data, commands, logs, paths, raw profiler data, source code, or diffs.
+GPU result import is represented as a hidden JSON text validation flow and is disabled by policy until a server upload endpoint is intentionally enabled in a later milestone. The frontend validator accepts only normalized GPU benchmark performance records and rejects sensitive fields such as hostnames, environment data, commands, logs, paths, raw profiler data, source code, or diffs.
 
 ### Output Correctness Comparison
 

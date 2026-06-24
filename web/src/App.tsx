@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import rawRecords from "../public/data/benchmark-results.json";
 import { BenchmarkChart } from "./components/BenchmarkChart";
 import { CaseTable } from "./components/CaseTable";
 import { CodeDiffPanel } from "./components/CodeDiffPanel";
@@ -8,6 +7,7 @@ import { KernelTraceRail } from "./components/KernelTraceRail";
 import { OperatorRail } from "./components/OperatorRail";
 import { RunFilters } from "./components/RunFilters";
 import { buildBenchmarkViewModel } from "./data/benchmarkData";
+import rawRecords from "./data/sample/benchmark-results.json";
 import type { BenchmarkRecord } from "./types";
 
 const benchmarkRecords = rawRecords as BenchmarkRecord[];
@@ -20,8 +20,16 @@ const defaultDataset = (operator: string) => {
   return datasets.includes("realistic") ? "realistic" : (datasets[0] ?? "");
 };
 
+function themeForCurrentHour(): "light" | "dark" {
+  const hour = new Date().getHours();
+  return hour >= 7 && hour < 19 ? "light" : "dark";
+}
+
 export function App() {
   const [operatorSearch, setOperatorSearch] = useState("");
+  const [importOpen, setImportOpen] = useState(false);
+  const [titleClickCount, setTitleClickCount] = useState(0);
+  const [theme, setTheme] = useState<"light" | "dark">(themeForCurrentHour);
   const [selectedOperator, setSelectedOperator] = useState(defaultOperator);
   const [selectedDataset, setSelectedDataset] = useState(defaultDataset(defaultOperator));
   const cases = viewModel.casesFor(selectedOperator, selectedDataset);
@@ -44,6 +52,16 @@ export function App() {
   const series = viewModel.seriesFor(selectedOperator, selectedDataset);
 
   useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    document.body.dataset.theme = theme;
+
+    return () => {
+      delete document.documentElement.dataset.theme;
+      delete document.body.dataset.theme;
+    };
+  }, [theme]);
+
+  useEffect(() => {
     const datasets = viewModel.datasetsFor(selectedOperator);
     if (!datasets.includes(selectedDataset)) {
       setSelectedDataset(defaultDataset(selectedOperator));
@@ -56,12 +74,49 @@ export function App() {
   }, [selectedCaseId, selectedDataset, selectedOperator]);
 
   const datasets = viewModel.datasetsFor(selectedOperator);
+  const openImportFromTitle = () => {
+    setTitleClickCount((count) => {
+      const next = count + 1;
+      if (next >= 3) {
+        setImportOpen(true);
+        return 0;
+      }
+      return next;
+    });
+  };
 
   return (
-    <main className="app-shell">
+    <main className="app-shell" data-theme={theme}>
+      <div className="formula-field" aria-hidden="true">
+        <span>σ(x)</span>
+        <span>BW=t⁻¹B</span>
+        <span>∂L / ∂x</span>
+        <span>Δt</span>
+        <span>E = mc²</span>
+        <span>O(n log n)</span>
+        <span>η = a / p</span>
+        <span>F ≤ BW×AI</span>
+        <span>Σ exp(x)</span>
+        <span>p95(t)</span>
+        <span>Δ = c - b</span>
+        <span>H = -Σ p log p</span>
+        <span>σ(x)</span>
+        <span>∇f(x)</span>
+        <span>Q = KᵀV</span>
+        <span>λ = c / f</span>
+        <span>μs/op</span>
+        <span>GB/s</span>
+      </div>
       <header className="console-header">
         <div>
-          <p className="eyebrow">CannBench / Operator Trace</p>
+          <button
+            type="button"
+            className="eyebrow eyebrow-trigger"
+            aria-label="CannBench operator trace"
+            onClick={openImportFromTitle}
+          >
+            CannBench / Operator Trace
+          </button>
           <h1 id="page-title">Operator Performance Console</h1>
           <p className="hero-copy">
             Compare GPU H800, Ascend NPU library, and custom operator versions across curated benchmark cases.
@@ -77,6 +132,14 @@ export function App() {
             <dd>{viewModel.operators.length}</dd>
           </div>
         </dl>
+        <button
+          type="button"
+          className="theme-toggle"
+          aria-label="Toggle light and dark theme"
+          onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
+        >
+          {theme === "dark" ? "moon" : "sun"}
+        </button>
       </header>
 
       <div className="console-grid">
@@ -105,9 +168,9 @@ export function App() {
           <BenchmarkChart series={series} caseIds={cases.map((item) => item.caseId)} />
           <CaseTable cases={cases} selectedCaseId={selectedCaseId} onSelectCase={setSelectedCaseId} />
           <CodeDiffPanel diffRef={selectedDiffRef} />
-          <GpuBenchmarkImport uploadEnabled={false} />
         </section>
       </div>
+      <GpuBenchmarkImport uploadEnabled={false} open={importOpen} onClose={() => setImportOpen(false)} />
     </main>
   );
 }

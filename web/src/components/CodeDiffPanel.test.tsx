@@ -12,7 +12,10 @@ describe("CodeDiffPanel", () => {
 
     expect(screen.getByRole("heading", { name: /aten_softmax dynamic UB reduction/i })).toBeInTheDocument();
     expect(screen.getByText(/repository diff/i)).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: /repository diff workspace/i })).not.toBeInTheDocument();
 
+    await user.click(screen.getByRole("button", { name: /open diff/i }));
+    expect(screen.getByRole("dialog", { name: /repository diff workspace/i })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /unified/i }));
 
     expect(screen.getByText(/unified diff/i)).toBeInTheDocument();
