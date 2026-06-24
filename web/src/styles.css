@@ -117,6 +117,38 @@ h1 {
   line-height: 1.7;
 }
 
+.shell-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin: 42px 0 0;
+}
+
+.shell-metrics div {
+  min-width: 132px;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(5, 8, 10, 0.5);
+}
+
+.shell-metrics dt {
+  margin: 0 0 8px;
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.shell-metrics dd {
+  margin: 0;
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 1.8rem;
+  font-weight: 700;
+}
+
 @media (max-width: 720px) {
   .app-shell {
     width: min(100% - 20px, 1180px);
