@@ -202,7 +202,7 @@ The Ascend backend is wired into the same operator framework as NVIDIA:
 - Same prepared-input flow
 - Same JSON / CSV / Markdown output writers
 
-Ascend execution requires a target machine with PyTorch and `torch_npu`. This repository does not currently include a built-in Ascend custom operator implementation. The custom-op deployment hook is intentionally a boolean flag:
+Ascend execution requires a target machine with PyTorch and `torch_npu`. The repository includes a built-in Ascend custom `softmax` operator project. The custom-op deployment hook is intentionally a boolean flag:
 
 ```bash
 cannbench operator \
@@ -218,6 +218,24 @@ src/cannbench/datasets/data/<operator>/custom_ops/ascend/default/install.sh
 ```
 
 If that path is absent, the run fails with a clear error. If `--deploy-custom-op` is not set, CannBench skips custom-op deployment and uses the default Ascend operator library behavior available in the target runtime.
+
+### Performance Viewer
+
+CannBench includes a static single-page frontend for inspecting normalized benchmark results, comparing GPU H800, Ascend NPU library, and multiple Ascend custom-op versions.
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
+The first version loads sample data from:
+
+```text
+web/public/data/benchmark-results.json
+```
+
+GPU result upload is represented as a local validation flow and is disabled by policy until a server upload endpoint is intentionally enabled in a later milestone. The frontend validator accepts only normalized GPU benchmark performance records and rejects sensitive fields such as hostnames, environment data, commands, logs, paths, raw profiler data, source code, or diffs.
 
 ### Output Correctness Comparison
 
@@ -359,8 +377,10 @@ Implemented now:
 - Remote device-side profiler artifact collection for Ascend and NVIDIA
 - Local Markdown report generation across NVIDIA, Ascend, and accuracy artifacts
 - Local profiler CSV summarization into normalized device-side latency metrics
+- Static frontend performance viewer with chart, case table, repository diff panel, and GPU JSON upload validation
 - NVIDIA PyTorch backend for single-card operator tests
 - Ascend PyTorch backend adapter with optional default custom-op deployment hook
+- Built-in Ascend custom `softmax` operator source project
 - Built-in operator datasets and dispatch for:
   - `softmax`
   - `embedding`
@@ -377,7 +397,7 @@ Implemented now:
 Planned next:
 
 - Harden profiler parsers against real `msprof op` and `ncu` output variants from target machines
-- Built-in Ascend custom operator projects under each operator dataset directory
+- Built-in Ascend custom operator projects for more operator datasets
 - Real-hardware validation on NVIDIA CUDA and Ascend NPU hosts
 - Model-level TTFS / TPS benchmarks
 
@@ -390,7 +410,7 @@ Planned next:
 
 ## Roadmap
 
-- Add built-in Ascend custom operator examples, starting with `softmax`
+- Add built-in Ascend custom operator examples beyond `softmax`
 - Expand operator datasets and realistic shape coverage
 - Add TTFS and TPS model benchmark pipeline
 - Standardize result schema
@@ -433,7 +453,8 @@ This repository is in the first implementation stage. The current scope is:
 - Single-card benchmarking only
 - First operator benchmark framework for NVIDIA and Ascend backends
 - Shared schema, timing, and report output layers
-- Ascend custom operator source projects are not included yet
+- A built-in Ascend custom `softmax` operator source project is included
+- Static frontend performance result viewing is included
 - Model TTFS/TPS benchmarking is not implemented yet
 
 ## License
