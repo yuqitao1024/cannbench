@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import rawRecords from "../public/data/benchmark-results.json";
 import { BenchmarkChart } from "./components/BenchmarkChart";
 import { CaseTable } from "./components/CaseTable";
+import { CodeDiffPanel } from "./components/CodeDiffPanel";
 import { KernelTraceRail } from "./components/KernelTraceRail";
 import { OperatorRail } from "./components/OperatorRail";
 import { RunFilters } from "./components/RunFilters";
@@ -27,6 +28,8 @@ export function App() {
   const selectedCaseRecords = selectedCaseId
     ? viewModel.recordsForCase(selectedOperator, selectedDataset, selectedCaseId)
     : [];
+  const selectedDiffRef =
+    selectedCaseRecords.find((record) => record.implementation === "custom" && record.diff_ref)?.diff_ref ?? null;
   const dtypes = [...new Set(cases.map((item) => item.dtype))];
   const customVersions = [
     ...new Set(
@@ -100,6 +103,7 @@ export function App() {
           <KernelTraceRail records={selectedCaseRecords} />
           <BenchmarkChart series={series} caseIds={cases.map((item) => item.caseId)} />
           <CaseTable cases={cases} selectedCaseId={selectedCaseId} onSelectCase={setSelectedCaseId} />
+          <CodeDiffPanel diffRef={selectedDiffRef} />
         </section>
       </div>
     </main>
