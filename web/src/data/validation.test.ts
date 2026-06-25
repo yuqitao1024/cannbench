@@ -11,7 +11,7 @@ const validRecord = {
   dtype: "float16",
   backend: "nvidia",
   device_class: "H800",
-  implementation: "library",
+  implementation: "cuda_event",
   implementation_version: "cuda-event",
   metrics: { latency_ms_avg: 0.011, latency_ms_p50: 0.011, latency_ms_p95: 0.012, sample_count: 1 },
   accuracy: { passed: true, max_abs_error: 0, max_rel_error: 0 },

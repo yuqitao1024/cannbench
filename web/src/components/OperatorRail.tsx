@@ -27,7 +27,7 @@ export function OperatorRail({
           aria-label="Search operators"
           className="operator-search"
           value={search}
-          placeholder="filter ops"
+          placeholder="Search operators"
           onChange={(event) => onSearchChange(event.target.value)}
         />
       </div>

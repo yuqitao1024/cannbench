@@ -23,7 +23,7 @@ export function CodeDiffPanel({ diffRef }: CodeDiffPanelProps) {
                   <p className="panel-kicker">Repository diff</p>
                   <h3>{diff.title}</h3>
                   <p>
-                    {diff.baselineLabel} vs {diff.customLabel}
+                    {diff.baselineLabel} vs {diff.simtLabel}
                   </p>
                 </div>
                 <div className="diff-workspace-actions">
@@ -68,8 +68,8 @@ export function CodeDiffPanel({ diffRef }: CodeDiffPanelProps) {
     return (
       <section className="diff-panel diff-panel--empty" aria-label="Repository diff">
         <p className="panel-kicker">Repository diff</p>
-        <h3>No custom operator diff</h3>
-        <p>Select an NPU custom-operator result to inspect repository-owned code changes.</p>
+        <h3>No SIMT op diff</h3>
+        <p>Select a SIMT op result to inspect repository-owned code changes.</p>
       </section>
     );
   }
@@ -81,7 +81,7 @@ export function CodeDiffPanel({ diffRef }: CodeDiffPanelProps) {
           <p className="panel-kicker">Repository diff</p>
           <h3>{diff.title}</h3>
           <p>
-            {diff.baselineLabel} vs {diff.customLabel}
+            {diff.baselineLabel} vs {diff.simtLabel}
           </p>
         </div>
       </div>

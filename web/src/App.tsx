@@ -40,13 +40,13 @@ export function App() {
     ? viewModel.recordsForCase(selectedOperator, selectedDataset, selectedCaseId)
     : [];
   const selectedDiffRef =
-    selectedCaseRecords.find((record) => record.implementation === "custom" && record.diff_ref)?.diff_ref ?? null;
+    selectedCaseRecords.find((record) => record.implementation === "simt" && record.diff_ref)?.diff_ref ?? null;
   const dtypes = [...new Set(cases.map((item) => item.dtype))];
-  const customVersions = [
+  const simtVersions = [
     ...new Set(
       cases.flatMap((item) =>
         item.records
-          .filter((record) => record.implementation === "custom")
+          .filter((record) => record.implementation === "simt")
           .map((record) => record.implementation_version)
       )
     )
@@ -153,7 +153,7 @@ export function App() {
               datasets={datasets}
               selectedDataset={selectedDataset}
               dtypes={dtypes}
-              customVersions={customVersions}
+              simtVersions={simtVersions}
               onSelectDataset={setSelectedDataset}
             />
           </div>

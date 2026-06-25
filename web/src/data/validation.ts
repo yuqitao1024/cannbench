@@ -110,8 +110,8 @@ function validateRecord(record: unknown, index: number, errors: string[]): void 
     errors.push(`${path}.backend must be nvidia or gpu`);
   }
 
-  if (record.implementation !== "library" && record.implementation !== "custom") {
-    errors.push(`${path}.implementation must be library or custom`);
+  if (record.implementation !== "cuda_event" && record.implementation !== "ncu") {
+    errors.push(`${path}.implementation must be cuda_event or ncu`);
   }
 
   if (!Array.isArray(record.shape) || record.shape.length === 0 || record.shape.length > 8) {

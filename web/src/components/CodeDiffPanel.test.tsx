@@ -8,7 +8,7 @@ describe("CodeDiffPanel", () => {
   it("renders repository-owned diff content and switches view mode", async () => {
     const user = userEvent.setup();
 
-    render(<CodeDiffPanel diffRef="softmax/custom/dynamic-ubuf" />);
+    render(<CodeDiffPanel diffRef="softmax/simt/dynamic-ubuf" />);
 
     expect(screen.getByRole("heading", { name: /aten_softmax dynamic UB reduction/i })).toBeInTheDocument();
     expect(screen.getByText(/repository diff/i)).toBeInTheDocument();

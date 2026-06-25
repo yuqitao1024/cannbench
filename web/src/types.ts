@@ -2,7 +2,7 @@ export type DatasetName = "smoke" | "realistic" | "stress" | string;
 
 export type BenchmarkBackend = "nvidia" | "gpu" | "ascend" | "npu";
 
-export type BenchmarkImplementation = "library" | "custom";
+export type BenchmarkImplementation = "cuda_event" | "ncu" | "cann_ops_library" | "simt";
 
 export interface BenchmarkMetrics {
   latency_ms_avg: number;

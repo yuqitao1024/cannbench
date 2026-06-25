@@ -8,10 +8,10 @@ function labelFor(record: BenchmarkRecord): string {
   if (record.backend === "nvidia" || record.backend === "gpu") {
     return `GPU ${record.device_class}`;
   }
-  if (record.implementation === "library") {
-    return "NPU library";
+  if (record.implementation === "cann_ops_library") {
+    return "CANN ops library";
   }
-  return `NPU custom ${record.implementation_version}`;
+  return `SIMT op ${record.implementation_version}`;
 }
 
 export function KernelTraceRail({ records }: KernelTraceRailProps) {

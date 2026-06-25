@@ -14,11 +14,14 @@ function formatLatency(record: BenchmarkRecord | undefined): string {
   return record ? record.metrics.latency_ms_avg.toFixed(4) : "-";
 }
 
-function customDelta(library: BenchmarkRecord | undefined, custom: BenchmarkRecord | undefined): string {
-  if (!library || !custom) {
+function simtDelta(cannOpsLibrary: BenchmarkRecord | undefined, simtOp: BenchmarkRecord | undefined): string {
+  if (!cannOpsLibrary || !simtOp) {
     return "-";
   }
-  const delta = ((custom.metrics.latency_ms_avg - library.metrics.latency_ms_avg) / library.metrics.latency_ms_avg) * 100;
+  const delta =
+    ((simtOp.metrics.latency_ms_avg - cannOpsLibrary.metrics.latency_ms_avg) /
+      cannOpsLibrary.metrics.latency_ms_avg) *
+    100;
   return `${delta >= 0 ? "+" : ""}${delta.toFixed(1)}%`;
 }
 
@@ -32,17 +35,23 @@ export function CaseTable({ cases, selectedCaseId, onSelectCase }: CaseTableProp
             <th>shape</th>
             <th>dtype</th>
             <th>GPU H800</th>
-            <th>NPU library</th>
-            <th>NPU custom</th>
-            <th>custom delta</th>
+            <th>CANN ops library</th>
+            <th>SIMT op</th>
+            <th>SIMT delta</th>
             <th>accuracy</th>
           </tr>
         </thead>
         <tbody>
           {cases.map((caseSummary) => {
             const gpu = findRecord(caseSummary.records, (record) => record.backend === "nvidia" || record.backend === "gpu");
-            const library = findRecord(caseSummary.records, (record) => record.backend === "ascend" && record.implementation === "library");
-            const custom = findRecord(caseSummary.records, (record) => record.backend === "ascend" && record.implementation === "custom");
+            const cannOpsLibrary = findRecord(
+              caseSummary.records,
+              (record) => record.backend === "ascend" && record.implementation === "cann_ops_library"
+            );
+            const simtOp = findRecord(
+              caseSummary.records,
+              (record) => record.backend === "ascend" && record.implementation === "simt"
+            );
             const accuracyPassed = caseSummary.records.every((record) => record.accuracy.passed);
             return (
               <tr
@@ -58,9 +67,9 @@ export function CaseTable({ cases, selectedCaseId, onSelectCase }: CaseTableProp
                 <td>{caseSummary.shape.join(" x ")}</td>
                 <td>{caseSummary.dtype}</td>
                 <td>{formatLatency(gpu)}</td>
-                <td>{formatLatency(library)}</td>
-                <td>{formatLatency(custom)}</td>
-                <td>{customDelta(library, custom)}</td>
+                <td>{formatLatency(cannOpsLibrary)}</td>
+                <td>{formatLatency(simtOp)}</td>
+                <td>{simtDelta(cannOpsLibrary, simtOp)}</td>
                 <td className={accuracyPassed ? "status-ok" : "status-bad"}>{accuracyPassed ? "pass" : "fail"}</td>
               </tr>
             );

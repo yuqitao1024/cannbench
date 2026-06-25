@@ -20,27 +20,27 @@ function seriesKey(record: BenchmarkRecord): string {
   if (record.backend === "nvidia" || record.backend === "gpu") {
     return "gpu";
   }
-  if (record.implementation === "library") {
-    return "npu-library";
+  if (record.implementation === "cann_ops_library") {
+    return "cann-ops-library";
   }
-  return `npu-custom:${record.implementation_version}`;
+  return `simt:${record.implementation_version}`;
 }
 
 function seriesName(record: BenchmarkRecord): string {
   if (record.backend === "nvidia" || record.backend === "gpu") {
     return `GPU ${record.device_class}`;
   }
-  if (record.implementation === "library") {
-    return "NPU library";
+  if (record.implementation === "cann_ops_library") {
+    return "CANN ops library";
   }
-  return `NPU custom: ${record.implementation_version}`;
+  return `SIMT op: ${record.implementation_version}`;
 }
 
 function seriesRank(key: string): [number, string] {
   if (key === "gpu") {
     return [0, key];
   }
-  if (key === "npu-library") {
+  if (key === "cann-ops-library") {
     return [1, key];
   }
   return [2, key];

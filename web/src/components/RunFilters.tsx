@@ -2,7 +2,7 @@ interface RunFiltersProps {
   datasets: string[];
   selectedDataset: string;
   dtypes: string[];
-  customVersions: string[];
+  simtVersions: string[];
   onSelectDataset: (dataset: string) => void;
 }
 
@@ -10,7 +10,7 @@ export function RunFilters({
   datasets,
   selectedDataset,
   dtypes,
-  customVersions,
+  simtVersions,
   onSelectDataset
 }: RunFiltersProps) {
   return (
@@ -31,7 +31,7 @@ export function RunFilters({
       </div>
       <div className="filter-chips" aria-label="Run metadata">
         <span>dtype: {dtypes.join(", ") || "none"}</span>
-        <span>custom: {customVersions.join(", ") || "none"}</span>
+        <span>SIMT op: {simtVersions.join(", ") || "none"}</span>
       </div>
     </section>
   );
