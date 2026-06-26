@@ -1,7 +1,7 @@
 export type TreasureNodeKind = "main" | "branch";
 
-interface BaseTreasureNode {
-  id: string;
+interface BaseTreasureNode<NodeId extends string = string> {
+  id: NodeId;
   label: string;
   x: number;
   y: number;
@@ -12,19 +12,44 @@ interface BaseTreasureNode {
   importance?: "normal" | "high";
 }
 
-export interface MainTreasureNode extends BaseTreasureNode {
+export interface MainTreasureNode<NodeId extends string = string> extends BaseTreasureNode<NodeId> {
   kind: "main";
   branchFrom?: never;
 }
 
-export interface BranchTreasureNode extends BaseTreasureNode {
+export interface BranchTreasureNode<ParentId extends string = string, NodeId extends string = string>
+  extends BaseTreasureNode<NodeId> {
   kind: "branch";
-  branchFrom: string;
+  branchFrom: ParentId;
 }
 
-export type TreasureNode = MainTreasureNode | BranchTreasureNode;
+export type TreasureNode<NodeId extends string = string, ParentId extends string = string> =
+  | MainTreasureNode<NodeId>
+  | BranchTreasureNode<ParentId, NodeId>;
 
-export const cudaTreasureRoute: TreasureNode[] = [
+type RouteMainIds<Route extends readonly TreasureNode[]> = Extract<Route[number], { kind: "main" }>["id"];
+
+type EnforceBranchParents<Route extends readonly TreasureNode[]> = {
+  readonly [Index in keyof Route]: Route[Index] extends BranchTreasureNode<infer ParentId, infer NodeId>
+    ? BranchTreasureNode<Extract<ParentId, RouteMainIds<Route>>, NodeId>
+    : Route[Index];
+};
+
+function defineTreasureRoute<const Route extends readonly TreasureNode[]>(
+  route: Route & EnforceBranchParents<Route>
+): Route {
+  const mainNodeIds = new Set(route.filter((node) => node.kind === "main").map((node) => node.id));
+
+  for (const node of route) {
+    if (node.kind === "branch" && !mainNodeIds.has(node.branchFrom)) {
+      throw new Error(`CUDA treasure route node "${node.id}" references missing branch parent "${node.branchFrom}".`);
+    }
+  }
+
+  return route;
+}
+
+export const cudaTreasureRoute = defineTreasureRoute([
   {
     id: "profile-truth",
     label: "Profile the Truth",
@@ -240,4 +265,4 @@ export const cudaTreasureRoute: TreasureNode[] = [
     relatedOptimizationIds: ["O26"],
     branchFrom: "polish-instructions"
   }
-];
+] as const);

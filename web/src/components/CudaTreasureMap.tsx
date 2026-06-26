@@ -2,7 +2,7 @@ import { useId, useState } from "react";
 import type { TreasureNode } from "../data/cudaOptimizationRoute";
 
 interface CudaTreasureMapProps {
-  route: TreasureNode[];
+  route: readonly TreasureNode[];
 }
 
 export function CudaTreasureMap({ route }: CudaTreasureMapProps) {
@@ -13,6 +13,15 @@ export function CudaTreasureMap({ route }: CudaTreasureMapProps) {
   const nodesById = new Map(route.map((node) => [node.id, node]));
   const mainRouteNodes = route.filter((node) => node.kind === "main");
   const branchNodes = route.filter((node) => node.kind === "branch");
+  const branchConnectors = branchNodes.map((node) => {
+    const parentNode = nodesById.get(node.branchFrom);
+
+    if (!parentNode || parentNode.kind !== "main") {
+      throw new Error(`CUDA treasure route node "${node.id}" references missing branch parent "${node.branchFrom}".`);
+    }
+
+    return { node, parentNode };
+  });
   const activeNodeId = focusedNodeId ?? hoveredNodeId;
   const activeNode = activeNodeId ? nodesById.get(activeNodeId) ?? null : null;
 
@@ -38,26 +47,19 @@ export function CudaTreasureMap({ route }: CudaTreasureMapProps) {
             strokeLinejoin="round"
             strokeLinecap="round"
           />
-          {branchNodes.map((node) => {
-            const parentNode = nodesById.get(node.branchFrom);
-            if (!parentNode) {
-              return null;
-            }
-
-            return (
-              <line
-                key={node.id}
-                className="cuda-treasure-map__path cuda-treasure-map__path--branch"
-                x1={parentNode.x}
-                y1={parentNode.y}
-                x2={node.x}
-                y2={node.y}
-                stroke="currentColor"
-                strokeWidth="1"
-                strokeDasharray="2 2"
-              />
-            );
-          })}
+          {branchConnectors.map(({ node, parentNode }) => (
+            <line
+              key={node.id}
+              className="cuda-treasure-map__path cuda-treasure-map__path--branch"
+              x1={parentNode.x}
+              y1={parentNode.y}
+              x2={node.x}
+              y2={node.y}
+              stroke="currentColor"
+              strokeWidth="1"
+              strokeDasharray="2 2"
+            />
+          ))}
         </svg>
 
         {route.map((node) => {

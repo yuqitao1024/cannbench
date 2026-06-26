@@ -1,7 +1,9 @@
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { useState } from "react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { CudaTreasureMap } from "./CudaTreasureMap";
 import { CudaTreasureMapModal } from "./CudaTreasureMapModal";
 
 afterEach(() => {
@@ -9,6 +11,19 @@ afterEach(() => {
 });
 
 describe("CudaTreasureMapModal", () => {
+  function FocusHarness() {
+    const [open, setOpen] = useState(false);
+
+    return (
+      <>
+        <button type="button" onClick={() => setOpen(true)}>
+          Open treasure route
+        </button>
+        <CudaTreasureMapModal open={open} onClose={() => setOpen(false)} />
+      </>
+    );
+  }
+
   it("renders the main CUDA optimization route labels", () => {
     render(<CudaTreasureMapModal open={true} onClose={() => undefined} />);
 
@@ -18,7 +33,24 @@ describe("CudaTreasureMapModal", () => {
     expect(screen.getByText(/Polish Instructions/i)).toBeInTheDocument();
   });
 
-  it("reveals the Fix Global Access field note on hover and focus", async () => {
+  it("renders branch connectors for branch route nodes", () => {
+    render(<CudaTreasureMapModal open={true} onClose={() => undefined} />);
+
+    const branchConnectors = Array.from(document.body.querySelectorAll(".cuda-treasure-map__path--branch"));
+
+    expect(branchConnectors).toHaveLength(6);
+    expect(
+      branchConnectors.some(
+        (connector) =>
+          connector.getAttribute("x1") === "51" &&
+          connector.getAttribute("y1") === "36" &&
+          connector.getAttribute("x2") === "60" &&
+          connector.getAttribute("y2") === "26"
+      )
+    ).toBe(true);
+  });
+
+  it("reveals the Fix Global Access field note on hover and focus with tooltip wiring", async () => {
     const user = userEvent.setup();
 
     render(<CudaTreasureMapModal open={true} onClose={() => undefined} />);
@@ -28,15 +60,25 @@ describe("CudaTreasureMapModal", () => {
     expect(screen.queryByText(/^Guide:\s*10\.2\.1$/i)).not.toBeInTheDocument();
 
     await user.hover(fixGlobalAccessNode);
-    expect(screen.getByText(/^Guide:\s*10\.2\.1$/i)).toBeInTheDocument();
-    expect(screen.getByText(/Repair coalescing, stride, and alignment before instruction micro-tuning\./i)).toBeInTheDocument();
+    const hoveredTooltip = screen.getByRole("tooltip");
+    expect(fixGlobalAccessNode).toHaveAttribute("aria-describedby", hoveredTooltip.id);
+    expect(within(hoveredTooltip).getByRole("heading", { name: /Fix Global Access/i })).toBeInTheDocument();
+    expect(within(hoveredTooltip).getByText(/^Guide:\s*10\.2\.1$/i)).toBeInTheDocument();
+    expect(
+      within(hoveredTooltip).getByText(/Repair coalescing, stride, and alignment before instruction micro-tuning\./i)
+    ).toBeInTheDocument();
+    expect(within(hoveredTooltip).getByText(/Make adjacent threads touch adjacent memory\./i)).toBeInTheDocument();
+    expect(within(hoveredTooltip).getByText(/^Route IDs:\s*O9, O10$/i)).toBeInTheDocument();
 
     await user.unhover(fixGlobalAccessNode);
     expect(screen.queryByText(/^Guide:\s*10\.2\.1$/i)).not.toBeInTheDocument();
+    expect(fixGlobalAccessNode).not.toHaveAttribute("aria-describedby");
 
     fixGlobalAccessNode.focus();
     expect(fixGlobalAccessNode).toHaveFocus();
-    expect(await screen.findByText(/^Guide:\s*10\.2\.1$/i)).toBeInTheDocument();
+    const focusedTooltip = await screen.findByRole("tooltip");
+    expect(fixGlobalAccessNode).toHaveAttribute("aria-describedby", focusedTooltip.id);
+    expect(within(focusedTooltip).getByText(/^Guide:\s*10\.2\.1$/i)).toBeInTheDocument();
   });
 
   it("closes on Escape and backdrop click but not on dialog clicks", async () => {
@@ -58,5 +100,52 @@ describe("CudaTreasureMapModal", () => {
 
     await user.keyboard("{Escape}");
     expect(onClose).toHaveBeenCalledTimes(2);
+  });
+
+  it("moves focus into the dialog, traps it, and restores focus on close", async () => {
+    const user = userEvent.setup();
+
+    render(<FocusHarness />);
+
+    const openButton = screen.getByRole("button", { name: /Open treasure route/i });
+    openButton.focus();
+
+    await user.click(openButton);
+
+    const closeButton = screen.getByRole("button", { name: /Close CUDA operator treasure route/i });
+    expect(closeButton).toHaveFocus();
+
+    await user.tab({ shift: true });
+    expect(screen.getByRole("button", { name: /Target GPU build/i })).toHaveFocus();
+
+    await user.tab();
+    expect(closeButton).toHaveFocus();
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: /CUDA operator treasure route/i })).not.toBeInTheDocument();
+    expect(openButton).toHaveFocus();
+  });
+
+  it("throws when a branch node points to a missing parent", () => {
+    expect(() =>
+      render(
+        <CudaTreasureMap
+          route={[
+            {
+              id: "branch-only",
+              label: "Broken branch",
+              kind: "branch",
+              x: 20,
+              y: 20,
+              summary: "Invalid route shape",
+              details: ["Missing branch parent should fail loudly."],
+              guideSections: ["0"],
+              relatedOptimizationIds: ["OX"],
+              branchFrom: "missing-parent"
+            }
+          ]}
+        />
+      )
+    ).toThrow(/missing branch parent/i);
   });
 });
