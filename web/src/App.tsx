@@ -135,7 +135,10 @@ export function App() {
           type="button"
           className="theme-toggle"
           aria-label="Toggle light and dark theme"
-          onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
+          onClick={() => {
+            setTitleClickCount(0);
+            setTheme((current) => (current === "dark" ? "light" : "dark"));
+          }}
         >
           {theme === "dark" ? "moon" : "sun"}
         </button>

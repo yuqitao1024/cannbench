@@ -105,4 +105,25 @@ describe("App", () => {
 
     expect(document.body.dataset.theme).toBe(appShell.dataset.theme);
   });
+
+  it("resets the hidden click streak when the theme changes", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    const titleTrigger = screen.getByRole("button", { name: /^CANNBench$/i });
+    await user.click(titleTrigger);
+    await user.click(titleTrigger);
+
+    await user.click(screen.getByRole("button", { name: /Toggle light and dark theme/i }));
+    await user.click(titleTrigger);
+
+    expect(screen.queryByRole("dialog", { name: /GPU benchmark import/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: /CUDA operator treasure route/i })).not.toBeInTheDocument();
+
+    await user.click(titleTrigger);
+    await user.click(titleTrigger);
+
+    expect(screen.getByRole("dialog", { name: /CUDA operator treasure route/i })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: /GPU benchmark import/i })).not.toBeInTheDocument();
+  });
 });
