@@ -34,6 +34,22 @@ const RECORD_FIELDS = new Set([
 const METRIC_FIELDS = new Set(["latency_ms_avg", "latency_ms_p50", "latency_ms_p95", "sample_count"]);
 const ACCURACY_FIELDS = new Set(["passed", "max_abs_error", "max_rel_error"]);
 
+const CODE_LIKE_PATTERNS = [
+  /```/,
+  /diff --git /i,
+  /#include\s*[<"]/i,
+  /\bTORCH_LIBRARY\b/,
+  /\b__global__\b/,
+  /\b__device__\b/,
+  /\b__host__\b/,
+  /\b__aicore__\b/,
+  /(^|\n)\s*(def|class|import|from)\s+[A-Za-z_]/m,
+  /(^|\n)\s*function\s+[A-Za-z_][A-Za-z0-9_]*\s*\(/m,
+  /=>\s*[{(A-Za-z_]/,
+  /(^|\n)\s*(const|let|var)\s+[A-Za-z_][A-Za-z0-9_]*\s*=/m,
+  /(^|\n)\s*template\s*</m
+];
+
 export interface ValidationResult {
   ok: boolean;
   acceptedCount: number;
@@ -58,6 +74,35 @@ function checkSensitiveFields(value: unknown, path: string, errors: string[]): v
       errors.push(`sensitive field rejected at ${path}.${key}`);
     }
     checkSensitiveFields(child, `${path}.${key}`, errors);
+  }
+}
+
+function isCodeLikeString(value: string): boolean {
+  if (value.length > 1600) {
+    return true;
+  }
+  if (!/[\n\r`#;{}<>()=]/.test(value)) {
+    return false;
+  }
+  return CODE_LIKE_PATTERNS.some((pattern) => pattern.test(value));
+}
+
+function checkCodeLikeContent(value: unknown, path: string, errors: string[]): void {
+  if (typeof value === "string") {
+    if (isCodeLikeString(value)) {
+      errors.push(`code-like content rejected at ${path}`);
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => checkCodeLikeContent(item, `${path}[${index}]`, errors));
+    return;
+  }
+  if (!isObject(value)) {
+    return;
+  }
+  for (const [key, child] of Object.entries(value)) {
+    checkCodeLikeContent(child, `${path}.${key}`, errors);
   }
 }
 
@@ -153,6 +198,7 @@ export function validateGpuBenchmarkUpload(payload: unknown): ValidationResult {
   const errors: string[] = [];
   const warnings: string[] = [];
   checkSensitiveFields(payload, "payload", errors);
+  checkCodeLikeContent(payload, "payload", errors);
 
   if (!isObject(payload)) {
     return { ok: false, acceptedCount: 0, errors: ["payload must be an object"], warnings };

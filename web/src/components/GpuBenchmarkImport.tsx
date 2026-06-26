@@ -12,7 +12,7 @@ const initialResult: ValidationResult = {
   ok: false,
   acceptedCount: 0,
   errors: [],
-  warnings: ["Paste normalized GPU benchmark JSON to validate locally."]
+  warnings: []
 };
 
 export function GpuBenchmarkImport({ uploadEnabled, open, onClose }: GpuBenchmarkImportProps) {
@@ -57,12 +57,6 @@ export function GpuBenchmarkImport({ uploadEnabled, open, onClose }: GpuBenchmar
         <header className="upload-header">
           <div>
             <p className="panel-kicker">Import GPU benchmark</p>
-            <h3>GPU Benchmark Import</h3>
-            <p className="upload-policy">
-              {uploadEnabled
-                ? "Upload enabled by server policy. Backend validation is still required."
-                : "Upload disabled by server policy."}
-            </p>
           </div>
           <button type="button" className="modal-close" aria-label="Close GPU benchmark import" onClick={onClose}>
             close
@@ -77,20 +71,36 @@ export function GpuBenchmarkImport({ uploadEnabled, open, onClose }: GpuBenchmar
             onChange={(event) => validateText(event.target.value)}
           />
         </label>
-        <div className={`validation-summary validation-summary--${result.ok ? "ok" : "blocked"}`}>
-          <strong>{result.ok ? `${result.acceptedCount} records accepted locally` : "Local validation required"}</strong>
-          <ul>
-            {result.errors.map((error) => (
-              <li key={error}>{error}</li>
-            ))}
-            {result.warnings.map((warning) => (
-              <li key={warning}>{warning}</li>
-            ))}
-            {result.ok && <li>schema passed; sensitive fields not detected</li>}
-          </ul>
-        </div>
+        {result.ok ? (
+          <div className="validation-summary validation-summary--ok">
+            <strong>{result.acceptedCount} records accepted locally</strong>
+            <ul>
+              {result.warnings.map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
+              <li>schema passed; sensitive fields not detected</li>
+            </ul>
+          </div>
+        ) : result.errors.length > 0 ? (
+          <div className="validation-summary validation-summary--blocked">
+            <strong>Local validation failed</strong>
+            <ul>
+              {result.errors.map((error) => (
+                <li key={error}>{error}</li>
+              ))}
+            </ul>
+          </div>
+        ) : (
+          <div className="upload-warning validation-summary validation-summary--warning" role="alert">
+            <strong>Warning</strong>
+            <p>
+              GPU benchmark data only. Never upload code, documents, environment details, employee IDs, or any
+              sensitive content. Violations are your responsibility.
+            </p>
+          </div>
+        )}
         <button type="button" className="upload-button" disabled={!uploadEnabled || !result.ok}>
-          Submit JSON
+          Submit
         </button>
       </section>
     </div>,

@@ -48,4 +48,13 @@ describe("validateGpuBenchmarkUpload", () => {
     expect(result.ok).toBe(false);
     expect(result.errors[0]).toMatch(/sensitive field/i);
   });
+
+  it("rejects code snippets embedded in allowed string fields", () => {
+    const result = validateGpuBenchmarkUpload({
+      records: [{ ...validRecord, implementation_version: "diff --git a/op.cc b/op.cc\n+#include <torch/extension.h>" }]
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain("code-like content rejected at payload.records[0].implementation_version");
+  });
 });

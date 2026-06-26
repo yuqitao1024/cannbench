@@ -1,29 +1,181 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { Diff, Hunk, parseDiff } from "react-diff-view";
 import "react-diff-view/style/index.css";
-import { getRepositoryDiff } from "../data/diffData";
+import { fetchSimtOperatorDiff } from "../data/simtDiffApi";
+import type { BenchmarkRecord, SimtOperatorDiff } from "../types";
 
 interface CodeDiffPanelProps {
-  diffRef: string | null;
+  operator: string;
+  simtRecords: BenchmarkRecord[];
 }
 
-export function CodeDiffPanel({ diffRef }: CodeDiffPanelProps) {
+type SelectionSlot = "base" | "compare";
+
+interface SimtVersionOption {
+  version: string;
+}
+
+function buildVersionOptions(records: BenchmarkRecord[]): SimtVersionOption[] {
+  const seen = new Set<string>();
+  const options: SimtVersionOption[] = [];
+  for (const record of records) {
+    if (record.implementation !== "simt" || seen.has(record.implementation_version)) {
+      continue;
+    }
+    seen.add(record.implementation_version);
+    options.push({
+      version: record.implementation_version
+    });
+  }
+  return options;
+}
+
+function countPatchLines(patch: string) {
+  let additions = 0;
+  let deletions = 0;
+  for (const line of patch.split("\n")) {
+    if (line.startsWith("+++")) {
+      continue;
+    }
+    if (line.startsWith("---")) {
+      continue;
+    }
+    if (line.startsWith("+")) {
+      additions += 1;
+      continue;
+    }
+    if (line.startsWith("-")) {
+      deletions += 1;
+    }
+  }
+  return { additions, deletions };
+}
+
+export function CodeDiffPanel({ operator, simtRecords }: CodeDiffPanelProps) {
   const [mode, setMode] = useState<"split" | "unified">("split");
   const [open, setOpen] = useState(false);
-  const diff = getRepositoryDiff(diffRef);
+  const [activeSlot, setActiveSlot] = useState<SelectionSlot>("compare");
+  const versionOptions = buildVersionOptions(simtRecords);
+  const versionSignature = versionOptions.map((option) => option.version).join("|");
+  const [baseVersion, setBaseVersion] = useState<string | null>(null);
+  const [compareVersion, setCompareVersion] = useState<string | null>(null);
+  const [diff, setDiff] = useState<SimtOperatorDiff | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [diffError, setDiffError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (versionOptions.length >= 2) {
+      setBaseVersion(versionOptions[0].version);
+      setCompareVersion(versionOptions[1].version);
+      setActiveSlot("base");
+      return;
+    }
+    if (versionOptions.length === 1) {
+      setBaseVersion(versionOptions[0].version);
+      setCompareVersion(null);
+      setActiveSlot("compare");
+      return;
+    }
+    setBaseVersion(null);
+    setCompareVersion(null);
+    setActiveSlot("compare");
+  }, [versionSignature]);
+
+  useEffect(() => {
+    if (versionOptions.length < 2 || !baseVersion || !compareVersion) {
+      setDiff(null);
+      setDiffError(null);
+      setIsLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    setIsLoading(true);
+    setDiffError(null);
+    fetchSimtOperatorDiff(operator, baseVersion, compareVersion, controller.signal)
+      .then((result) => {
+        setDiff(result.patch ? result : null);
+        setDiffError(result.patch ? null : "No code changes detected between the selected SIMT operator versions.");
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+        const message = error instanceof Error ? error.message : "Failed to load SIMT operator diff.";
+        setDiff(null);
+        setDiffError(message);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setIsLoading(false);
+        }
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [baseVersion, compareVersion, operator, versionSignature]);
+
   const files = diff ? parseDiff(diff.patch, { nearbySequences: "zip" }) : [];
+  const patchCounts = diff ? countPatchLines(diff.patch) : { additions: 0, deletions: 0 };
+
+  const assignVersion = (version: string) => {
+    const alternativeVersion = versionOptions.find((option) => option.version !== version)?.version ?? null;
+
+    if (activeSlot === "base") {
+      setBaseVersion(version);
+      setCompareVersion((current) => {
+        if (current === version) {
+          return alternativeVersion;
+        }
+        return current;
+      });
+      setActiveSlot("compare");
+      return;
+    }
+
+    setCompareVersion(version);
+    setBaseVersion((current) => {
+      if (current === version) {
+        return alternativeVersion;
+      }
+      return current;
+    });
+    setActiveSlot("base");
+  };
+
+  const emptyState =
+    versionOptions.length < 2
+      ? {
+          title: "No diff available",
+          description: "Need at least two SIMT operator versions to compare."
+        }
+      : isLoading
+        ? {
+            title: "Loading diff",
+            description: "Comparing repository-owned SIMT operator directories."
+          }
+        : {
+            title: "No diff available",
+            description: diffError ?? "No recorded diff matches the selected SIMT operator versions."
+          };
+
   const workspace =
     open && diff
       ? createPortal(
           <div className="modal-backdrop diff-workspace-backdrop" role="presentation">
-            <section className="diff-workspace" role="dialog" aria-modal="true" aria-label="Repository diff workspace">
+            <section className="diff-workspace" role="dialog" aria-modal="true" aria-label="SIMT operator diff workspace">
               <header className="diff-workspace-toolbar">
                 <div>
-                  <p className="panel-kicker">Repository diff</p>
-                  <h3>{diff.title}</h3>
-                  <p>
-                    {diff.baselineLabel} vs {diff.simtLabel}
+                  <p className="panel-kicker">SIMT operator diff</p>
+                  <h3>
+                    {baseVersion} {"->"} {compareVersion}
+                  </h3>
+                  <p className="diff-summary-inline">
+                    {files.length} files changed{" "}
+                    <span className="diff-summary-plus">{patchCounts.additions} ++</span>{" "}
+                    <span className="diff-summary-minus">{patchCounts.deletions} --</span>
                   </p>
                 </div>
                 <div className="diff-workspace-actions">
@@ -43,7 +195,7 @@ export function CodeDiffPanel({ diffRef }: CodeDiffPanelProps) {
               <div className="diff-workspace-body">
                 <aside className="diff-file-rail" aria-label="Changed files">
                   {files.map((file) => (
-                    <span key={file.newPath ?? file.oldPath}>{(file.newPath ?? file.oldPath).split("/").slice(-3).join("/")}</span>
+                    <span key={file.newPath ?? file.oldPath}>{(file.newPath ?? file.oldPath).split("/").slice(-4).join("/")}</span>
                   ))}
                 </aside>
                 <div className="diff-workspace-content">
@@ -64,45 +216,88 @@ export function CodeDiffPanel({ diffRef }: CodeDiffPanelProps) {
         )
       : null;
 
-  if (!diff) {
-    return (
-      <section className="diff-panel diff-panel--empty" aria-label="Repository diff">
-        <p className="panel-kicker">Repository diff</p>
-        <h3>No SIMT op diff</h3>
-        <p>Select a SIMT op result to inspect repository-owned code changes.</p>
-      </section>
-    );
-  }
-
   return (
-    <section className="diff-panel" aria-label="Repository diff">
+    <section className={`diff-panel${diff ? "" : " diff-panel--empty"}`} aria-label="SIMT operator diff">
       <div className="diff-head">
-        <div>
-          <p className="panel-kicker">Repository diff</p>
-          <h3>{diff.title}</h3>
-          <p>
-            {diff.baselineLabel} vs {diff.simtLabel}
-          </p>
+        <p className="panel-kicker">SIMT operator diff</p>
+      </div>
+      <div className="diff-selector">
+        <div className="diff-slots" role="group" aria-label="Selected SIMT versions">
+          <button
+            type="button"
+            className={`diff-slot${activeSlot === "base" ? " is-active" : ""}`}
+            onClick={() => setActiveSlot("base")}
+          >
+            <span className="diff-slot-label">base</span>
+            <span className={`diff-slot-pill${baseVersion ? " is-filled is-base" : ""}`}>
+              {baseVersion ?? "select version"}
+            </span>
+            {activeSlot === "base" ? <span className="diff-slot-hint">Select a version below</span> : null}
+          </button>
+          <button
+            type="button"
+            className={`diff-slot${activeSlot === "compare" ? " is-active" : ""}`}
+            onClick={() => setActiveSlot("compare")}
+          >
+            <span className="diff-slot-label">compare</span>
+            <span className={`diff-slot-pill${compareVersion ? " is-filled is-compare" : ""}`}>
+              {compareVersion ?? "select version"}
+            </span>
+            {activeSlot === "compare" ? <span className="diff-slot-hint">Select a version below</span> : null}
+          </button>
+        </div>
+        <div className="diff-version-row" aria-label="SIMT operator versions">
+          {versionOptions.map((option) => (
+            <button
+              key={option.version}
+              type="button"
+              className={[
+                "diff-version-pill",
+                option.version === baseVersion ? "is-base" : "",
+                option.version === compareVersion ? "is-compare" : "",
+                activeSlot === "base" && option.version === baseVersion ? "is-active-target" : "",
+                activeSlot === "compare" && option.version === compareVersion ? "is-active-target" : ""
+              ]
+                .filter(Boolean)
+                .join(" ")}
+              onClick={() => assignVersion(option.version)}
+            >
+              {option.version}
+            </button>
+          ))}
         </div>
       </div>
-      <div className="diff-summary-grid">
-        <div>
-          <span className="diff-summary-label">changed files</span>
-          <strong>{files.length}</strong>
-        </div>
-        <div>
-          <span className="diff-summary-label">default view</span>
-          <strong>split</strong>
-        </div>
-        <button type="button" className="diff-open-button" onClick={() => setOpen(true)}>
-          Open diff
-        </button>
-      </div>
-      <div className="diff-files" aria-label="Changed files">
-        {files.map((file) => (
-          <span key={file.newPath ?? file.oldPath}>{(file.newPath ?? file.oldPath).split("/").slice(-3).join("/")}</span>
-        ))}
-      </div>
+      {diff ? (
+        <>
+          <div className="diff-summary-row">
+            <p className="diff-summary-inline">
+              {files.length} files changed <span className="diff-summary-plus">{patchCounts.additions} ++</span>{" "}
+              <span className="diff-summary-minus">{patchCounts.deletions} --</span>
+            </p>
+            <button type="button" className="diff-open-button" onClick={() => setOpen(true)} disabled={!diff}>
+              Details
+            </button>
+          </div>
+          <div className="diff-files" aria-label="Changed files">
+            {files.map((file) => (
+              <span key={file.newPath ?? file.oldPath}>{(file.newPath ?? file.oldPath).split("/").slice(-4).join("/")}</span>
+            ))}
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="diff-summary-row">
+            <p className="diff-summary-inline">{isLoading ? "Loading diff summary" : "No diff summary"}</p>
+            <button type="button" className="diff-open-button" disabled>
+              Details
+            </button>
+          </div>
+          <div className="diff-empty-copy">
+            <h4>{emptyState.title}</h4>
+            <p>{emptyState.description}</p>
+          </div>
+        </>
+      )}
       {workspace}
     </section>
   );

@@ -68,3 +68,10 @@ export interface BenchmarkViewModel {
   recordsForCase: (operator: string, dataset: string, caseId: string) => BenchmarkRecord[];
   seriesFor: (operator: string, dataset: string) => ChartSeries[];
 }
+
+export interface SimtOperatorDiff {
+  operator: string;
+  base_version: string;
+  compare_version: string;
+  patch: string;
+}

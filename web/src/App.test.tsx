@@ -8,6 +8,25 @@ beforeAll(() => {
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
     measureText: (text: string) => ({ width: text.length * 8 })
   } as CanvasRenderingContext2D);
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        operator: "softmax",
+        base_version: "dynamic-ubuf",
+        compare_version: "tiled-v2",
+        patch: `diff --git a/src/cannbench/datasets/data/softmax/custom_ops/ascend/aten_softmax/csrc/simt/spatial_softmax.asc b/src/cannbench/datasets/data/softmax/custom_ops/ascend/aten_softmax/csrc/simt/spatial_softmax.asc
+--- a/src/cannbench/datasets/data/softmax/custom_ops/ascend/aten_softmax/csrc/simt/spatial_softmax.asc
++++ b/src/cannbench/datasets/data/softmax/custom_ops/ascend/aten_softmax/csrc/simt/spatial_softmax.asc
+@@ -1,2 +1,2 @@
+-alpha
++beta
+ gamma
+`
+      })
+    }))
+  );
 });
 
 afterEach(() => {
@@ -42,7 +61,12 @@ describe("App", () => {
 
     await user.click(titleTrigger);
     expect(screen.getByRole("dialog", { name: /GPU benchmark import/i })).toBeInTheDocument();
-    expect(screen.getByText(/Upload disabled by server policy/i)).toBeInTheDocument();
+    expect(screen.getByText(/Import GPU benchmark/i)).toBeInTheDocument();
+    expect(screen.queryByText(/^Local validation required$/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      /GPU benchmark data only\. Never upload code, documents, environment details, employee IDs, or any sensitive content\. Violations are your responsibility\./i
+    );
+    expect(screen.getByRole("button", { name: /^Submit$/i })).toBeDisabled();
   });
 
   it("syncs the selected theme to document body for portaled dialogs", async () => {

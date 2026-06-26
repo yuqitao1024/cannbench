@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import difflib
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import partial
@@ -8,6 +10,7 @@ from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 
 SENSITIVE_FIELDS = {
@@ -45,6 +48,22 @@ RECORD_FIELDS = {
 
 METRIC_FIELDS = {"latency_ms_avg", "latency_ms_p50", "latency_ms_p95", "sample_count"}
 ACCURACY_FIELDS = {"passed", "max_abs_error", "max_rel_error"}
+SAFE_COMPONENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+CODE_LIKE_PATTERNS = (
+    re.compile(r"```"),
+    re.compile(r"diff --git ", re.IGNORECASE),
+    re.compile(r'#include\s*[<"]', re.IGNORECASE),
+    re.compile(r"\bTORCH_LIBRARY\b"),
+    re.compile(r"\b__global__\b"),
+    re.compile(r"\b__device__\b"),
+    re.compile(r"\b__host__\b"),
+    re.compile(r"\b__aicore__\b"),
+    re.compile(r"(^|\n)\s*(def|class|import|from)\s+[A-Za-z_]", re.MULTILINE),
+    re.compile(r"(^|\n)\s*function\s+[A-Za-z_][A-Za-z0-9_]*\s*\(", re.MULTILINE),
+    re.compile(r"=>\s*[{(A-Za-z_]"),
+    re.compile(r"(^|\n)\s*(const|let|var)\s+[A-Za-z_][A-Za-z0-9_]*\s*=", re.MULTILINE),
+    re.compile(r"(^|\n)\s*template\s*<", re.MULTILINE),
+)
 
 
 @dataclass(frozen=True)
@@ -56,12 +75,108 @@ class ValidationResult:
 
 
 @dataclass(frozen=True)
+class SimtDiffResult:
+    operator: str
+    base_version: str
+    compare_version: str
+    patch: str
+
+
+@dataclass(frozen=True)
 class ServeConfig:
     frontend_dir: Path
     published_dir: Path
     host: str = "127.0.0.1"
     port: int = 8000
     enable_gpu_upload: bool = False
+
+
+def _datasets_root() -> Path:
+    return Path(__file__).resolve().parent / "datasets" / "data"
+
+
+def _validate_component(value: str, field_name: str) -> str:
+    if not SAFE_COMPONENT_RE.fullmatch(value):
+        raise ValueError(f"{field_name} must match {SAFE_COMPONENT_RE.pattern}")
+    return value
+
+
+def _resolve_simt_operator_dir(operator: str, version: str, datasets_root: Path | None = None) -> Path:
+    safe_operator = _validate_component(operator, "operator")
+    safe_version = _validate_component(version, "version")
+    root = (datasets_root or _datasets_root()).resolve()
+    target = (root / safe_operator / "custom_ops" / "ascend" / safe_version).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("resolved diff path escapes datasets root") from exc
+    if not target.is_dir():
+        raise FileNotFoundError(f"SIMT operator directory not found: {target}")
+    return target
+
+
+def _read_text_lines(path: Path) -> list[str]:
+    return path.read_text(encoding="utf-8").splitlines()
+
+
+def _iter_version_files(version_dir: Path) -> dict[Path, Path]:
+    files: dict[Path, Path] = {}
+    for path in sorted(version_dir.rglob("*")):
+        if not path.is_file():
+            continue
+        if "__pycache__" in path.parts:
+            continue
+        files[path.relative_to(version_dir)] = path
+    return files
+
+
+def build_simt_operator_diff(
+    operator: str,
+    base_version: str,
+    compare_version: str,
+    datasets_root: Path | None = None,
+) -> SimtDiffResult:
+    base_dir = _resolve_simt_operator_dir(operator, base_version, datasets_root)
+    compare_dir = _resolve_simt_operator_dir(operator, compare_version, datasets_root)
+    base_files = _iter_version_files(base_dir)
+    compare_files = _iter_version_files(compare_dir)
+    patch_chunks: list[str] = []
+
+    logical_root = Path("src") / "cannbench" / "datasets" / "data" / operator / "custom_ops" / "ascend"
+    for relative_path in sorted(set(base_files) | set(compare_files)):
+        base_path = base_files.get(relative_path)
+        compare_path = compare_files.get(relative_path)
+        base_lines = _read_text_lines(base_path) if base_path else []
+        compare_lines = _read_text_lines(compare_path) if compare_path else []
+        if base_lines == compare_lines:
+            continue
+        logical_path = logical_root / relative_path
+        patch_lines = list(
+            difflib.unified_diff(
+                base_lines,
+                compare_lines,
+                fromfile=f"a/{logical_path.as_posix()}",
+                tofile=f"b/{logical_path.as_posix()}",
+                lineterm="",
+            )
+        )
+        if patch_lines:
+            patch_chunks.append(
+                "\n".join(
+                    [
+                        f"diff --git a/{logical_path.as_posix()} b/{logical_path.as_posix()}",
+                        *patch_lines,
+                    ]
+                )
+            )
+
+    patch = ("\n".join(patch_chunks) + "\n") if patch_chunks else ""
+    return SimtDiffResult(
+        operator=operator,
+        base_version=base_version,
+        compare_version=compare_version,
+        patch=patch,
+    )
 
 
 def _is_object(value: Any) -> bool:
@@ -79,6 +194,29 @@ def _check_sensitive_fields(value: Any, path: str, errors: list[str]) -> None:
         if str(key).lower() in SENSITIVE_FIELDS:
             errors.append(f"sensitive field rejected at {path}.{key}")
         _check_sensitive_fields(child, f"{path}.{key}", errors)
+
+
+def _is_code_like_string(value: str) -> bool:
+    if len(value) > 1600:
+        return True
+    if not re.search(r"[\n\r`#;{}<>()=]", value):
+        return False
+    return any(pattern.search(value) for pattern in CODE_LIKE_PATTERNS)
+
+
+def _check_code_like_content(value: Any, path: str, errors: list[str]) -> None:
+    if isinstance(value, str):
+        if _is_code_like_string(value):
+            errors.append(f"code-like content rejected at {path}")
+        return
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            _check_code_like_content(item, f"{path}[{index}]", errors)
+        return
+    if not _is_object(value):
+        return
+    for key, child in value.items():
+        _check_code_like_content(child, f"{path}.{key}", errors)
 
 
 def _reject_unknown_fields(value: dict[str, Any], allowed: set[str], path: str, errors: list[str]) -> None:
@@ -157,6 +295,7 @@ def validate_gpu_benchmark_upload(payload: Any) -> ValidationResult:
     errors: list[str] = []
     warnings: list[str] = []
     _check_sensitive_fields(payload, "payload", errors)
+    _check_code_like_content(payload, "payload", errors)
 
     if not _is_object(payload):
         return ValidationResult(False, 0, ("payload must be an object",), ())
@@ -200,8 +339,14 @@ class CannBenchRequestHandler(SimpleHTTPRequestHandler):
         return super().translate_path(path)
 
     def do_GET(self) -> None:
-        if self.path == "/":
+        parsed = urlsplit(self.path)
+        if parsed.path == "/api/simt-diff":
+            self._handle_simt_diff(parsed.query)
+            return
+        if parsed.path == "/":
             self.path = "/index.html"
+        else:
+            self.path = parsed.path
         super().do_GET()
 
     def do_POST(self) -> None:
@@ -235,6 +380,41 @@ class CannBenchRequestHandler(SimpleHTTPRequestHandler):
         output_path.write_text(json.dumps(payload, indent=2) + "\n")
 
         response = json.dumps({"ok": True, "path": str(output_path.relative_to(self._published_dir))}).encode()
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(response)))
+        self.end_headers()
+        self.wfile.write(response)
+
+    def _handle_simt_diff(self, query: str) -> None:
+        params = parse_qs(query, keep_blank_values=False)
+        operator = params.get("operator", [None])[0]
+        base_version = params.get("base_version", [None])[0]
+        compare_version = params.get("compare_version", [None])[0]
+        if not operator or not base_version or not compare_version:
+            self.send_error(
+                HTTPStatus.BAD_REQUEST,
+                "operator, base_version, and compare_version are required",
+            )
+            return
+
+        try:
+            diff = build_simt_operator_diff(operator, base_version, compare_version)
+        except ValueError as exc:
+            self.send_error(HTTPStatus.BAD_REQUEST, str(exc))
+            return
+        except FileNotFoundError as exc:
+            self.send_error(HTTPStatus.NOT_FOUND, str(exc))
+            return
+
+        response = json.dumps(
+            {
+                "operator": diff.operator,
+                "base_version": diff.base_version,
+                "compare_version": diff.compare_version,
+                "patch": diff.patch,
+            }
+        ).encode()
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(response)))

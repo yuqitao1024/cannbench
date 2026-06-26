@@ -4,11 +4,15 @@ import { describe, expect, it } from "vitest";
 import { GpuBenchmarkImport } from "./GpuBenchmarkImport";
 
 describe("GpuBenchmarkImport", () => {
-  it("shows upload disabled policy and local validation entry", () => {
+  it("shows local validation entry and disabled submit button", () => {
     render(<GpuBenchmarkImport uploadEnabled={false} open={true} onClose={() => undefined} />);
 
-    expect(screen.getByText(/Upload disabled by server policy/i)).toBeInTheDocument();
+    expect(screen.getByText(/Import GPU benchmark/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/Paste GPU benchmark JSON/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Submit JSON/i })).toBeDisabled();
+    expect(screen.queryByText(/^Local validation required$/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      /GPU benchmark data only\. Never upload code, documents, environment details, employee IDs, or any sensitive content\. Violations are your responsibility\./i
+    );
+    expect(screen.getByRole("button", { name: /^Submit$/i })).toBeDisabled();
   });
 });
