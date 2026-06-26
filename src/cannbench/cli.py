@@ -2,6 +2,7 @@ import argparse
 from pathlib import Path
 
 from cannbench.backends import get_backend
+from cannbench.core.batch import expand_prepared_input_plans
 from cannbench.core.config import OperatorBenchmarkRequest
 from cannbench.core.cuda_events import write_cuda_event_profile_csv
 from cannbench.core.layout import build_run_layout
@@ -51,14 +52,15 @@ def _benchmark_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--implementation", choices=["cann_ops_library", "simt"])
     parser.add_argument("--op", choices=list_operator_names())
     parser.add_argument("--dtype", default="float16")
-    parser.add_argument("--dataset", choices=["smoke", "realistic", "stress"], default="realistic")
+    parser.add_argument("--dataset", choices=["smoke", "realistic", "stress"])
     parser.add_argument("--case-id")
     parser.add_argument("--prepared-input", type=Path)
+    parser.add_argument("--prepared-dir", type=Path)
     parser.add_argument("--deploy-custom-op", action="store_true", default=False)
     parser.add_argument("--warmup", type=_non_negative_int, default=10)
     parser.add_argument("--iterations", type=_positive_int, default=1)
     parser.add_argument("--output-dir", type=Path, default=Path("results"))
-    parser.add_argument("--run-name", default="operator-benchmark")
+    parser.add_argument("--run-name")
 
 
 def _resolve_deploy_custom_op(backend: str, implementation: str | None, deploy_custom_op: bool) -> bool:
@@ -92,8 +94,10 @@ def _build_request_from_args(args: argparse.Namespace) -> OperatorBenchmarkReque
                 args.backend, getattr(args, "implementation", None), args.deploy_custom_op
             ),
         )
-    if not args.op or not args.case_id:
-        raise ValueError("--op and --case-id are required unless --prepared-input is set")
+    if not args.op:
+        raise ValueError("--op is required")
+    if not args.dataset or not args.case_id:
+        raise ValueError("--dataset and --case-id are required for single-case execution")
     return OperatorBenchmarkRequest(
         backend=args.backend,
         op=args.op,
@@ -149,16 +153,18 @@ def build_parser() -> argparse.ArgumentParser:
     collect.add_argument("--endpoint", type=Path, required=True)
     collect.add_argument("--output-dir", type=Path, required=True)
     collect.add_argument("--run-id")
+    collect.add_argument("--run-name")
     collect.add_argument("--capture-output", action="store_true", default=False)
     collect.add_argument("--profile-device-time", action="store_true", default=False)
     collect.add_argument("--summarize-profile", action="store_true", default=False)
     collect.add_argument("--implementation", choices=["cann_ops_library", "simt"])
     collect.add_argument("--op", choices=list_operator_names())
     collect.add_argument("--dtype", default="float16")
-    collect.add_argument("--dataset", choices=["smoke", "realistic", "stress"], default="realistic")
+    collect.add_argument("--dataset", choices=["smoke", "realistic", "stress"])
     collect.add_argument("--case-id")
     collect.add_argument("--seed", type=_non_negative_int, default=0)
     collect.add_argument("--prepared-input", type=Path)
+    collect.add_argument("--prepared-dir", type=Path)
     collect.add_argument("--warmup", type=_non_negative_int, default=10)
     collect.add_argument("--iterations", type=_positive_int, default=1)
     collect.add_argument("--deploy-custom-op", action="store_true", default=False)
@@ -197,17 +203,58 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _is_batch_mode(args: argparse.Namespace) -> bool:
+    if getattr(args, "prepared_dir", None) is not None:
+        return True
+    return getattr(args, "prepared_input", None) is None and getattr(args, "case_id", None) is None
+
+
+def _validate_benchmark_selection(
+    args: argparse.Namespace,
+    *,
+    allow_batch: bool,
+) -> None:
+    prepared_input = getattr(args, "prepared_input", None)
+    prepared_dir = getattr(args, "prepared_dir", None)
+    case_id = getattr(args, "case_id", None)
+    op = getattr(args, "op", None)
+
+    if prepared_input is not None and prepared_dir is not None:
+        raise ValueError("--prepared-input and --prepared-dir are mutually exclusive")
+    if (prepared_input is not None or prepared_dir is not None) and case_id is not None:
+        raise ValueError("--case-id cannot be used with --prepared-input or --prepared-dir")
+    if prepared_dir is not None and not op:
+        raise ValueError("--op is required with --prepared-dir")
+    if prepared_input is None and not op:
+        raise ValueError("--op is required unless --prepared-input is set")
+    if not allow_batch and prepared_dir is not None:
+        raise ValueError("--prepared-dir is only supported for bench and collect")
+    if allow_batch and _is_batch_mode(args) and not getattr(args, "run_name", None):
+        raise ValueError("--run-name is required for batch execution")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
     if args.command in {"bench", "operator"}:
         try:
+            _validate_benchmark_selection(args, allow_batch=args.command == "bench")
+            if args.command == "bench" and _is_batch_mode(args):
+                expand_prepared_input_plans(
+                    op=args.op,
+                    dtype=args.dtype,
+                    dataset=args.dataset,
+                    case_id=args.case_id,
+                    prepared_input=args.prepared_input,
+                    prepared_dir=args.prepared_dir,
+                )
+                parser.error("batch bench execution is not implemented yet")
             request = _build_request_from_args(args)
             backend = get_backend(args.backend)
             result = backend.run_operator(request)
             write_benchmark_outputs(
-                args.output_dir, args.run_name, result, request.output_formats
+                args.output_dir, args.run_name or "operator-benchmark", result, request.output_formats
             )
         except (RuntimeError, ValueError) as exc:
             parser.error(str(exc))
@@ -269,10 +316,22 @@ def main(argv: list[str] | None = None) -> int:
             parser.error(str(exc))
     elif args.command == "collect":
         try:
+            _validate_benchmark_selection(args, allow_batch=True)
+            if _is_batch_mode(args):
+                expand_prepared_input_plans(
+                    op=args.op,
+                    dtype=args.dtype,
+                    dataset=args.dataset,
+                    case_id=args.case_id,
+                    seed=args.seed,
+                    prepared_input=args.prepared_input,
+                    prepared_dir=args.prepared_dir,
+                )
+                parser.error("batch collect execution is not implemented yet")
             prepared_input = args.prepared_input
             if prepared_input is None:
-                if not args.op or not args.case_id:
-                    parser.error("--op and --case-id are required unless --prepared-input is set")
+                if not args.dataset or not args.case_id:
+                    parser.error("--dataset and --case-id are required for single-case execution")
                 prepared = build_prepared_operator_input(
                     op=args.op,
                     dtype=args.dtype,

@@ -204,6 +204,48 @@ def test_build_parser_exposes_collect_subcommand():
     assert args.deploy_custom_op is True
 
 
+def test_build_parser_accepts_prepared_dir_for_bench():
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "bench",
+            "--backend",
+            "nvidia",
+            "--op",
+            "softmax",
+            "--prepared-dir",
+            "prepared/softmax",
+            "--run-name",
+            "softmax-batch",
+        ]
+    )
+
+    assert args.prepared_dir == Path("prepared/softmax")
+    assert args.run_name == "softmax-batch"
+
+
+def test_build_parser_accepts_prepared_dir_for_collect():
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "collect",
+            "--endpoint",
+            "configs/ascend.json",
+            "--output-dir",
+            "results/ascend-softmax",
+            "--op",
+            "softmax",
+            "--prepared-dir",
+            "prepared/softmax",
+            "--run-name",
+            "softmax-batch",
+        ]
+    )
+
+    assert args.prepared_dir == Path("prepared/softmax")
+    assert args.run_name == "softmax-batch"
+
+
 def test_build_parser_exposes_publish_subcommand():
     parser = build_parser()
     args = parser.parse_args(
@@ -1098,6 +1140,143 @@ def test_main_rejects_negative_warmup():
                 "-1",
             ]
         )
+
+
+def test_main_rejects_batch_bench_without_run_name(tmp_path, capsys):
+    prepared_dir = tmp_path / "prepared"
+    prepared_dir.mkdir()
+
+    with pytest.raises(SystemExit) as excinfo:
+        main(
+            [
+                "bench",
+                "--backend",
+                "nvidia",
+                "--op",
+                "softmax",
+                "--prepared-dir",
+                str(prepared_dir),
+            ]
+        )
+
+    captured = capsys.readouterr()
+    assert excinfo.value.code == 2
+    assert "--run-name is required for batch execution" in captured.err
+
+
+def test_main_rejects_prepared_input_and_prepared_dir_together(tmp_path, capsys):
+    prepared_path = tmp_path / "prepared.json"
+    prepared_path.write_text("{}")
+    prepared_dir = tmp_path / "prepared"
+    prepared_dir.mkdir()
+
+    with pytest.raises(SystemExit) as excinfo:
+        main(
+            [
+                "bench",
+                "--backend",
+                "nvidia",
+                "--op",
+                "softmax",
+                "--prepared-input",
+                str(prepared_path),
+                "--prepared-dir",
+                str(prepared_dir),
+                "--run-name",
+                "softmax-batch",
+            ]
+        )
+
+    captured = capsys.readouterr()
+    assert excinfo.value.code == 2
+    assert "--prepared-input and --prepared-dir are mutually exclusive" in captured.err
+
+
+def test_main_rejects_direct_selection_without_op(capsys):
+    with pytest.raises(SystemExit) as excinfo:
+        main(
+            [
+                "bench",
+                "--backend",
+                "nvidia",
+                "--case-id",
+                "tiny_logits",
+            ]
+        )
+
+    captured = capsys.readouterr()
+    assert excinfo.value.code == 2
+    assert "--op is required unless --prepared-input is set" in captured.err
+
+
+def test_main_rejects_batch_bench_without_op(tmp_path, capsys):
+    prepared_dir = tmp_path / "prepared"
+    prepared_dir.mkdir()
+    prepared_path = prepared_dir / "tiny.json"
+    prepared_path.write_text(
+        """{
+  "schema_version": 1,
+  "op": "softmax",
+  "dtype": "float16",
+  "dataset": "smoke",
+  "seed": 7,
+  "case": {
+    "case_id": "tiny_logits",
+    "family": "lm_logits",
+    "source_kind": "synthetic_smoke",
+    "source_project": "cannbench",
+    "source_model": "smoke_fixture",
+    "source_file": "built-in",
+    "source_op": "softmax",
+    "payload": {
+      "dimensions": [32, 128],
+      "dim": -1
+    }
+  }
+}
+"""
+    )
+
+    with pytest.raises(SystemExit) as excinfo:
+        main(
+            [
+                "bench",
+                "--backend",
+                "nvidia",
+                "--prepared-dir",
+                str(prepared_dir),
+                "--run-name",
+                "softmax-batch",
+            ]
+        )
+
+    captured = capsys.readouterr()
+    assert excinfo.value.code == 2
+    assert "--op is required with --prepared-dir" in captured.err
+
+
+def test_main_rejects_operator_prepared_dir(tmp_path, capsys):
+    prepared_dir = tmp_path / "prepared"
+    prepared_dir.mkdir()
+
+    with pytest.raises(SystemExit) as excinfo:
+        main(
+            [
+                "operator",
+                "--backend",
+                "nvidia",
+                "--op",
+                "softmax",
+                "--prepared-dir",
+                str(prepared_dir),
+                "--run-name",
+                "softmax-batch",
+            ]
+        )
+
+    captured = capsys.readouterr()
+    assert excinfo.value.code == 2
+    assert "--prepared-dir is only supported for bench and collect" in captured.err
 
 
 def test_main_converts_backend_runtime_failure_to_cli_error(monkeypatch, capsys):
