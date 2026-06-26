@@ -81,6 +81,23 @@ describe("CudaTreasureMapModal", () => {
     expect(within(focusedTooltip).getByText(/^Guide:\s*10\.2\.1$/i)).toBeInTheDocument();
   });
 
+  it("lets hover override a previously clicked node focus", async () => {
+    const user = userEvent.setup();
+
+    render(<CudaTreasureMapModal open={true} onClose={() => undefined} />);
+
+    const fixGlobalAccessNode = screen.getByRole("button", { name: /Fix Global Access/i });
+    const targetGpuBuildNode = screen.getByRole("button", { name: /Target GPU build/i });
+
+    await user.click(fixGlobalAccessNode);
+    expect(screen.getByRole("tooltip")).toHaveTextContent(/Fix Global Access/i);
+
+    await user.hover(targetGpuBuildNode);
+
+    expect(screen.getByRole("tooltip")).toHaveTextContent(/Target GPU build/i);
+    expect(targetGpuBuildNode).toHaveAttribute("aria-describedby", screen.getByRole("tooltip").id);
+  });
+
   it("closes on Escape and backdrop click but not on dialog clicks", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();

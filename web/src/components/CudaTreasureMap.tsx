@@ -35,7 +35,7 @@ export function CudaTreasureMap({ route, mainRouteOrder }: CudaTreasureMapProps)
 
     return { node, parentNode };
   });
-  const activeNodeId = focusedNodeId ?? hoveredNodeId;
+  const activeNodeId = hoveredNodeId ?? focusedNodeId;
   const activeNode = activeNodeId ? nodesById.get(activeNodeId) ?? null : null;
 
   return (
@@ -97,6 +97,7 @@ export function CudaTreasureMap({ route, mainRouteOrder }: CudaTreasureMapProps)
                 zIndex: activeNode?.id === node.id ? 2 : 1
               }}
               aria-describedby={activeNode?.id === node.id ? tooltipId : undefined}
+              onClick={() => setFocusedNodeId(node.id)}
               onMouseEnter={() => setHoveredNodeId(node.id)}
               onMouseLeave={() => setHoveredNodeId((current) => (current === node.id ? null : current))}
               onFocus={() => setFocusedNodeId(node.id)}
@@ -112,13 +113,7 @@ export function CudaTreasureMap({ route, mainRouteOrder }: CudaTreasureMapProps)
             id={`${tooltipIdPrefix}-${activeNode.id}`}
             role="tooltip"
             className="cuda-treasure-map__field-note"
-            style={{
-              position: "absolute",
-              left: `min(calc(${activeNode.x}% + 1rem), calc(100% - 18rem))`,
-              top: `min(calc(${activeNode.y}% + 1rem), calc(100% - 12rem))`,
-              maxWidth: "16rem",
-              zIndex: 3
-            }}
+            style={{ zIndex: 3 }}
           >
             <p className="cuda-treasure-map__field-note-kicker">Field note</p>
             <h3 className="cuda-treasure-map__field-note-title">{activeNode.label}</h3>

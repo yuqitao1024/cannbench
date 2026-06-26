@@ -1416,7 +1416,11 @@ body[data-theme="light"] .upload-panel {
 }
 
 .cuda-treasure-map__field-note {
+  position: absolute;
+  right: 1rem;
+  bottom: 1rem;
   width: min(16rem, calc(100% - 2rem));
+  max-height: min(18rem, calc(100% - 2rem));
   padding: 1rem 1rem 1.05rem;
   border: 1px solid color-mix(in srgb, var(--treasure-accent) 28%, transparent);
   border-radius: 20px;
@@ -1428,6 +1432,7 @@ body[data-theme="light"] .upload-panel {
     0 18px 40px rgba(0, 0, 0, 0.42),
     0 0 0 1px rgba(250, 189, 47, 0.08);
   backdrop-filter: blur(10px);
+  overflow: auto;
 }
 
 .cuda-treasure-map__field-note-kicker,
