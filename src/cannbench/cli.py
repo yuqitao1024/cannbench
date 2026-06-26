@@ -1,4 +1,6 @@
 import argparse
+import shutil
+import tempfile
 from pathlib import Path
 
 from cannbench.backends import get_backend
@@ -29,7 +31,7 @@ from cannbench.core.prepared_input import (
     read_prepared_operator_input,
     write_prepared_operator_input,
 )
-from cannbench.core.remote import collect_remote_artifacts
+from cannbench.core.remote import collect_remote_artifacts, read_remote_endpoint
 from cannbench.core.report import write_local_report
 from cannbench.core.output import (
     build_benchmark_artifact_stem,
@@ -274,11 +276,6 @@ def _prepared_reference_for_plan(
     layout_root: Path,
     plan,
 ) -> tuple[Path, str]:
-    if plan.source_path is not None:
-        if getattr(args, "prepared_dir", None) is not None:
-            return plan.source_path, plan.source_path.name
-        return plan.source_path, plan.source_path.name
-
     prepared_path = _prepared_manifest_path(
         prepared_dir,
         plan.op,
@@ -287,7 +284,11 @@ def _prepared_reference_for_plan(
         plan.dtype,
         plan.seed,
     )
-    write_prepared_operator_input(prepared_path, plan.prepared)
+    if plan.source_path is not None:
+        prepared_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(plan.source_path, prepared_path)
+    else:
+        write_prepared_operator_input(prepared_path, plan.prepared)
     return prepared_path, _relative_artifact_path(layout_root, prepared_path) or prepared_path.name
 
 
@@ -326,6 +327,53 @@ def _validate_unique_batch_artifact_stems(plans: list) -> None:
         seen[stem] = plan_ref
 
 
+def _copy_directory_contents(source_dir: Path, dest_dir: Path) -> None:
+    if not source_dir.is_dir():
+        return
+    shutil.copytree(source_dir, dest_dir, dirs_exist_ok=True)
+
+
+def _copy_batch_collect_perf_artifacts(
+    source_dir: Path,
+    dest_dir: Path,
+    artifact_stem: str,
+) -> Path | None:
+    if not source_dir.is_dir():
+        return None
+
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    preferred_result_path: Path | None = None
+    copied_any = False
+
+    for source_path in sorted(source_dir.iterdir()):
+        if not source_path.is_file():
+            continue
+        if source_path.name.startswith("benchmark."):
+            dest_path = dest_dir / f"{artifact_stem}{source_path.suffix}"
+        else:
+            dest_path = dest_dir / f"{artifact_stem}-{source_path.name}"
+        shutil.copy2(source_path, dest_path)
+        copied_any = True
+        if source_path.suffix == ".json":
+            preferred_result_path = dest_path
+        elif preferred_result_path is None:
+            preferred_result_path = dest_path
+
+    if not copied_any:
+        return None
+    return preferred_result_path
+
+
+def _prepare_batch_run_layout(output_dir: Path, run_name: str):
+    layout = build_run_layout(output_dir, run_name)
+    if layout.root.exists() and any(layout.root.iterdir()):
+        raise ValueError(
+            f"batch run directory already exists and is not empty: {layout.root}"
+        )
+    layout.root.mkdir(parents=True, exist_ok=True)
+    return layout
+
+
 def _run_batch_bench(args: argparse.Namespace) -> None:
     plans = expand_prepared_input_plans(
         op=args.op,
@@ -336,7 +384,7 @@ def _run_batch_bench(args: argparse.Namespace) -> None:
         prepared_dir=args.prepared_dir,
     )
     _validate_unique_batch_artifact_stems(plans)
-    layout = build_run_layout(args.output_dir, args.run_name)
+    layout = _prepare_batch_run_layout(args.output_dir, args.run_name)
     backend = get_backend(args.backend)
     summary_rows: list[BatchResultRecord] = []
     failure_rows: list[BatchFailureRecord] = []
@@ -414,6 +462,130 @@ def _run_batch_bench(args: argparse.Namespace) -> None:
     if failure_rows:
         raise RuntimeError(
             f"batch bench completed with {len(failure_rows)} failures; see {failures_path}"
+        )
+
+
+def _run_batch_collect(args: argparse.Namespace) -> None:
+    if not args.capture_output and not args.profile_device_time:
+        raise ValueError("collect requires --capture-output or --profile-device-time")
+    plans = expand_prepared_input_plans(
+        op=args.op,
+        dtype=args.dtype,
+        dataset=args.dataset,
+        case_id=args.case_id,
+        seed=args.seed,
+        prepared_input=args.prepared_input,
+        prepared_dir=args.prepared_dir,
+    )
+    _validate_unique_batch_artifact_stems(plans)
+    layout = _prepare_batch_run_layout(args.output_dir, args.run_name)
+    endpoint = read_remote_endpoint(args.endpoint)
+    summary_rows: list[BatchResultRecord] = []
+    failure_rows: list[BatchFailureRecord] = []
+    remote_parent_run_id = args.run_id or args.run_name
+
+    for plan in plans:
+        prepared_path, prepared_reference = _prepared_reference_for_plan(
+            args, layout.prepared_dir, layout.root, plan
+        )
+        artifact_stem = build_benchmark_artifact_stem(
+            op=plan.op,
+            dataset=plan.dataset,
+            case_id=plan.case_id,
+            dtype=plan.dtype,
+            seed=plan.seed,
+        )
+        remote_run_id = f"{remote_parent_run_id}/{artifact_stem}"
+        try:
+            with tempfile.TemporaryDirectory(prefix=f"{artifact_stem}-", dir=layout.root) as temp_dir_name:
+                temp_dir = Path(temp_dir_name)
+                collect_remote_artifacts(
+                    endpoint=endpoint,
+                    prepared_input=prepared_path,
+                    output_dir=temp_dir,
+                    run_id=remote_run_id,
+                    capture_output=args.capture_output,
+                    profile_device_time=args.profile_device_time,
+                    summarize_profile=args.summarize_profile,
+                    warmup=args.warmup,
+                    iterations=args.iterations,
+                    deploy_custom_op=_resolve_deploy_custom_op(
+                        endpoint.backend, args.implementation, args.deploy_custom_op
+                    ),
+                )
+
+                if args.capture_output:
+                    _copy_directory_contents(temp_dir / "output", layout.output_dir / artifact_stem)
+
+                if args.profile_device_time and layout.profile_dir is not None:
+                    profile_dest = layout.profile_dir / artifact_stem
+                    _copy_directory_contents(temp_dir / "profile", profile_dest)
+                    profile_summary = temp_dir / "profile-summary.json"
+                    if profile_summary.exists():
+                        profile_dest.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(profile_summary, profile_dest / "profile-summary.json")
+
+                result_path = _copy_batch_collect_perf_artifacts(
+                    temp_dir / "perf",
+                    layout.perf_dir,
+                    artifact_stem,
+                )
+                if args.profile_device_time and result_path is None:
+                    raise RuntimeError(
+                        f"missing perf artifacts for profiled collect case {artifact_stem}"
+                    )
+
+            summary_rows.append(
+                BatchResultRecord(
+                    op=plan.op,
+                    dataset=plan.dataset,
+                    case_id=plan.case_id,
+                    dtype=plan.dtype,
+                    seed=plan.seed,
+                    status="ok",
+                    prepared_input=prepared_reference,
+                    result_path=_relative_artifact_path(layout.root, result_path),
+                )
+            )
+        except Exception as exc:
+            summary_rows.append(
+                BatchResultRecord(
+                    op=plan.op,
+                    dataset=plan.dataset,
+                    case_id=plan.case_id,
+                    dtype=plan.dtype,
+                    seed=plan.seed,
+                    status="failed",
+                    prepared_input=prepared_reference,
+                    result_path=None,
+                )
+            )
+            failure_rows.append(
+                BatchFailureRecord(
+                    op=plan.op,
+                    dataset=plan.dataset,
+                    case_id=plan.case_id,
+                    dtype=plan.dtype,
+                    seed=plan.seed,
+                    prepared_input=prepared_reference,
+                    error=str(exc),
+                )
+            )
+
+    metadata = BatchSummaryMetadata(
+        backend=endpoint.backend,
+        run_name=args.run_name,
+        implementation=getattr(args, "implementation", None),
+        total_cases=len(summary_rows),
+        success_count=sum(1 for row in summary_rows if row.status == "ok"),
+        failure_count=len(failure_rows),
+    )
+    write_batch_summary_json(layout.meta_dir / "summary.json", summary_rows, metadata)
+    write_batch_summary_csv(layout.meta_dir / "summary.csv", summary_rows)
+    failures_path = write_batch_failures_json(layout.meta_dir / "failures.json", failure_rows, metadata)
+    if failure_rows:
+        raise RuntimeError(
+            f"batch collect completed with {len(failure_rows)} failures; see {failures_path}"
         )
 
 
@@ -495,16 +667,8 @@ def main(argv: list[str] | None = None) -> int:
         try:
             _validate_benchmark_selection(args, allow_batch=True)
             if _is_batch_mode(args):
-                expand_prepared_input_plans(
-                    op=args.op,
-                    dtype=args.dtype,
-                    dataset=args.dataset,
-                    case_id=args.case_id,
-                    seed=args.seed,
-                    prepared_input=args.prepared_input,
-                    prepared_dir=args.prepared_dir,
-                )
-                parser.error("batch collect execution is not implemented yet")
+                _run_batch_collect(args)
+                return 0
             prepared_input = args.prepared_input
             if prepared_input is None:
                 if not args.dataset or not args.case_id:

@@ -153,7 +153,7 @@ Prepared inputs are generated with `dtype=float16` and `seed=7` by default. This
 
 ### Unified CLI
 
-Use `bench` for direct local execution:
+Use `bench` for a single local case:
 
 ```bash
 cannbench bench \
@@ -166,7 +166,19 @@ cannbench bench \
   --iterations 1
 ```
 
-Use `collect` for remote execution. It can either consume an existing prepared input or generate one automatically from `op/dataset/case-id/dtype/seed` before uploading it to the remote host:
+Use `bench` without `--dataset` or `--case-id` to expand the full built-in dataset set for one operator. The default expansion covers `smoke`, `realistic`, and `stress`, and writes one batch run directory with per-case artifacts plus `summary.json`, `summary.csv`, and `failures.json`:
+
+```bash
+cannbench bench \
+  --backend nvidia \
+  --op softmax \
+  --output-dir runs \
+  --run-name h800-softmax-all \
+  --warmup 10 \
+  --iterations 1
+```
+
+Use `collect` for remote single-case execution. It can either consume an existing prepared input or generate one automatically from `op/dataset/case-id/dtype/seed` before uploading it to the remote host:
 
 ```bash
 cannbench collect \
@@ -176,6 +188,18 @@ cannbench collect \
   --dataset realistic \
   --case-id t5_attention \
   --output-dir runs/h800-softmax-realistic \
+  --profile-device-time
+```
+
+Use `collect --prepared-dir` for remote batch execution over a prepared manifest set. The command preserves the prepared manifests under the batch run, stores per-case outputs in stable local paths, and emits the same batch summary artifacts as local `bench`:
+
+```bash
+cannbench collect \
+  --endpoint configs/ascend.json \
+  --op softmax \
+  --prepared-dir prepared/softmax/realistic \
+  --output-dir runs \
+  --run-name ascend-softmax-realistic \
   --profile-device-time
 ```
 

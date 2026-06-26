@@ -9,6 +9,7 @@ from cannbench.cli import build_parser, main
 from cannbench.core.layout import build_run_layout
 from cannbench.core.cuda_events import CudaEventProfileResult
 from cannbench.core.operator_output import CapturedOperatorOutput, OutputComparisonResult
+from cannbench.core.remote import RemoteEndpoint
 from cannbench.core.result import (
     OperatorBenchmarkResult,
     OperatorCase,
@@ -855,6 +856,323 @@ def test_main_collect_builds_prepared_input_when_case_is_provided(tmp_path, monk
     assert written_path.suffix == ".json"
     assert written_prepared is built
     assert captured["prepared_input"] == written_path
+
+
+def test_main_runs_batch_collect_and_writes_aggregated_artifacts(tmp_path, monkeypatch):
+    endpoint = RemoteEndpoint(
+        name="ascend-a2",
+        backend="ascend",
+        host="user@ascend-host",
+        workdir="/opt/cannbench",
+        python="python3",
+        env={},
+    )
+    prepared_dir = tmp_path / "prepared"
+    prepared_dir.mkdir()
+    output_dir = tmp_path / "results"
+    alpha = build_prepared_operator_input(
+        op="softmax",
+        dtype="float16",
+        dataset="smoke",
+        case_id="tiny_logits",
+        seed=1,
+    )
+    beta = build_prepared_operator_input(
+        op="softmax",
+        dtype="float16",
+        dataset="stress",
+        case_id="wide_vocab_lm_logits",
+        seed=2,
+    )
+    write_prepared_operator_input(prepared_dir / "a.json", alpha)
+    write_prepared_operator_input(prepared_dir / "b.json", beta)
+
+    captured_calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr("cannbench.cli.read_remote_endpoint", lambda path: endpoint)
+
+    def fake_collect_remote_artifacts(**kwargs):
+        captured_calls.append(kwargs)
+        case_output_dir = kwargs["output_dir"]
+        (case_output_dir / "output").mkdir(parents=True)
+        (case_output_dir / "output" / "tensor.json").write_text("{}")
+        (case_output_dir / "profile").mkdir(parents=True)
+        (case_output_dir / "profile" / "op_summary.csv").write_text(
+            "Op Name,Task Duration(us)\nsoftmax,1000\n"
+        )
+        (case_output_dir / "profile-summary.json").write_text("{}")
+        (case_output_dir / "perf").mkdir(parents=True)
+        (case_output_dir / "perf" / "benchmark.json").write_text(
+            json.dumps({"status": "ok"}) + "\n"
+        )
+        (case_output_dir / "perf" / "benchmark.csv").write_text("header\nvalue\n")
+
+    monkeypatch.setattr(
+        "cannbench.cli.collect_remote_artifacts", fake_collect_remote_artifacts
+    )
+
+    exit_code = main(
+        [
+            "collect",
+            "--endpoint",
+            str(tmp_path / "ascend.json"),
+            "--output-dir",
+            str(output_dir),
+            "--run-id",
+            "remote-root",
+            "--run-name",
+            "softmax-remote-batch",
+            "--op",
+            "softmax",
+            "--prepared-dir",
+            str(prepared_dir),
+            "--capture-output",
+            "--profile-device-time",
+            "--summarize-profile",
+            "--implementation",
+            "simt",
+        ]
+    )
+
+    layout = build_run_layout(output_dir, "softmax-remote-batch")
+    summary = json.loads((layout.meta_dir / "summary.json").read_text())
+    failures = json.loads((layout.meta_dir / "failures.json").read_text())
+
+    assert exit_code == 0
+    assert [call["run_id"] for call in captured_calls] == [
+        "remote-root/softmax-smoke-tiny_logits-float16-seed1",
+        "remote-root/softmax-stress-wide_vocab_lm_logits-float16-seed2",
+    ]
+    assert all(call["endpoint"] == endpoint for call in captured_calls)
+    assert all(call["deploy_custom_op"] is True for call in captured_calls)
+    assert all(Path(call["prepared_input"]).is_relative_to(layout.prepared_dir) for call in captured_calls)
+    assert (layout.prepared_dir / "softmax" / "smoke" / "tiny_logits-float16-seed1.json").exists()
+    assert (layout.prepared_dir / "softmax" / "stress" / "wide_vocab_lm_logits-float16-seed2.json").exists()
+    assert (layout.perf_dir / "softmax-smoke-tiny_logits-float16-seed1.json").exists()
+    assert (layout.perf_dir / "softmax-stress-wide_vocab_lm_logits-float16-seed2.csv").exists()
+    assert (layout.output_dir / "softmax-smoke-tiny_logits-float16-seed1" / "tensor.json").exists()
+    assert (layout.profile_dir / "softmax-smoke-tiny_logits-float16-seed1" / "op_summary.csv").exists()
+    assert (layout.profile_dir / "softmax-smoke-tiny_logits-float16-seed1" / "profile-summary.json").exists()
+    assert summary["metadata"] == {
+        "backend": "ascend",
+        "run_name": "softmax-remote-batch",
+        "implementation": "simt",
+        "total_cases": 2,
+        "success_count": 2,
+        "failure_count": 0,
+    }
+    assert [row["status"] for row in summary["results"]] == ["ok", "ok"]
+    assert summary["results"][0]["prepared_input"] == "prepared/softmax/smoke/tiny_logits-float16-seed1.json"
+    assert summary["results"][0]["result_path"] == "perf/softmax-smoke-tiny_logits-float16-seed1.json"
+    assert failures["failure_count"] == 0
+
+
+def test_main_batch_collect_records_failures_and_continues(tmp_path, monkeypatch, capsys):
+    endpoint = RemoteEndpoint(
+        name="ascend-a2",
+        backend="ascend",
+        host="user@ascend-host",
+        workdir="/opt/cannbench",
+        python="python3",
+        env={},
+    )
+    prepared_dir = tmp_path / "prepared"
+    prepared_dir.mkdir()
+    output_dir = tmp_path / "results"
+    alpha = build_prepared_operator_input(
+        op="softmax",
+        dtype="float16",
+        dataset="smoke",
+        case_id="tiny_logits",
+        seed=1,
+    )
+    beta = build_prepared_operator_input(
+        op="softmax",
+        dtype="float16",
+        dataset="stress",
+        case_id="wide_vocab_lm_logits",
+        seed=2,
+    )
+    write_prepared_operator_input(prepared_dir / "a.json", alpha)
+    write_prepared_operator_input(prepared_dir / "b.json", beta)
+
+    run_ids: list[str] = []
+
+    monkeypatch.setattr("cannbench.cli.read_remote_endpoint", lambda path: endpoint)
+
+    def fake_collect_remote_artifacts(**kwargs):
+        run_ids.append(kwargs["run_id"])
+        prepared_input = kwargs["prepared_input"]
+        if prepared_input.name == "tiny_logits-float16-seed1.json":
+            raise TimeoutError("ssh timeout")
+        case_output_dir = kwargs["output_dir"]
+        (case_output_dir / "perf").mkdir(parents=True)
+        (case_output_dir / "perf" / "benchmark.json").write_text(
+            json.dumps({"status": "ok"}) + "\n"
+        )
+
+    monkeypatch.setattr(
+        "cannbench.cli.collect_remote_artifacts", fake_collect_remote_artifacts
+    )
+
+    with pytest.raises(SystemExit) as excinfo:
+        main(
+            [
+                "collect",
+                "--endpoint",
+                str(tmp_path / "ascend.json"),
+                "--output-dir",
+                str(output_dir),
+                "--run-name",
+                "softmax-remote-batch",
+                "--op",
+                "softmax",
+                "--prepared-dir",
+                str(prepared_dir),
+                "--profile-device-time",
+            ]
+        )
+
+    layout = build_run_layout(output_dir, "softmax-remote-batch")
+    summary = json.loads((layout.meta_dir / "summary.json").read_text())
+    failures = json.loads((layout.meta_dir / "failures.json").read_text())
+    captured = capsys.readouterr()
+
+    assert excinfo.value.code == 2
+    assert run_ids == [
+        "softmax-remote-batch/softmax-smoke-tiny_logits-float16-seed1",
+        "softmax-remote-batch/softmax-stress-wide_vocab_lm_logits-float16-seed2",
+    ]
+    assert [row["status"] for row in summary["results"]] == ["failed", "ok"]
+    assert failures["failure_count"] == 1
+    assert failures["failures"][0]["case_id"] == "tiny_logits"
+    assert failures["failures"][0]["error"] == "ssh timeout"
+    assert "batch collect completed with 1 failures" in captured.err
+
+
+def test_main_rejects_batch_collect_without_collection_mode(tmp_path, capsys):
+    prepared_dir = tmp_path / "prepared"
+    prepared_dir.mkdir()
+
+    with pytest.raises(SystemExit) as excinfo:
+        main(
+            [
+                "collect",
+                "--endpoint",
+                str(tmp_path / "ascend.json"),
+                "--output-dir",
+                str(tmp_path / "results"),
+                "--run-name",
+                "softmax-remote-batch",
+                "--op",
+                "softmax",
+                "--prepared-dir",
+                str(prepared_dir),
+            ]
+        )
+
+    captured = capsys.readouterr()
+    assert excinfo.value.code == 2
+    assert "collect requires --capture-output or --profile-device-time" in captured.err
+
+
+def test_main_runs_batch_collect_from_selection_expansion(tmp_path, monkeypatch):
+    endpoint = RemoteEndpoint(
+        name="ascend-a2",
+        backend="ascend",
+        host="user@ascend-host",
+        workdir="/opt/cannbench",
+        python="python3",
+        env={},
+    )
+    output_dir = tmp_path / "results"
+    collected_prepared: list[Path] = []
+
+    monkeypatch.setattr("cannbench.cli.read_remote_endpoint", lambda path: endpoint)
+
+    def fake_collect_remote_artifacts(**kwargs):
+        collected_prepared.append(kwargs["prepared_input"])
+        case_output_dir = kwargs["output_dir"]
+        (case_output_dir / "perf").mkdir(parents=True)
+        (case_output_dir / "perf" / "benchmark.json").write_text(
+            json.dumps({"status": "ok"}) + "\n"
+        )
+
+    monkeypatch.setattr(
+        "cannbench.cli.collect_remote_artifacts", fake_collect_remote_artifacts
+    )
+
+    exit_code = main(
+        [
+            "collect",
+            "--endpoint",
+            str(tmp_path / "ascend.json"),
+            "--output-dir",
+            str(output_dir),
+            "--run-name",
+            "softmax-smoke-batch",
+            "--op",
+            "softmax",
+            "--dataset",
+            "smoke",
+            "--profile-device-time",
+        ]
+    )
+
+    layout = build_run_layout(output_dir, "softmax-smoke-batch")
+
+    assert exit_code == 0
+    assert collected_prepared
+    assert all(path.is_relative_to(layout.prepared_dir) for path in collected_prepared)
+    assert (layout.prepared_dir / "softmax" / "smoke" / "tiny_logits-float16-seed0.json").exists()
+
+
+def test_main_rejects_batch_collect_when_run_directory_exists(tmp_path, monkeypatch, capsys):
+    endpoint = RemoteEndpoint(
+        name="ascend-a2",
+        backend="ascend",
+        host="user@ascend-host",
+        workdir="/opt/cannbench",
+        python="python3",
+        env={},
+    )
+    prepared_dir = tmp_path / "prepared"
+    prepared_dir.mkdir()
+    prepared = build_prepared_operator_input(
+        op="softmax",
+        dtype="float16",
+        dataset="smoke",
+        case_id="tiny_logits",
+        seed=1,
+    )
+    write_prepared_operator_input(prepared_dir / "a.json", prepared)
+    layout = build_run_layout(tmp_path / "results", "softmax-remote-batch")
+    layout.root.mkdir(parents=True)
+    (layout.root / "stale.txt").write_text("stale")
+
+    monkeypatch.setattr("cannbench.cli.read_remote_endpoint", lambda path: endpoint)
+
+    with pytest.raises(SystemExit) as excinfo:
+        main(
+            [
+                "collect",
+                "--endpoint",
+                str(tmp_path / "ascend.json"),
+                "--output-dir",
+                str(tmp_path / "results"),
+                "--run-name",
+                "softmax-remote-batch",
+                "--op",
+                "softmax",
+                "--prepared-dir",
+                str(prepared_dir),
+                "--profile-device-time",
+            ]
+        )
+
+    captured = capsys.readouterr()
+    assert excinfo.value.code == 2
+    assert "batch run directory already exists and is not empty" in captured.err
 
 
 def test_main_report_writes_local_report(tmp_path, monkeypatch):
