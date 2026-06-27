@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
@@ -32,6 +32,7 @@ afterEach(() => {
 });
 
 beforeEach(() => {
+  vi.clearAllMocks();
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date(2024, 0, 1, 12, 0, 0));
 });
@@ -104,6 +105,16 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: /Toggle light and dark theme/i }));
 
     expect(document.body.dataset.theme).toBe(appShell.dataset.theme);
+  });
+
+  it("does not render the diff card when the selected operator has only one simt version", async () => {
+    const fetchSpy = vi.mocked(fetch);
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.queryByLabelText(/simt operator diff/i)).not.toBeInTheDocument();
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("resets the hidden click streak when the theme changes", async () => {

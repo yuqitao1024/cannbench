@@ -51,6 +51,7 @@ export function App() {
       )
     )
   ].sort();
+  const showDiffPanel = simtVersions.length > 1;
   const series = viewModel.seriesFor(selectedOperator, selectedDataset);
 
   useEffect(() => {
@@ -169,7 +170,7 @@ export function App() {
           <KernelTraceRail records={selectedCaseRecords} />
           <BenchmarkChart series={series} caseIds={cases.map((item) => item.caseId)} />
           <CaseTable cases={cases} selectedCaseId={selectedCaseId} onSelectCase={setSelectedCaseId} />
-          <CodeDiffPanel operator={selectedOperator} />
+          {showDiffPanel ? <CodeDiffPanel operator={selectedOperator} /> : null}
         </section>
       </div>
       <GpuBenchmarkImport uploadEnabled={false} open={importOpen} onClose={() => setImportOpen(false)} />
