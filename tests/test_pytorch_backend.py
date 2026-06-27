@@ -1,4 +1,5 @@
 import builtins
+import subprocess
 import sys
 from types import SimpleNamespace
 
@@ -6,6 +7,7 @@ import pytest
 
 from cannbench.backends import get_backend
 from cannbench.core.config import OperatorBenchmarkRequest
+from cannbench.core.profile import LocalDeviceProfileResult
 
 
 def test_get_backend_returns_nvidia_backend():
@@ -417,6 +419,120 @@ def test_backend_captures_softmax_output_once(monkeypatch):
     assert captured["moved_to_cpu"] is True
     assert captured["output_dtype"] == "float32"
     assert captured["synchronized"] is True
+
+
+def test_nvidia_backend_profiles_softmax_with_ncu(monkeypatch, tmp_path):
+    captured: dict[str, object] = {}
+
+    class FakeTensor:
+        def reshape(self, shape):
+            captured["shape"] = shape
+            return self
+
+    class FakeTorch:
+        def __init__(self) -> None:
+            self.cuda = SimpleNamespace(
+                is_available=lambda: True,
+                synchronize=lambda: None,
+                get_device_name=lambda device: "Fake GPU",
+            )
+            self.device = lambda kind: kind
+            self.float16 = "float16"
+            self.tensor = self._tensor
+            self.softmax = lambda tensor, dim: tensor
+
+        def _tensor(self, values, device=None, dtype=None):
+            captured["device"] = device
+            captured["dtype"] = dtype
+            return FakeTensor()
+
+    monkeypatch.setitem(sys.modules, "torch", FakeTorch())
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        captured["cwd"] = kwargs.get("cwd")
+        profile_dir = captured["cwd"] / "profile"
+        profile_dir.mkdir(parents=True, exist_ok=True)
+        (profile_dir / "ncu.csv").write_text(
+            "Kernel Name,Metric Name,Metric Unit,Metric Value\n"
+            "softmax,gpu__time_duration.sum,nsecond,1000000\n",
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+
+    from cannbench.backends.pytorch_backend import NvidiaBackend
+
+    backend = NvidiaBackend()
+    request = OperatorBenchmarkRequest(
+        backend="nvidia",
+        op="softmax",
+        dtype="float16",
+        dataset="smoke",
+        case_id="tiny_logits",
+        warmup=2,
+        iterations=1,
+        seed=7,
+    )
+
+    result = backend.profile_operator_device_time(request)
+
+    assert isinstance(result, LocalDeviceProfileResult)
+    assert result.benchmark_result.device_name == "Fake GPU"
+    assert result.profile_summary.backend == "nvidia"
+    assert result.profile_summary.source_files == ("ncu.csv",)
+    assert result.profile_artifacts[0][0] == "ncu.csv"
+    command = captured["command"]
+    assert command[0] == "ncu"
+    assert "--csv" in command
+
+
+def test_nvidia_backend_profile_raises_when_ncu_fails(monkeypatch):
+    class FakeTensor:
+        def reshape(self, shape):
+            del shape
+            return self
+
+    class FakeTorch:
+        def __init__(self) -> None:
+            self.cuda = SimpleNamespace(
+                is_available=lambda: True,
+                synchronize=lambda: None,
+                get_device_name=lambda device: "Fake GPU",
+            )
+            self.device = lambda kind: kind
+            self.float16 = "float16"
+            self.tensor = lambda values, device=None, dtype=None: FakeTensor()
+            self.softmax = lambda tensor, dim: tensor
+
+    monkeypatch.setitem(sys.modules, "torch", FakeTorch())
+    monkeypatch.setattr(
+        "subprocess.run",
+        lambda command, **kwargs: subprocess.CompletedProcess(
+            command,
+            1,
+            "",
+            "ncu failed",
+        ),
+    )
+
+    from cannbench.backends.pytorch_backend import NvidiaBackend
+
+    backend = NvidiaBackend()
+    request = OperatorBenchmarkRequest(
+        backend="nvidia",
+        op="softmax",
+        dtype="float16",
+        dataset="smoke",
+        case_id="tiny_logits",
+        warmup=2,
+        iterations=1,
+        seed=7,
+    )
+
+    with pytest.raises(RuntimeError, match="ncu profiling failed"):
+        backend.profile_operator_device_time(request)
 
 
 def test_backend_runs_embedding_with_materialized_inputs(monkeypatch):

@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import importlib
+import tempfile
 import subprocess
 from importlib.resources import as_file, files
 from pathlib import Path
 
 from cannbench.backends.torch_backend_base import TorchOperatorBackend
 from cannbench.core.config import OperatorBenchmarkRequest
+from cannbench.core.prepared_input import build_prepared_operator_input, write_prepared_operator_input
+from cannbench.core.profile import LocalDeviceProfileResult, read_device_profile
+from cannbench.core.result import OperatorBenchmarkResult, OperatorCase
 
 _ASCEND_CUSTOM_OP_MODULES = {
     "softmax": "aten_softmax",
@@ -19,6 +23,98 @@ class NvidiaBackend(TorchOperatorBackend):
 
     def _availability_error(self) -> str:
         return "CUDA is required for the nvidia backend"
+
+    def profile_operator_device_time(
+        self, request: OperatorBenchmarkRequest
+    ) -> LocalDeviceProfileResult:
+        self.validate_request(request)
+        self._before_run_operator(request)
+        torch = self._torch_module()
+        if not self._is_available(torch):
+            raise RuntimeError(self._availability_error())
+
+        prepared = build_prepared_operator_input(
+            op=request.op,
+            dtype=request.dtype,
+            dataset=request.dataset,
+            case_id=request.case_id,
+            seed=request.seed,
+        )
+        with tempfile.TemporaryDirectory(prefix="cannbench-ncu-") as temp_dir_name:
+            temp_dir = Path(temp_dir_name)
+            prepared_path = temp_dir / "prepared.json"
+            profile_dir = temp_dir / "profile"
+            perf_dir = temp_dir / "perf"
+            write_prepared_operator_input(prepared_path, prepared)
+            command = [
+                "ncu",
+                "--target-processes",
+                "all",
+                "--force-overwrite",
+                "--csv",
+                "--log-file",
+                str(profile_dir / "ncu.csv"),
+                "--export",
+                str(profile_dir / "ncu-report"),
+                "python3",
+                "-m",
+                "cannbench",
+                "operator",
+                "--backend",
+                "nvidia",
+                "--prepared-input",
+                str(prepared_path),
+                "--warmup",
+                str(request.warmup),
+                "--iterations",
+                str(request.iterations),
+                "--output-dir",
+                str(perf_dir),
+                "--run-name",
+                "benchmark",
+            ]
+            result = subprocess.run(
+                command,
+                cwd=temp_dir,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"ncu profiling failed (exit {result.returncode}): {result.stderr.strip()}"
+                )
+            summary = read_device_profile(profile_dir, backend="nvidia")
+            artifacts = tuple(
+                (
+                    str(path.relative_to(profile_dir)),
+                    path.read_bytes(),
+                )
+                for path in sorted(profile_dir.rglob("*"))
+                if path.is_file()
+            )
+        return LocalDeviceProfileResult(
+            benchmark_result=OperatorBenchmarkResult(
+                backend=self.name,
+                device_name=self._device_name(torch, self._device(torch)),
+                op=request.op,
+                dtype=request.dtype,
+                case=OperatorCase(
+                    case_id=request.case_id,
+                    family=request.family,
+                    source_kind=request.source_kind,
+                    source_project=request.source_project,
+                    source_model=request.source_model,
+                    source_file=request.source_file,
+                    source_op=request.source_op,
+                    payload=request.case_payload,
+                ),
+                warmup=request.warmup,
+                iterations=request.iterations,
+            ),
+            profile_summary=summary,
+            profile_artifacts=artifacts,
+        )
 
 
 class AscendBackend(TorchOperatorBackend):
