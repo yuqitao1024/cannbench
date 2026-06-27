@@ -1229,27 +1229,7 @@ body[data-theme="light"] .upload-panel {
 }
 
 .cuda-treasure-map-modal .modal-close {
-  align-self: center;
-  padding: 0.4rem 0.75rem;
-  border: 1px solid color-mix(in srgb, var(--treasure-muted) 28%, transparent);
-  border-radius: 999px;
-  color: var(--treasure-muted);
-  background: color-mix(in srgb, var(--treasure-rail) 82%, transparent);
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
-  transition:
-    color 160ms ease,
-    border-color 160ms ease,
-    background 160ms ease,
-    transform 160ms ease;
-}
-
-.cuda-treasure-map-modal .modal-close:hover,
-.cuda-treasure-map-modal .modal-close:focus-visible {
-  color: var(--treasure-accent);
-  border-color: color-mix(in srgb, var(--treasure-accent) 44%, transparent);
-  background: color-mix(in srgb, var(--treasure-accent) 12%, transparent);
-  transform: translateY(-1px);
+  align-self: flex-start;
 }
 
 .cuda-treasure-map {
@@ -1272,7 +1252,7 @@ body[data-theme="light"] .upload-panel {
 .cuda-treasure-map__canvas {
   position: relative;
   isolation: isolate;
-  min-height: clamp(34rem, 68vh, 44rem) !important;
+  min-height: clamp(42rem, 78vh, 56rem) !important;
   padding: 18px;
   border: 1px solid color-mix(in srgb, var(--treasure-muted) 18%, transparent);
   border-radius: 24px;
@@ -1309,39 +1289,81 @@ body[data-theme="light"] .upload-panel {
   border-radius: 18px;
 }
 
+.cuda-treasure-map__background {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  pointer-events: none;
+  user-select: none;
+  filter: saturate(1.02) brightness(0.96);
+}
+
 .cuda-treasure-map__paths {
-  color: var(--treasure-accent);
-  filter: drop-shadow(0 0 18px rgba(250, 189, 47, 0.12));
+  position: absolute;
+  inset: 0;
+  color: rgba(131, 165, 152, 0.95);
+  filter: drop-shadow(0 0 12px rgba(131, 165, 152, 0.16));
 }
 
 .cuda-treasure-map__path {
-  transition:
-    color 160ms ease,
-    opacity 160ms ease,
-    filter 160ms ease;
-}
-
-.cuda-treasure-map__path--main {
-  color: var(--treasure-accent);
-  opacity: 0.94;
-  filter: drop-shadow(0 0 14px rgba(250, 189, 47, 0.2));
+  opacity: 0.92;
 }
 
 .cuda-treasure-map__path--branch {
-  color: var(--treasure-accent-2);
-  opacity: 0.72;
-  filter: drop-shadow(0 0 12px rgba(131, 165, 152, 0.2));
+  color: rgba(131, 165, 152, 0.92);
+}
+
+.cuda-treasure-map__node-slot {
+  display: grid;
+  place-items: center;
+}
+
+.cuda-treasure-map__anchor {
+  position: absolute;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 999px;
+  pointer-events: none;
+  transform: translateZ(0);
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease,
+    opacity 160ms ease;
+}
+
+.cuda-treasure-map__anchor--main {
+  border: 1px solid rgba(250, 189, 47, 0.72);
+  background: radial-gradient(circle, rgba(250, 189, 47, 0.3) 0%, rgba(250, 189, 47, 0.08) 56%, transparent 72%);
+  box-shadow:
+    0 0 0 0.35rem rgba(250, 189, 47, 0.08),
+    0 0 1.4rem rgba(250, 189, 47, 0.22);
+}
+
+.cuda-treasure-map__anchor--main.is-on-main-route {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.cuda-treasure-map__anchor--branch {
+  width: 0.72rem;
+  height: 0.72rem;
+  border: 1px dashed rgba(131, 165, 152, 0.56);
+  background: radial-gradient(circle, rgba(131, 165, 152, 0.2) 0%, rgba(131, 165, 152, 0.04) 58%, transparent 74%);
+  box-shadow: 0 0 1rem rgba(131, 165, 152, 0.12);
 }
 
 .cuda-treasure-map__node {
+  position: relative;
   min-width: 0;
   max-width: min(10rem, 22vw);
   padding: 0.5rem 0.75rem;
   border: 1px solid color-mix(in srgb, var(--treasure-muted) 24%, transparent);
   border-radius: 16px;
   color: var(--treasure-ink);
-  background:
-    linear-gradient(180deg, rgba(32, 35, 36, 0.96), rgba(22, 24, 25, 0.94));
+  background: linear-gradient(180deg, rgba(32, 35, 36, 0.94), rgba(20, 23, 24, 0.92));
   box-shadow:
     0 10px 22px rgba(0, 0, 0, 0.28),
     inset 0 1px 0 rgba(255, 255, 255, 0.03);
@@ -1349,6 +1371,7 @@ body[data-theme="light"] .upload-panel {
   letter-spacing: 0.02em;
   text-align: left;
   cursor: pointer;
+  z-index: 1;
   transition:
     transform 160ms ease,
     border-color 160ms ease,
@@ -1360,6 +1383,7 @@ body[data-theme="light"] .upload-panel {
 .cuda-treasure-map__node:hover,
 .cuda-treasure-map__node:focus-visible,
 .cuda-treasure-map__node[aria-describedby] {
+  transform: translateY(-1px);
   border-color: color-mix(in srgb, var(--treasure-accent) 42%, transparent);
   box-shadow:
     0 14px 28px rgba(0, 0, 0, 0.34),
@@ -1371,17 +1395,26 @@ body[data-theme="light"] .upload-panel {
 }
 
 .cuda-treasure-map__node--main {
-  border-left: 3px solid color-mix(in srgb, var(--treasure-accent) 78%, transparent);
+  border-color: rgba(250, 189, 47, 0.28);
+  color: #f9e8b7;
+  background:
+    linear-gradient(180deg, rgba(77, 55, 17, 0.84), rgba(42, 32, 13, 0.9)),
+    rgba(25, 20, 12, 0.78);
+  box-shadow:
+    0 12px 24px rgba(0, 0, 0, 0.3),
+    0 0 0 1px rgba(250, 189, 47, 0.08),
+    inset 0 1px 0 rgba(255, 236, 179, 0.08);
 }
 
 .cuda-treasure-map__node--branch {
   max-width: min(9rem, 20vw);
   padding: 0.42rem 0.65rem;
   border-style: dashed;
-  border-left: 3px solid color-mix(in srgb, var(--treasure-accent-2) 72%, transparent);
-  color: color-mix(in srgb, var(--treasure-ink) 92%, var(--treasure-accent-2));
+  border-color: rgba(131, 165, 152, 0.42);
+  color: color-mix(in srgb, #dfe7d7 88%, var(--treasure-accent-2));
   background:
-    linear-gradient(180deg, rgba(24, 30, 31, 0.94), rgba(18, 22, 23, 0.94));
+    linear-gradient(180deg, rgba(20, 36, 36, 0.9), rgba(16, 26, 27, 0.92)),
+    rgba(16, 22, 23, 0.82);
   font-size: 0.72rem;
 }
 
@@ -1405,14 +1438,18 @@ body[data-theme="light"] .upload-panel {
     0 0 32px rgba(184, 187, 38, 0.12);
 }
 
-.cuda-treasure-map__node.is-important::before {
-  content: "";
-  position: absolute;
-  inset: 7px auto 7px 7px;
-  width: 0.42rem;
-  border-radius: 999px;
-  background: linear-gradient(180deg, var(--treasure-green), var(--treasure-accent));
-  opacity: 0.9;
+.cuda-treasure-map__node-slot:hover .cuda-treasure-map__anchor--main,
+.cuda-treasure-map__node-slot:focus-within .cuda-treasure-map__anchor--main {
+  transform: scale(1.08);
+  box-shadow:
+    0 0 0 0.45rem rgba(250, 189, 47, 0.11),
+    0 0 1.9rem rgba(250, 189, 47, 0.3);
+}
+
+.cuda-treasure-map__node-slot:hover .cuda-treasure-map__anchor--branch,
+.cuda-treasure-map__node-slot:focus-within .cuda-treasure-map__anchor--branch {
+  transform: scale(1.08);
+  box-shadow: 0 0 1.4rem rgba(131, 165, 152, 0.18);
 }
 
 .cuda-treasure-map__field-note {
@@ -1662,7 +1699,7 @@ body[data-theme="light"] .cuda-treasure-map__field-note {
   }
 
   .cuda-treasure-map__canvas {
-    min-height: clamp(28rem, 76vh, 34rem) !important;
+    min-height: clamp(34rem, 82vh, 42rem) !important;
     padding: 14px;
   }
 

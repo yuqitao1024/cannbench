@@ -5,6 +5,8 @@ interface BaseTreasureNode<NodeId extends string = string> {
   label: string;
   x: number;
   y: number;
+  labelDx?: number;
+  labelDy?: number;
   summary: string;
   details: string[];
   guideSections: string[];
@@ -61,8 +63,10 @@ export const cudaTreasureRoute = defineTreasureRoute([
     id: "profile-truth",
     label: "Profile the Truth",
     kind: "main",
-    x: 10,
+    x: 9,
     y: 18,
+    labelDx: 1.1,
+    labelDy: -0.25,
     summary: "Measure device-side reality before changing kernel code.",
     details: [
       "Use GPU-side timing and profiler traces to find the real hotspot.",
@@ -79,6 +83,8 @@ export const cudaTreasureRoute = defineTreasureRoute([
     kind: "main",
     x: 24,
     y: 30,
+    labelDx: 1.1,
+    labelDy: -0.1,
     summary: "Keep numerical intent and validation alongside performance work.",
     details: [
       "Check optimized kernels against trusted reference outputs.",
@@ -93,7 +99,9 @@ export const cudaTreasureRoute = defineTreasureRoute([
     label: "Shape Parallel Work",
     kind: "main",
     x: 38,
-    y: 20,
+    y: 19,
+    labelDx: 1.1,
+    labelDy: -0.15,
     summary: "Expose enough parallel work before low-level tuning.",
     details: [
       "Choose decomposition that gives threads enough independent work.",
@@ -108,7 +116,9 @@ export const cudaTreasureRoute = defineTreasureRoute([
     label: "Cut Data Motion",
     kind: "main",
     x: 51,
-    y: 36,
+    y: 35,
+    labelDx: 1.1,
+    labelDy: -0.15,
     summary: "Reduce host-device movement and redundant intermediate traffic.",
     details: [
       "Batch transfers and keep intermediates on GPU when possible.",
@@ -123,8 +133,10 @@ export const cudaTreasureRoute = defineTreasureRoute([
     id: "branch-streams",
     label: "Pinned / Async / Streams",
     kind: "branch",
-    x: 60,
-    y: 26,
+    x: 69.09,
+    y: 25.5,
+    labelDx: 1.1,
+    labelDy: -0.1,
     summary: "Use overlap and pinned memory when transfers are unavoidable.",
     details: [
       "Use pinned host memory for faster async copies.",
@@ -140,7 +152,9 @@ export const cudaTreasureRoute = defineTreasureRoute([
     label: "Fix Global Access",
     kind: "main",
     x: 65,
-    y: 56,
+    y: 57,
+    labelDx: 1.1,
+    labelDy: -0.2,
     summary: "Repair coalescing, stride, and alignment before instruction micro-tuning.",
     details: [
       "Make adjacent threads touch adjacent memory.",
@@ -155,8 +169,10 @@ export const cudaTreasureRoute = defineTreasureRoute([
     id: "branch-l2",
     label: "L2 persistence",
     kind: "branch",
-    x: 74,
-    y: 46,
+    x: 84.34,
+    y: 37.62,
+    labelDx: -1.9,
+    labelDy: -0.1,
     summary: "Treat hot memory regions as persistent only when reuse is predictable.",
     details: [
       "Use access-policy windows for predictable reuse regions.",
@@ -170,8 +186,10 @@ export const cudaTreasureRoute = defineTreasureRoute([
     id: "stage-through-shared",
     label: "Stage Through Shared",
     kind: "main",
-    x: 54,
-    y: 74,
+    x: 78,
+    y: 81,
+    labelDx: -1.7,
+    labelDy: -0.9,
     summary: "Move into shared memory only when reuse or access repair justifies it.",
     details: [
       "Tile reused inputs through shared memory.",
@@ -186,8 +204,10 @@ export const cudaTreasureRoute = defineTreasureRoute([
     id: "branch-bank-conflicts",
     label: "Bank conflicts",
     kind: "branch",
-    x: 43,
-    y: 84,
+    x: 33.93,
+    y: 67.06,
+    labelDx: 1,
+    labelDy: -0.1,
     summary: "Pad and lay out shared tiles to avoid conflict serialization.",
     details: [
       "Use padding in transpose-style tiles.",
@@ -201,8 +221,10 @@ export const cudaTreasureRoute = defineTreasureRoute([
     id: "branch-async-g2s",
     label: "Async G2S copy",
     kind: "branch",
-    x: 68,
-    y: 86,
+    x: 55.7,
+    y: 72.81,
+    labelDx: 1,
+    labelDy: -0.1,
     summary: "Pipeline global-to-shared movement when it helps throughput and pressure.",
     details: [
       "Use async copy paths to reduce register pressure.",
@@ -216,8 +238,10 @@ export const cudaTreasureRoute = defineTreasureRoute([
     id: "tune-launch-geometry",
     label: "Tune Launch Geometry",
     kind: "main",
-    x: 32,
-    y: 66,
+    x: 49,
+    y: 89,
+    labelDx: -0.2,
+    labelDy: -1.15,
     summary: "Balance threads, blocks, occupancy, registers, and shared memory together.",
     details: [
       "Tune block shape after memory behavior is understood.",
@@ -231,8 +255,10 @@ export const cudaTreasureRoute = defineTreasureRoute([
     id: "branch-concurrency",
     label: "Concurrent kernels",
     kind: "branch",
-    x: 18,
-    y: 74,
+    x: 21.02,
+    y: 48.41,
+    labelDx: 0.95,
+    labelDy: -0.05,
     summary: "Use independent streams only when the workload really permits overlap.",
     details: [
       "Launch independent kernels concurrently when resources allow it.",
@@ -247,7 +273,9 @@ export const cudaTreasureRoute = defineTreasureRoute([
     label: "Polish Instructions",
     kind: "main",
     x: 18,
-    y: 48,
+    y: 73,
+    labelDx: 1.1,
+    labelDy: -0.85,
     summary: "Apply arithmetic and control-flow micro-optimizations after memory and launch tuning.",
     details: [
       "Reduce expensive arithmetic where accuracy allows it.",
@@ -261,8 +289,10 @@ export const cudaTreasureRoute = defineTreasureRoute([
     id: "branch-target-build",
     label: "Target GPU build",
     kind: "branch",
-    x: 8,
-    y: 60,
+    x: 27.24,
+    y: 13.76,
+    labelDx: 1,
+    labelDy: -0.1,
     summary: "Make sure optimized kernels are built for the GPU targets that matter.",
     details: [
       "Compile for relevant compute capabilities.",

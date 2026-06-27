@@ -33,21 +33,18 @@ describe("CudaTreasureMapModal", () => {
     expect(screen.getByText(/Polish Instructions/i)).toBeInTheDocument();
   });
 
-  it("renders branch connectors for branch route nodes", () => {
+  it("renders the fixed map background with frontend anchor rings", () => {
     render(<CudaTreasureMapModal open={true} onClose={() => undefined} />);
 
-    const branchConnectors = Array.from(document.body.querySelectorAll(".cuda-treasure-map__path--branch"));
+    const background = document.body.querySelector(".cuda-treasure-map__background");
+    const mainAnchors = Array.from(document.body.querySelectorAll(".cuda-treasure-map__anchor--main"));
+    const branchAnchors = Array.from(document.body.querySelectorAll(".cuda-treasure-map__anchor--branch"));
 
-    expect(branchConnectors).toHaveLength(6);
-    expect(
-      branchConnectors.some(
-        (connector) =>
-          connector.getAttribute("x1") === "51" &&
-          connector.getAttribute("y1") === "36" &&
-          connector.getAttribute("x2") === "60" &&
-          connector.getAttribute("y2") === "26"
-      )
-    ).toBe(true);
+    expect(background?.tagName.toLowerCase()).toBe("img");
+    expect(background).toHaveAttribute("src");
+    expect(background?.getAttribute("src")).toMatch(/cuda-treasure-map-dark/i);
+    expect(mainAnchors).toHaveLength(8);
+    expect(branchAnchors).toHaveLength(6);
   });
 
   it("reveals the Fix Global Access field note on hover and focus with tooltip wiring", async () => {

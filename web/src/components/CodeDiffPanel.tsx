@@ -307,13 +307,12 @@ export function CodeDiffPanel({ operator }: CodeDiffPanelProps) {
       ) : (
         <>
           <div className="diff-summary-row">
-            <p className="diff-summary-inline">{isLoadingVersions || isLoading ? "Loading diff summary" : "No diff summary"}</p>
+            <p className="diff-summary-inline">{isLoadingVersions || isLoading ? "Loading diff summary" : emptyState.title}</p>
             <button type="button" className="diff-open-button" disabled>
               Details
             </button>
           </div>
           <div className="diff-empty-copy">
-            <h4>{emptyState.title}</h4>
             <p>{emptyState.description}</p>
           </div>
         </>

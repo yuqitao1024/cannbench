@@ -90,5 +90,31 @@ describe("CodeDiffPanel", () => {
     expect(await screen.findByText(/no diff available/i)).toBeInTheDocument();
     expect(await screen.findByText(/need at least two simt operator versions to compare/i)).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: /details/i })).toBeDisabled();
+    expect(screen.getAllByText(/no diff available/i)).toHaveLength(1);
+  });
+
+  it("shows a clean service error when the api returns html instead of json", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const url = String(input);
+        if (url.includes("/api/simt-versions")) {
+          return {
+            ok: true,
+            headers: {
+              get: () => "text/html"
+            },
+            text: async () => "<!doctype html><html><body>dev index</body></html>"
+          };
+        }
+        throw new Error("unexpected diff request");
+      })
+    );
+
+    render(<CodeDiffPanel operator="softmax" />);
+
+    expect(await screen.findByText(/no diff available/i)).toBeInTheDocument();
+    expect(await screen.findByText(/simt diff service is unavailable/i)).toBeInTheDocument();
+    expect(screen.queryByText(/unexpected token/i)).not.toBeInTheDocument();
   });
 });

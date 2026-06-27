@@ -122,7 +122,6 @@ export function CudaTreasureMapModal({ open, onClose }: CudaTreasureMapModalProp
         <header className="cuda-treasure-map-modal__header">
           <div>
             <p className="panel-kicker">CUDA treasure map</p>
-            <h2>CUDA operator treasure route</h2>
           </div>
           <button type="button" className="modal-close" aria-label="Close CUDA operator treasure route" onClick={onClose}>
             close
