@@ -3,6 +3,44 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
+import { DEFAULT_PUBLISHED_RUN } from "./data/benchmarkRecordsApi";
+
+const benchmarkPayload = {
+  records: [
+    {
+      schema_version: 1,
+      run_id: "softmax-realistic-h800-20260628",
+      operator: "softmax",
+      dataset: "realistic",
+      case_id: "gptj_attention",
+      shape: [1, 16, 128, 128],
+      dtype: "float16",
+      backend: "nvidia",
+      device_class: "H800",
+      implementation: "cuda_event",
+      implementation_version: "cuda-event",
+      metrics: { latency_ms_avg: 0.011, latency_ms_p50: 0.011, latency_ms_p95: 0.012, sample_count: 1 },
+      accuracy: { passed: true, max_abs_error: 0, max_rel_error: 0 },
+      diff_ref: null
+    },
+    {
+      schema_version: 1,
+      run_id: "embedding-realistic-h800-20260628",
+      operator: "embedding",
+      dataset: "realistic",
+      case_id: "bert_token_embedding",
+      shape: [16, 128, 768],
+      dtype: "float16",
+      backend: "nvidia",
+      device_class: "H800",
+      implementation: "cuda_event",
+      implementation_version: "cuda-event",
+      metrics: { latency_ms_avg: 0.021, latency_ms_p50: 0.021, latency_ms_p95: 0.023, sample_count: 1 },
+      accuracy: { passed: true, max_abs_error: 0, max_rel_error: 0 },
+      diff_ref: null
+    }
+  ]
+};
 
 beforeAll(() => {
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
@@ -12,6 +50,12 @@ beforeAll(() => {
     "fetch",
     vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
+      if (url === `/published/${DEFAULT_PUBLISHED_RUN}/meta/benchmark-records.json`) {
+        return {
+          ok: true,
+          json: async () => benchmarkPayload
+        };
+      }
       if (url.includes("/api/simt-versions")) {
         return {
           ok: true,
@@ -43,7 +87,9 @@ describe("App", () => {
     render(<App />);
 
     expect(screen.getByRole("heading", { name: /^CANNBench$/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /softmax/i })).toHaveAttribute("aria-pressed", "true");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /softmax/i })).toHaveAttribute("aria-pressed", "true");
+    });
     expect(screen.getByRole("button", { name: /gptj_attention/i })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /^embedding\s+1 cases/i }));
@@ -114,7 +160,13 @@ describe("App", () => {
     await waitFor(() => {
       expect(screen.queryByLabelText(/simt operator diff/i)).not.toBeInTheDocument();
     });
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(fetchSpy).toHaveBeenCalledWith(
+      `/published/${DEFAULT_PUBLISHED_RUN}/meta/benchmark-records.json`,
+      expect.any(Object)
+    );
+    expect(
+      fetchSpy.mock.calls.some(([url]) => String(url).includes("/api/simt-versions"))
+    ).toBe(false);
   });
 
   it("resets the hidden click streak when the theme changes", async () => {
@@ -136,5 +188,18 @@ describe("App", () => {
 
     expect(screen.getByRole("dialog", { name: /CUDA operator treasure route/i })).toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: /GPU benchmark import/i })).not.toBeInTheDocument();
+  });
+
+  it("shows a load failure state when published benchmark records cannot be fetched", async () => {
+    vi.mocked(fetch).mockImplementationOnce(async () => ({
+      ok: false,
+      status: 404
+    } as Response));
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("status")).toHaveTextContent(/Failed to load benchmark records\./i);
+    });
   });
 });

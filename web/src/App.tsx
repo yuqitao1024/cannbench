@@ -10,32 +10,38 @@ import { RunFilters } from "./components/RunFilters";
 import logoDarkUrl from "./assets/brand/cannbench-logo-dark.png";
 import logoLightUrl from "./assets/brand/cannbench-logo-light.png";
 import { buildBenchmarkViewModel } from "./data/benchmarkData";
-import rawRecords from "./data/sample/benchmark-results.json";
+import { loadBenchmarkRecords } from "./data/benchmarkRecordsApi";
 import type { BenchmarkRecord } from "./types";
-
-const benchmarkRecords = rawRecords as BenchmarkRecord[];
-const viewModel = buildBenchmarkViewModel(benchmarkRecords);
-const defaultOperator = viewModel.operators.some((operator) => operator.name === "softmax")
-  ? "softmax"
-  : (viewModel.operators[0]?.name ?? "");
-const defaultDataset = (operator: string) => {
-  const datasets = viewModel.datasetsFor(operator);
-  return datasets.includes("realistic") ? "realistic" : (datasets[0] ?? "");
-};
 
 function themeForCurrentHour(): "light" | "dark" {
   const hour = new Date().getHours();
   return hour >= 7 && hour < 19 ? "light" : "dark";
 }
 
+function defaultOperatorName(records: BenchmarkRecord[]): string {
+  const viewModel = buildBenchmarkViewModel(records);
+  return viewModel.operators.some((operator) => operator.name === "softmax")
+    ? "softmax"
+    : (viewModel.operators[0]?.name ?? "");
+}
+
+function defaultDatasetName(records: BenchmarkRecord[], operator: string): string {
+  const viewModel = buildBenchmarkViewModel(records);
+  const datasets = viewModel.datasetsFor(operator);
+  return datasets.includes("realistic") ? "realistic" : (datasets[0] ?? "");
+}
+
 export function App() {
+  const [benchmarkRecords, setBenchmarkRecords] = useState<BenchmarkRecord[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [operatorSearch, setOperatorSearch] = useState("");
   const [importOpen, setImportOpen] = useState(false);
   const [treasureMapOpen, setTreasureMapOpen] = useState(false);
   const [titleClickCount, setTitleClickCount] = useState(0);
   const [theme, setTheme] = useState<"light" | "dark">(themeForCurrentHour);
-  const [selectedOperator, setSelectedOperator] = useState(defaultOperator);
-  const [selectedDataset, setSelectedDataset] = useState(defaultDataset(defaultOperator));
+  const [selectedOperator, setSelectedOperator] = useState("");
+  const [selectedDataset, setSelectedDataset] = useState("");
+  const viewModel = buildBenchmarkViewModel(benchmarkRecords);
   const cases = viewModel.casesFor(selectedOperator, selectedDataset);
   const [selectedCaseId, setSelectedCaseId] = useState(cases[0]?.caseId ?? "");
   const selectedCaseRecords = selectedCaseId
@@ -65,9 +71,30 @@ export function App() {
   }, [theme]);
 
   useEffect(() => {
+    const controller = new AbortController();
+    loadBenchmarkRecords(controller.signal)
+      .then((records) => {
+        setBenchmarkRecords(records);
+        setLoadError(null);
+        const operator = defaultOperatorName(records);
+        const dataset = defaultDatasetName(records, operator);
+        setSelectedOperator(operator);
+        setSelectedDataset(dataset);
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+        setBenchmarkRecords([]);
+        setLoadError(error instanceof Error ? error.message : "failed to load benchmark records");
+      });
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
     const datasets = viewModel.datasetsFor(selectedOperator);
     if (!datasets.includes(selectedDataset)) {
-      setSelectedDataset(defaultDataset(selectedOperator));
+      setSelectedDataset(defaultDatasetName(benchmarkRecords, selectedOperator));
       return;
     }
     const nextCases = viewModel.casesFor(selectedOperator, selectedDataset);
@@ -154,23 +181,35 @@ export function App() {
           onSelectOperator={setSelectedOperator}
         />
         <section className="workspace" aria-labelledby="selected-operator-title">
-          <div className="workspace-head">
-            <div>
-              <p className="panel-kicker">Selected operator</p>
-              <h2 id="selected-operator-title">{selectedOperator}</h2>
+          {loadError ? (
+            <div className="workspace-empty" role="status">
+              Failed to load benchmark records.
             </div>
-            <RunFilters
-              datasets={datasets}
-              selectedDataset={selectedDataset}
-              dtypes={dtypes}
-              simtVersions={simtVersions}
-              onSelectDataset={setSelectedDataset}
-            />
-          </div>
-          <KernelTraceRail records={selectedCaseRecords} />
-          <BenchmarkChart series={series} caseIds={cases.map((item) => item.caseId)} />
-          <CaseTable cases={cases} selectedCaseId={selectedCaseId} onSelectCase={setSelectedCaseId} />
-          {showDiffPanel ? <CodeDiffPanel operator={selectedOperator} /> : null}
+          ) : benchmarkRecords.length === 0 ? (
+            <div className="workspace-empty" role="status">
+              Loading benchmark records...
+            </div>
+          ) : (
+            <>
+              <div className="workspace-head">
+                <div>
+                  <p className="panel-kicker">Selected operator</p>
+                  <h2 id="selected-operator-title">{selectedOperator}</h2>
+                </div>
+                <RunFilters
+                  datasets={datasets}
+                  selectedDataset={selectedDataset}
+                  dtypes={dtypes}
+                  simtVersions={simtVersions}
+                  onSelectDataset={setSelectedDataset}
+                />
+              </div>
+              <KernelTraceRail records={selectedCaseRecords} />
+              <BenchmarkChart series={series} caseIds={cases.map((item) => item.caseId)} />
+              <CaseTable cases={cases} selectedCaseId={selectedCaseId} onSelectCase={setSelectedCaseId} />
+              {showDiffPanel ? <CodeDiffPanel operator={selectedOperator} /> : null}
+            </>
+          )}
         </section>
       </div>
       <GpuBenchmarkImport uploadEnabled={false} open={importOpen} onClose={() => setImportOpen(false)} />

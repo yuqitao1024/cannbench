@@ -451,6 +451,17 @@ h1,
   padding: 18px;
 }
 
+.workspace-empty {
+  display: grid;
+  place-items: center;
+  min-height: 360px;
+  border-radius: 24px;
+  color: var(--muted);
+  background: rgba(0, 0, 0, 0.08);
+  font-family: var(--font-mono);
+  letter-spacing: 0.05em;
+}
+
 .workspace-head {
   display: flex;
   gap: 20px;
