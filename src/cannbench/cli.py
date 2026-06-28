@@ -406,6 +406,46 @@ def _finalize_remote_execution_artifacts(
     )
 
 
+def _build_remote_benchmark_record(
+    *,
+    run_id: str,
+    backend: str,
+    implementation: str | None,
+    prepared,
+    execution_result,
+) -> dict[str, object]:
+    if execution_result.artifacts.profile is None:
+        raise RuntimeError("missing profile summary for profiled remote bench case")
+    return build_collect_benchmark_record(
+        run_id=run_id,
+        backend=backend,
+        implementation=implementation,
+        prepared=prepared,
+        perf_payload=json.loads(
+            dict(execution_result.artifacts.profile.perf_artifacts)["benchmark.json"].decode("utf-8")
+        ),
+        profile_summary=execution_result.artifacts.profile.profile_summary,
+    )
+
+
+def _build_local_benchmark_record_entry(
+    *,
+    run_id: str,
+    backend: str,
+    implementation: str | None,
+    prepared,
+    profile_result,
+) -> dict[str, object]:
+    return build_local_benchmark_record(
+        run_id=run_id,
+        backend=backend,
+        implementation=implementation,
+        prepared=prepared,
+        device_name=profile_result.profile.device_name,
+        profile_summary=profile_result.profile.profile_summary,
+    )
+
+
 def _prepare_batch_run_layout(output_dir: Path, run_name: str):
     layout = build_run_layout(output_dir, run_name)
     if layout.root.exists() and any(layout.root.iterdir()):
@@ -493,13 +533,12 @@ def _run_batch_local_bench(args: argparse.Namespace) -> None:
                     if profiled_result_path is not None:
                         result_path = profiled_result_path
                     benchmark_records.append(
-                        build_local_benchmark_record(
+                        _build_local_benchmark_record_entry(
                             run_id=f"{args.run_name}/{artifact_stem}",
                             backend=args.backend,
                             implementation=getattr(args, "implementation", None),
                             prepared=plan.prepared,
-                            device_name=profile_result.profile.device_name,
-                            profile_summary=profile_result.profile.profile_summary,
+                            profile_result=profile_result,
                         )
                     )
             summary_rows.append(
@@ -619,15 +658,12 @@ def _run_batch_remote_bench(args: argparse.Namespace) -> None:
                         f"missing profile summary for profiled remote bench case {artifact_stem}"
                     )
                 benchmark_records.append(
-                    build_collect_benchmark_record(
+                    _build_remote_benchmark_record(
                         run_id=remote_run_id,
                         backend=endpoint.backend,
                         implementation=args.implementation,
                         prepared=plan.prepared,
-                        perf_payload=json.loads(
-                            dict(remote_result.artifacts.profile.perf_artifacts)["benchmark.json"].decode("utf-8")
-                        ),
-                        profile_summary=remote_result.artifacts.profile.profile_summary,
+                        execution_result=remote_result,
                     )
                 )
 
@@ -742,13 +778,12 @@ def _run_single_local_bench(args: argparse.Namespace) -> None:
             if profiled_result_path is not None:
                 result_path = profiled_result_path
             benchmark_records.append(
-                build_local_benchmark_record(
+                _build_local_benchmark_record_entry(
                     run_id=f"{run_name}/{artifact_stem}",
                     backend=args.backend,
                     implementation=getattr(args, "implementation", None),
                     prepared=prepared,
-                    device_name=profile_result.profile.device_name,
-                    profile_summary=profile_result.profile.profile_summary,
+                    profile_result=profile_result,
                 )
             )
         row = BatchResultRecord(
@@ -868,15 +903,12 @@ def _run_single_remote_bench(args: argparse.Namespace) -> None:
             if remote_result.artifacts.profile is None:
                 raise RuntimeError("missing profile summary for profiled remote bench case")
             benchmark_records.append(
-                build_collect_benchmark_record(
+                _build_remote_benchmark_record(
                     run_id=args.run_id or run_name,
                     backend=endpoint.backend,
                     implementation=args.implementation,
                     prepared=prepared,
-                    perf_payload=json.loads(
-                        dict(remote_result.artifacts.profile.perf_artifacts)["benchmark.json"].decode("utf-8")
-                    ),
-                    profile_summary=remote_result.artifacts.profile.profile_summary,
+                    execution_result=remote_result,
                 )
             )
         row = BatchResultRecord(

@@ -7,7 +7,7 @@ from cannbench.core.profile import DeviceProfileSummary
 
 
 @dataclass(frozen=True)
-class RemoteProfileArtifacts:
+class BenchProfileArtifacts:
     backend: str
     device_name: str
     profile_summary: DeviceProfileSummary
@@ -16,9 +16,13 @@ class RemoteProfileArtifacts:
 
 
 @dataclass(frozen=True)
-class RemoteExecutionArtifacts:
+class BenchExecutionArtifacts:
     output_artifacts: tuple[tuple[str, bytes], ...] = ()
-    profile: RemoteProfileArtifacts | None = None
+    profile: BenchProfileArtifacts | None = None
+
+
+RemoteProfileArtifacts = BenchProfileArtifacts
+RemoteExecutionArtifacts = BenchExecutionArtifacts
 
 
 def read_artifact_tree(root: Path) -> tuple[tuple[str, bytes], ...]:
