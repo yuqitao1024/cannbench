@@ -43,6 +43,12 @@ def test_build_collect_benchmark_record_for_ascend_simt():
     assert record["implementation_version"] == "v1"
     assert record["device_class"] == "Ascend"
     assert record["shape"] == [4, 8, 1024, 1024]
+    assert record["family"] == "attention"
+    assert record["source_kind"] == "real_model"
+    assert record["source_project"] == "TritonBench"
+    assert record["source_model"] == "T5Small"
+    assert record["source_file"] == "hf_train/T5Small_train.json"
+    assert record["source_op"] == "aten._softmax.default"
     assert record["diff_ref"] == "softmax/simt/v1"
 
 
@@ -77,6 +83,12 @@ def test_build_benchmark_record_for_nvidia_ncu():
     assert record["implementation_version"] == "ncu"
     assert record["device_class"] == "H800"
     assert record["shape"] == [4, 8, 1024, 1024]
+    assert record["family"] == "attention"
+    assert record["source_kind"] == "real_model"
+    assert record["source_project"] == "TritonBench"
+    assert record["source_model"] == "T5Small"
+    assert record["source_file"] == "hf_train/T5Small_train.json"
+    assert record["source_op"] == "aten._softmax.default"
     assert record["diff_ref"] is None
 
 

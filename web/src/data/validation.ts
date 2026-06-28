@@ -20,12 +20,18 @@ const RECORD_FIELDS = new Set([
   "operator",
   "dataset",
   "case_id",
+  "family",
   "shape",
   "dtype",
   "backend",
   "device_class",
   "implementation",
   "implementation_version",
+  "source_kind",
+  "source_project",
+  "source_model",
+  "source_file",
+  "source_op",
   "metrics",
   "accuracy",
   "diff_ref"
@@ -147,7 +153,22 @@ function validateRecord(record: unknown, index: number, errors: string[]): void 
     errors.push(`${path}.schema_version must be 1`);
   }
 
-  for (const key of ["run_id", "operator", "dataset", "case_id", "dtype", "device_class", "implementation", "implementation_version"]) {
+  for (const key of [
+    "run_id",
+    "operator",
+    "dataset",
+    "case_id",
+    "family",
+    "dtype",
+    "device_class",
+    "implementation",
+    "implementation_version",
+    "source_kind",
+    "source_project",
+    "source_model",
+    "source_file",
+    "source_op"
+  ]) {
     requireString(record[key], `${path}.${key}`, errors);
   }
 

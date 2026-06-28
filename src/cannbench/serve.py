@@ -35,12 +35,18 @@ RECORD_FIELDS = {
     "operator",
     "dataset",
     "case_id",
+    "family",
     "shape",
     "dtype",
     "backend",
     "device_class",
     "implementation",
     "implementation_version",
+    "source_kind",
+    "source_project",
+    "source_model",
+    "source_file",
+    "source_op",
     "metrics",
     "accuracy",
     "diff_ref",
@@ -274,7 +280,22 @@ def _validate_record(record: Any, index: int, errors: list[str]) -> None:
     if record.get("schema_version") != 1:
         errors.append(f"{path}.schema_version must be 1")
 
-    for key in ["run_id", "operator", "dataset", "case_id", "dtype", "device_class", "implementation", "implementation_version"]:
+    for key in [
+        "run_id",
+        "operator",
+        "dataset",
+        "case_id",
+        "family",
+        "dtype",
+        "device_class",
+        "implementation",
+        "implementation_version",
+        "source_kind",
+        "source_project",
+        "source_model",
+        "source_file",
+        "source_op",
+    ]:
         _require_string(record.get(key), f"{path}.{key}", errors)
 
     if record.get("backend") not in {"nvidia", "gpu"}:
