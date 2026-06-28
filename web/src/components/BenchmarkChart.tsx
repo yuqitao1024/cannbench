@@ -1,20 +1,41 @@
 import { useEffect, useRef } from "react";
 import * as echarts from "echarts/core";
-import { GridComponent, LegendComponent, TooltipComponent } from "echarts/components";
+import { GridComponent, LegendComponent, MarkLineComponent, TooltipComponent } from "echarts/components";
 import { LineChart } from "echarts/charts";
 import { SVGRenderer } from "echarts/renderers";
-import type { ChartSeries } from "../types";
+import type { ChartSegment, ChartSeries } from "../types";
 
-echarts.use([GridComponent, LegendComponent, TooltipComponent, LineChart, SVGRenderer]);
+echarts.use([GridComponent, LegendComponent, TooltipComponent, MarkLineComponent, LineChart, SVGRenderer]);
 
-const SERIES_COLORS = ["#75f94c", "#ff7a3d", "#2df1ff", "#4da3ff", "#8cc8ff"];
+const SERIES_COLORS = ["#b8bb26", "#fe8019", "#83a598", "#689d6a", "#d3869b"];
 
 interface BenchmarkChartProps {
   series: ChartSeries[];
-  caseIds: string[];
+  segments: ChartSegment[];
 }
 
-export function BenchmarkChart({ series, caseIds }: BenchmarkChartProps) {
+function tooltipHtml(params: Array<{ seriesName: string; value: number | null; dataIndex: number }>, series: ChartSeries[]) {
+  const lines = params
+    .map((param) => {
+      const matchedSeries = series.find((item) => item.name === param.seriesName);
+      const point = matchedSeries?.points[param.dataIndex];
+      const record = point?.record;
+      if (!record || point?.latencyMs === null) {
+        return null;
+      }
+      return [
+        `<strong>${param.seriesName}</strong>`,
+        `case: ${record.case_id}`,
+        `latency: ${point.latencyMs.toFixed(4)} ms`,
+        `shape: ${record.shape.join(" x ")}`,
+        `dtype: ${record.dtype}`
+      ].join("<br/>");
+    })
+    .filter(Boolean);
+  return lines.join("<hr/>");
+}
+
+export function BenchmarkChart({ series, segments }: BenchmarkChartProps) {
   const chartRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -23,34 +44,52 @@ export function BenchmarkChart({ series, caseIds }: BenchmarkChartProps) {
     }
 
     const chart = echarts.init(chartRef.current, undefined, { renderer: "svg" });
+    const caseIds = series[0]?.points.map((point) => point.caseId) ?? [];
     chart.setOption({
       color: SERIES_COLORS,
       backgroundColor: "transparent",
-      tooltip: { trigger: "axis" },
+      tooltip: {
+        trigger: "axis",
+        backgroundColor: "rgba(29, 32, 33, 0.92)",
+        borderColor: "rgba(235, 219, 178, 0.12)",
+        textStyle: { color: "#ebdbb2", fontFamily: "JetBrains Mono, monospace" },
+        formatter: (params: unknown) => tooltipHtml(params as Array<{ seriesName: string; value: number | null; dataIndex: number }>, series)
+      },
       legend: {
         top: 0,
-        textStyle: { color: "#8fa6ad", fontFamily: "JetBrains Mono, monospace" }
+        textStyle: { color: "#a89984", fontFamily: "JetBrains Mono, monospace" }
       },
-      grid: { top: 56, right: 18, bottom: 58, left: 58 },
+      grid: { top: 62, right: 20, bottom: 72, left: 62 },
       xAxis: {
         type: "category",
         data: caseIds,
-        axisLabel: { color: "#8fa6ad", rotate: 18 },
-        axisLine: { lineStyle: { color: "rgba(143, 166, 173, 0.22)" } }
+        axisLabel: { color: "#a89984", rotate: 22, interval: 0 },
+        axisLine: { lineStyle: { color: "rgba(168, 153, 132, 0.24)" } }
       },
       yAxis: {
         type: "value",
         name: "latency ms",
-        nameTextStyle: { color: "#8fa6ad" },
-        axisLabel: { color: "#8fa6ad" },
-        splitLine: { lineStyle: { color: "rgba(143, 166, 173, 0.12)" } }
+        nameTextStyle: { color: "#a89984", fontFamily: "JetBrains Mono, monospace" },
+        axisLabel: { color: "#a89984" },
+        splitLine: { lineStyle: { color: "rgba(168, 153, 132, 0.12)" } }
       },
       series: series.map((item) => ({
         name: item.name,
         type: "line",
-        smooth: true,
-        symbolSize: 8,
-        data: item.points.map((point) => point.latencyMs)
+        connectNulls: false,
+        smooth: false,
+        showSymbol: true,
+        symbolSize: 7,
+        data: item.points.map((point) => point.latencyMs),
+        markLine:
+          segments.length > 1
+            ? {
+                symbol: "none",
+                label: { show: false },
+                lineStyle: { color: "rgba(250, 189, 47, 0.18)", type: "dashed" },
+                data: segments.slice(0, -1).map((segment) => ({ xAxis: segment.end + 0.5 }))
+              }
+            : undefined
       }))
     });
 
@@ -60,10 +99,17 @@ export function BenchmarkChart({ series, caseIds }: BenchmarkChartProps) {
       window.removeEventListener("resize", resize);
       chart.dispose();
     };
-  }, [caseIds, series]);
+  }, [segments, series]);
 
   return (
     <section className="chart-panel" aria-label="Latency comparison chart">
+      {segments.length > 1 ? (
+        <div className="chart-segment-bar" aria-hidden="true">
+          {segments.map((segment) => (
+            <span key={segment.key}>{segment.label}</span>
+          ))}
+        </div>
+      ) : null}
       <div ref={chartRef} className="chart-canvas" />
     </section>
   );

@@ -23,12 +23,18 @@ export interface BenchmarkRecord {
   operator: string;
   dataset: DatasetName;
   case_id: string;
+  family: string;
   shape: number[];
   dtype: string;
   backend: BenchmarkBackend;
   device_class: string;
   implementation: BenchmarkImplementation;
   implementation_version: string;
+  source_kind: string;
+  source_project: string;
+  source_model: string;
+  source_file: string;
+  source_op: string;
   metrics: BenchmarkMetrics;
   accuracy: AccuracySummary;
   diff_ref: string | null;
@@ -42,9 +48,14 @@ export interface OperatorSummary {
 
 export interface CaseSummary {
   caseId: string;
+  dataset: string;
+  family: string;
   shape: number[];
   dtype: string;
   records: BenchmarkRecord[];
+  sourceLabel: string;
+  coverageTag: string;
+  availableSeries: string[];
 }
 
 export interface ChartPoint {
@@ -60,13 +71,32 @@ export interface ChartSeries {
   points: ChartPoint[];
 }
 
+export interface ChartSegment {
+  key: string;
+  label: string;
+  start: number;
+  end: number;
+}
+
+export interface SeriesOption {
+  key: string;
+  name: string;
+  available: boolean;
+}
+
+export interface MetricOption {
+  key: "latency";
+  name: "Latency";
+}
+
 export interface BenchmarkViewModel {
   records: BenchmarkRecord[];
   operators: OperatorSummary[];
   datasetsFor: (operator: string) => string[];
   casesFor: (operator: string, dataset: string) => CaseSummary[];
-  recordsForCase: (operator: string, dataset: string, caseId: string) => BenchmarkRecord[];
   seriesFor: (operator: string, dataset: string) => ChartSeries[];
+  seriesOptionsFor: (operator: string, dataset: string) => SeriesOption[];
+  chartSegmentsFor: (operator: string, dataset: string) => ChartSegment[];
 }
 
 export interface SimtOperatorDiff {

@@ -405,8 +405,7 @@ h1,
 }
 
 .operator-button,
-.dataset-tab,
-.case-link,
+.filter-chip,
 .diff-toggle button {
   border: 0;
   color: inherit;
@@ -463,33 +462,43 @@ h1,
 }
 
 .workspace-head {
-  display: flex;
-  gap: 20px;
-  align-items: flex-start;
-  justify-content: space-between;
+  display: grid;
+  gap: 18px;
 }
 
 .workspace h2 {
   margin: 4px 0 0;
-  font-size: clamp(2rem, 4vw, 3.5rem);
+  font-size: clamp(1.6rem, 3vw, 2.4rem);
 }
 
 .run-filters {
   display: grid;
-  gap: 12px;
-  justify-items: end;
+  gap: 10px;
 }
 
-.dataset-tabs,
+.filter-row {
+  display: grid;
+  gap: 8px;
+}
+
+.filter-row-label {
+  color: var(--faint);
+  font: 0.68rem var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.filter-chip-row,
 .diff-toggle {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   padding: 5px;
   border-radius: 999px;
   background: rgba(0, 0, 0, 0.14);
 }
 
-.dataset-tab,
+.filter-chip,
 .diff-toggle button {
   padding: 8px 14px;
   border-radius: 999px;
@@ -498,63 +507,57 @@ h1,
   font-size: 0.76rem;
 }
 
-.dataset-tab[aria-selected="true"],
+.filter-chip[aria-pressed="true"],
 .diff-toggle button[aria-pressed="true"] {
   color: var(--bg1);
   background: var(--accent);
 }
 
-.filter-chips,
-.trace-rail {
+.filter-chip:disabled {
+  opacity: 0.34;
+  cursor: not-allowed;
+}
+
+.coverage-chips,
+.diff-files {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
 
-.filter-chips span,
-.trace-chip,
+.coverage-chips span,
 .diff-files span {
   padding: 8px 10px;
   border-radius: 999px;
   background: rgba(0, 0, 0, 0.11);
+  color: var(--muted);
+  font: 0.72rem var(--font-mono);
 }
 
-.trace-rail,
 .chart-panel,
 .table-panel,
 .diff-panel {
   border-radius: 22px;
 }
 
-.trace-rail {
-  padding: 14px;
-  box-shadow: none;
-}
-
-.trace-chip {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-}
-
-.trace-chip strong {
-  color: var(--text);
-}
-
-.trace-chip--gpu {
-  color: var(--green);
-}
-
-.trace-chip--cann_ops_library {
-  color: var(--orange);
-}
-
-.trace-chip--simt {
-  color: var(--blue);
-}
-
 .chart-panel {
   overflow: hidden;
+  padding: 12px 14px 6px;
+}
+
+.chart-segment-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.chart-segment-bar span {
+  padding: 7px 11px;
+  border-radius: 999px;
+  color: var(--accent-2);
+  background: rgba(0, 0, 0, 0.12);
+  font: 0.72rem var(--font-mono);
 }
 
 .chart-canvas {
@@ -589,26 +592,7 @@ th {
 }
 
 tbody tr {
-  cursor: pointer;
-}
-
-tbody tr:hover,
-tbody tr.is-selected {
-  background: rgba(250, 189, 47, 0.13);
-}
-
-.case-link {
-  padding: 0;
-  color: var(--accent-2);
-  font-family: var(--font-mono);
-}
-
-.status-ok {
-  color: var(--green);
-}
-
-.status-bad {
-  color: var(--red);
+  vertical-align: top;
 }
 
 .diff-panel {

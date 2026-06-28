@@ -4,14 +4,13 @@ import { CaseTable } from "./components/CaseTable";
 import { CodeDiffPanel } from "./components/CodeDiffPanel";
 import { CudaTreasureMapModal } from "./components/CudaTreasureMapModal";
 import { GpuBenchmarkImport } from "./components/GpuBenchmarkImport";
-import { KernelTraceRail } from "./components/KernelTraceRail";
 import { OperatorRail } from "./components/OperatorRail";
 import { RunFilters } from "./components/RunFilters";
 import logoDarkUrl from "./assets/brand/cannbench-logo-dark.png";
 import logoLightUrl from "./assets/brand/cannbench-logo-light.png";
-import { buildBenchmarkViewModel } from "./data/benchmarkData";
+import { buildBenchmarkViewModel, metricOptions } from "./data/benchmarkData";
 import { loadBenchmarkRecords } from "./data/benchmarkRecordsApi";
-import type { BenchmarkRecord } from "./types";
+import type { BenchmarkRecord, MetricOption } from "./types";
 
 function themeForCurrentHour(): "light" | "dark" {
   const hour = new Date().getHours();
@@ -28,7 +27,7 @@ function defaultOperatorName(records: BenchmarkRecord[]): string {
 function defaultDatasetName(records: BenchmarkRecord[], operator: string): string {
   const viewModel = buildBenchmarkViewModel(records);
   const datasets = viewModel.datasetsFor(operator);
-  return datasets.includes("realistic") ? "realistic" : (datasets[0] ?? "");
+  return datasets.includes("ALL") ? "ALL" : (datasets[0] ?? "");
 }
 
 export function App() {
@@ -41,13 +40,14 @@ export function App() {
   const [theme, setTheme] = useState<"light" | "dark">(themeForCurrentHour);
   const [selectedOperator, setSelectedOperator] = useState("");
   const [selectedDataset, setSelectedDataset] = useState("");
+  const [selectedMetric, setSelectedMetric] = useState<MetricOption["key"]>("latency");
   const viewModel = buildBenchmarkViewModel(benchmarkRecords);
   const cases = viewModel.casesFor(selectedOperator, selectedDataset);
-  const [selectedCaseId, setSelectedCaseId] = useState(cases[0]?.caseId ?? "");
-  const selectedCaseRecords = selectedCaseId
-    ? viewModel.recordsForCase(selectedOperator, selectedDataset, selectedCaseId)
-    : [];
-  const dtypes = [...new Set(cases.map((item) => item.dtype))];
+  const allSeries = viewModel.seriesFor(selectedOperator, selectedDataset);
+  const seriesOptions = viewModel.seriesOptionsFor(selectedOperator, selectedDataset);
+  const [selectedSeries, setSelectedSeries] = useState<string[]>([]);
+  const chartSeries = allSeries.filter((series) => selectedSeries.includes(series.key));
+  const chartSegments = viewModel.chartSegmentsFor(selectedOperator, selectedDataset);
   const simtVersions = [
     ...new Set(
       cases.flatMap((item) =>
@@ -58,7 +58,6 @@ export function App() {
     )
   ].sort();
   const showDiffPanel = simtVersions.length > 1;
-  const series = viewModel.seriesFor(selectedOperator, selectedDataset);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -97,11 +96,19 @@ export function App() {
       setSelectedDataset(defaultDatasetName(benchmarkRecords, selectedOperator));
       return;
     }
-    const nextCases = viewModel.casesFor(selectedOperator, selectedDataset);
-    if (!nextCases.some((item) => item.caseId === selectedCaseId)) {
-      setSelectedCaseId(nextCases[0]?.caseId ?? "");
-    }
-  }, [selectedCaseId, selectedDataset, selectedOperator]);
+  }, [benchmarkRecords, selectedDataset, selectedOperator, viewModel]);
+
+  useEffect(() => {
+    const available = seriesOptions.filter((option) => option.available).map((option) => option.key);
+    setSelectedSeries((current) => {
+      const kept = current.filter((item) => available.includes(item));
+      const next = kept.length > 0 ? kept : available;
+      if (current.length === next.length && current.every((item, index) => item === next[index])) {
+        return current;
+      }
+      return next;
+    });
+  }, [seriesOptions]);
 
   const datasets = viewModel.datasetsFor(selectedOperator);
   const openHiddenModalFromTitle = () => {
@@ -197,16 +204,31 @@ export function App() {
                   <h2 id="selected-operator-title">{selectedOperator}</h2>
                 </div>
                 <RunFilters
+                  metrics={metricOptions()}
+                  selectedMetric={selectedMetric}
                   datasets={datasets}
                   selectedDataset={selectedDataset}
-                  dtypes={dtypes}
-                  simtVersions={simtVersions}
+                  seriesOptions={seriesOptions}
+                  selectedSeries={selectedSeries}
+                  onSelectMetric={setSelectedMetric}
                   onSelectDataset={setSelectedDataset}
+                  onToggleSeries={(series) => {
+                    setSelectedSeries((current) => {
+                      if (current.includes(series)) {
+                        return current.length === 1 ? current : current.filter((item) => item !== series);
+                      }
+                      return [...current, series];
+                    });
+                  }}
                 />
               </div>
-              <KernelTraceRail records={selectedCaseRecords} />
-              <BenchmarkChart series={series} caseIds={cases.map((item) => item.caseId)} />
-              <CaseTable cases={cases} selectedCaseId={selectedCaseId} onSelectCase={setSelectedCaseId} />
+              <div className="coverage-chips" aria-label="Dataset coverage summary">
+                <span>float16 only</span>
+                <span>real-model coverage</span>
+                <span>boundary / stress coverage</span>
+              </div>
+              <BenchmarkChart series={chartSeries} segments={chartSegments} />
+              <CaseTable cases={cases} showDatasetColumn={selectedDataset === "ALL"} />
               {showDiffPanel ? <CodeDiffPanel operator={selectedOperator} /> : null}
             </>
           )}

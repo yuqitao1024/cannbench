@@ -9,8 +9,31 @@ const benchmarkPayload = {
   records: [
     {
       schema_version: 1,
-      run_id: "softmax-realistic-h800-20260628",
+      run_id: "opbench-nvidia-h800-cuda-pytorch",
       operator: "softmax",
+      family: "attention",
+      dataset: "smoke",
+      case_id: "tiny_logits",
+      shape: [128, 128],
+      dtype: "float16",
+      backend: "nvidia",
+      device_class: "H800",
+      implementation: "ncu",
+      implementation_version: "pytorch",
+      source_kind: "synthetic_smoke",
+      source_project: "cannbench",
+      source_model: "smoke_fixture",
+      source_file: "built-in",
+      source_op: "softmax",
+      metrics: { latency_ms_avg: 0.003, latency_ms_p50: 0.003, latency_ms_p95: 0.004, sample_count: 1 },
+      accuracy: { passed: true, max_abs_error: 0, max_rel_error: 0 },
+      diff_ref: null
+    },
+    {
+      schema_version: 1,
+      run_id: "opbench-nvidia-h800-cuda-pytorch",
+      operator: "softmax",
+      family: "attention",
       dataset: "realistic",
       case_id: "gptj_attention",
       shape: [1, 16, 128, 128],
@@ -18,15 +41,65 @@ const benchmarkPayload = {
       backend: "nvidia",
       device_class: "H800",
       implementation: "ncu",
-      implementation_version: "ncu",
+      implementation_version: "pytorch",
+      source_kind: "real_model",
+      source_project: "TritonBench",
+      source_model: "GPTJForCausalLM",
+      source_file: "hf_train/GPTJForCausalLM_train.json",
+      source_op: "aten._softmax.default",
       metrics: { latency_ms_avg: 0.011, latency_ms_p50: 0.011, latency_ms_p95: 0.012, sample_count: 1 },
       accuracy: { passed: true, max_abs_error: 0, max_rel_error: 0 },
       diff_ref: null
     },
     {
       schema_version: 1,
-      run_id: "embedding-realistic-h800-20260628",
+      run_id: "opbench-ascend-950pr-cann-cannops",
+      operator: "softmax",
+      family: "attention",
+      dataset: "realistic",
+      case_id: "gptj_attention",
+      shape: [1, 16, 128, 128],
+      dtype: "float16",
+      backend: "ascend",
+      device_class: "950PR",
+      implementation: "cann_ops_library",
+      implementation_version: "cannops",
+      source_kind: "real_model",
+      source_project: "TritonBench",
+      source_model: "GPTJForCausalLM",
+      source_file: "hf_train/GPTJForCausalLM_train.json",
+      source_op: "aten._softmax.default",
+      metrics: { latency_ms_avg: 0.016, latency_ms_p50: 0.016, latency_ms_p95: 0.018, sample_count: 1 },
+      accuracy: { passed: true, max_abs_error: 0, max_rel_error: 0 },
+      diff_ref: null
+    },
+    {
+      schema_version: 1,
+      run_id: "opbench-ascend-950pr-simt-v1",
+      operator: "softmax",
+      family: "attention",
+      dataset: "realistic",
+      case_id: "gptj_attention",
+      shape: [1, 16, 128, 128],
+      dtype: "float16",
+      backend: "ascend",
+      device_class: "950PR",
+      implementation: "simt",
+      implementation_version: "v1",
+      source_kind: "real_model",
+      source_project: "TritonBench",
+      source_model: "GPTJForCausalLM",
+      source_file: "hf_train/GPTJForCausalLM_train.json",
+      source_op: "aten._softmax.default",
+      metrics: { latency_ms_avg: 0.014, latency_ms_p50: 0.014, latency_ms_p95: 0.015, sample_count: 1 },
+      accuracy: { passed: true, max_abs_error: 0.0004, max_rel_error: 0.0008 },
+      diff_ref: "softmax/simt/v1"
+    },
+    {
+      schema_version: 1,
+      run_id: "opbench-nvidia-h800-cuda-pytorch",
       operator: "embedding",
+      family: "token_lookup",
       dataset: "realistic",
       case_id: "bert_token_embedding",
       shape: [16, 128, 768],
@@ -34,7 +107,12 @@ const benchmarkPayload = {
       backend: "nvidia",
       device_class: "H800",
       implementation: "ncu",
-      implementation_version: "ncu",
+      implementation_version: "pytorch",
+      source_kind: "real_model",
+      source_project: "TritonBench",
+      source_model: "BERT_pytorch",
+      source_file: "torchbench_train/BERT_pytorch_train.json",
+      source_op: "torch.nn.Embedding",
       metrics: { latency_ms_avg: 0.021, latency_ms_p50: 0.021, latency_ms_p95: 0.023, sample_count: 1 },
       accuracy: { passed: true, max_abs_error: 0, max_rel_error: 0 },
       diff_ref: null
@@ -61,7 +139,18 @@ beforeAll(() => {
           ok: true,
           json: async () => ({
             operator: "softmax",
-            versions: ["v1"]
+            versions: ["v1", "v2"]
+          })
+        };
+      }
+      if (url.includes("/api/simt-diff")) {
+        return {
+          ok: true,
+          json: async () => ({
+            operator: "softmax",
+            base_version: "v1",
+            compare_version: "v2",
+            patch: "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-old\n+new\n"
           })
         };
       }
@@ -90,12 +179,33 @@ describe("App", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /softmax/i })).toHaveAttribute("aria-pressed", "true");
     });
-    expect(screen.getByRole("button", { name: /gptj_attention/i })).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: /gptj_attention/i })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /^embedding\s+1 cases/i }));
 
     expect(screen.getByRole("button", { name: /^embedding\s+1 cases/i })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: /bert_token_embedding/i })).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: /bert_token_embedding/i })).toBeInTheDocument();
+  });
+
+  it("renders metric, split, and series filters plus coverage-first case rows", async () => {
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /^softmax\s+2 cases/i })).toHaveAttribute("aria-pressed", "true");
+    });
+
+    expect(screen.getByRole("button", { name: /^Latency$/i })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: /^ALL$/i })).toHaveAttribute("aria-pressed", "true");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /^NVIDIA H800 PyTorch$/i })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByRole("button", { name: /^Ascend 950PR CANN Ops$/i })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByRole("button", { name: /^Ascend 950PR SIMT v1$/i })).toHaveAttribute("aria-pressed", "true");
+    });
+
+    expect(screen.getByRole("cell", { name: /TritonBench \/ GPTJForCausalLM/i })).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: /real-model coverage/i })).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: /cannbench \/ smoke_fixture/i })).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: /smoke coverage/i })).toBeInTheDocument();
   });
 
   it("opens the GPU JSON import dialog after three title clicks in light theme", async () => {
@@ -154,19 +264,27 @@ describe("App", () => {
   });
 
   it("does not render the diff card when the selected operator has only one simt version", async () => {
-    const fetchSpy = vi.mocked(fetch);
+    vi.mocked(fetch).mockImplementationOnce(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === `/published/${DEFAULT_PUBLISHED_RUN}/meta/benchmark-records.json`) {
+        return {
+          ok: true,
+          json: async () => ({
+            records: benchmarkPayload.records.filter((record) => record.operator !== "softmax" || record.implementation !== "simt")
+          })
+        };
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
     render(<App />);
 
     await waitFor(() => {
       expect(screen.queryByLabelText(/simt operator diff/i)).not.toBeInTheDocument();
     });
-    expect(fetchSpy).toHaveBeenCalledWith(
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith(
       `/published/${DEFAULT_PUBLISHED_RUN}/meta/benchmark-records.json`,
       expect.any(Object)
     );
-    expect(
-      fetchSpy.mock.calls.some(([url]) => String(url).includes("/api/simt-versions"))
-    ).toBe(false);
   });
 
   it("resets the hidden click streak when the theme changes", async () => {
