@@ -215,13 +215,15 @@ def test_build_parser_exposes_prepare_subcommand():
     assert args.seed == 7
 
 
-def test_build_parser_exposes_capture_output_subcommand():
+def test_build_parser_exposes_compare_subcommand():
     parser = build_parser()
     args = parser.parse_args(
         [
-            "capture-output",
-            "--backend",
+            "compare",
+            "--left-backend",
             "nvidia",
+            "--right-backend",
+            "ascend",
             "--op",
             "softmax",
             "--dataset",
@@ -229,30 +231,13 @@ def test_build_parser_exposes_capture_output_subcommand():
             "--case-id",
             "tiny_logits",
             "--output",
-            "nvidia-output",
-        ]
-    )
-
-    assert args.command == "capture-output"
-    assert args.backend == "nvidia"
-    assert args.output.name == "nvidia-output"
-
-
-def test_build_parser_exposes_compare_output_subcommand():
-    parser = build_parser()
-    args = parser.parse_args(
-        [
-            "compare-output",
-            "--left",
-            "nvidia-output",
-            "--right",
-            "ascend-output",
-            "--output",
             "accuracy.json",
         ]
     )
 
-    assert args.command == "compare-output"
+    assert args.command == "compare"
+    assert args.left_backend == "nvidia"
+    assert args.right_backend == "ascend"
     assert args.rtol == 0.001
     assert args.atol == 0.001
 
@@ -405,24 +390,6 @@ def test_build_parser_exposes_report_subcommand():
 
     assert args.command == "report"
     assert args.output.name == "report.md"
-
-
-def test_build_parser_exposes_summarize_profile_subcommand():
-    parser = build_parser()
-    args = parser.parse_args(
-        [
-            "summarize-profile",
-            "--backend",
-            "ascend",
-            "--profile-dir",
-            "results/ascend/profile",
-            "--output",
-            "results/ascend/profile-summary.json",
-        ]
-    )
-
-    assert args.command == "summarize-profile"
-    assert args.backend == "ascend"
 
 
 def test_build_parser_accepts_ascend_backend():
@@ -1065,9 +1032,9 @@ def test_main_prepare_writes_prepared_input_manifest(tmp_path):
     assert "\"case_id\": \"tiny_logits\"" in payload
 
 
-def test_main_capture_output_writes_artifact(tmp_path, monkeypatch):
+def test_main_compare_captures_outputs_and_writes_report(tmp_path, monkeypatch):
     captured: dict[str, object] = {}
-    output = CapturedOperatorOutput(
+    left_output = CapturedOperatorOutput(
         backend="nvidia",
         device_name="Fake GPU",
         op="softmax",
@@ -1078,51 +1045,17 @@ def test_main_capture_output_writes_artifact(tmp_path, monkeypatch):
         shape=(1,),
         values=(1.0,),
     )
-
-    class FakeBackend:
-        def capture_operator_output(self, request):
-            captured["request"] = request
-            return output
-
-    monkeypatch.setattr("cannbench.cli.get_backend", lambda name: FakeBackend())
-
-    def fake_write_operator_output(path, actual_output):
-        captured["output_path"] = path
-        captured["output"] = actual_output
-        return {}
-
-    monkeypatch.setattr("cannbench.cli.write_operator_output", fake_write_operator_output)
-
-    exit_code = main(
-        [
-            "capture-output",
-            "--backend",
-            "nvidia",
-            "--op",
-            "softmax",
-            "--dtype",
-            "float16",
-            "--dataset",
-            "smoke",
-            "--case-id",
-            "tiny_logits",
-            "--seed",
-            "7",
-            "--output",
-            str(tmp_path / "nvidia-output"),
-        ]
+    right_output = CapturedOperatorOutput(
+        backend="ascend",
+        device_name="Fake NPU",
+        op="softmax",
+        dtype="float16",
+        dataset="smoke",
+        case_id="tiny_logits",
+        seed=7,
+        shape=(1,),
+        values=(1.0,),
     )
-
-    assert exit_code == 0
-    assert captured["request"].seed == 7
-    assert captured["request"].warmup == 0
-    assert captured["request"].iterations == 1
-    assert captured["output_path"] == tmp_path / "nvidia-output"
-    assert captured["output"] is output
-
-
-def test_main_compare_output_writes_report(tmp_path, monkeypatch):
-    captured: dict[str, object] = {}
     comparison = OutputComparisonResult(
         passed=True,
         shape_match=True,
@@ -1145,7 +1078,13 @@ def test_main_compare_output_writes_report(tmp_path, monkeypatch):
         atol=0.001,
     )
 
-    monkeypatch.setattr("cannbench.cli.read_operator_output", lambda path: path)
+    class FakeBackend:
+        def capture_operator_output(self, request):
+            requests = captured.setdefault("requests", [])
+            requests.append(request)
+            return left_output if request.backend == "nvidia" else right_output
+
+    monkeypatch.setattr("cannbench.cli.get_backend", lambda name: FakeBackend())
     monkeypatch.setattr(
         "cannbench.cli.compare_operator_outputs",
         lambda left, right, rtol, atol: comparison,
@@ -1162,21 +1101,33 @@ def test_main_compare_output_writes_report(tmp_path, monkeypatch):
 
     exit_code = main(
         [
-            "compare-output",
-            "--left",
-            str(tmp_path / "nvidia-output"),
-            "--right",
-            str(tmp_path / "ascend-output"),
-            "--rtol",
-            "0.001",
-            "--atol",
-            "0.001",
+            "compare",
+            "--left-backend",
+            "nvidia",
+            "--right-backend",
+            "ascend",
+            "--op",
+            "softmax",
+            "--dtype",
+            "float16",
+            "--dataset",
+            "smoke",
+            "--case-id",
+            "tiny_logits",
+            "--seed",
+            "7",
             "--output",
             str(tmp_path / "accuracy.json"),
         ]
     )
 
     assert exit_code == 0
+    assert len(captured["requests"]) == 2
+    assert captured["requests"][0].backend == "nvidia"
+    assert captured["requests"][1].backend == "ascend"
+    assert captured["requests"][0].seed == 7
+    assert captured["requests"][0].warmup == 0
+    assert captured["requests"][0].iterations == 1
     assert captured["report_path"] == tmp_path / "accuracy.json"
     assert captured["comparison"] is comparison
 
@@ -1761,42 +1712,6 @@ def test_main_serve_invokes_static_service(tmp_path, monkeypatch):
         "port": 9000,
         "enable_gpu_upload": True,
     }
-
-
-def test_main_summarize_profile_writes_summary(tmp_path, monkeypatch):
-    captured: dict[str, object] = {}
-    summary = object()
-
-    monkeypatch.setattr(
-        "cannbench.cli.read_device_profile",
-        lambda profile_dir, backend: captured.setdefault("summary", summary),
-    )
-
-    def fake_write_device_profile_summary(path, actual_summary):
-        captured["output_path"] = path
-        captured["actual_summary"] = actual_summary
-        return path
-
-    monkeypatch.setattr(
-        "cannbench.cli.write_device_profile_summary",
-        fake_write_device_profile_summary,
-    )
-
-    exit_code = main(
-        [
-            "summarize-profile",
-            "--backend",
-            "ascend",
-            "--profile-dir",
-            str(tmp_path / "profile"),
-            "--output",
-            str(tmp_path / "profile-summary.json"),
-        ]
-    )
-
-    assert exit_code == 0
-    assert captured["output_path"] == tmp_path / "profile-summary.json"
-    assert captured["actual_summary"] is summary
 
 
 def test_main_runs_internal_run_from_prepared_input(tmp_path, monkeypatch):

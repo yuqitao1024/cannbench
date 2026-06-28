@@ -120,7 +120,7 @@ def test_collect_remote_artifacts_runs_capture_and_downloads_output(tmp_path):
         [
             "ssh",
             "user@ascend-host",
-            "cd /opt/cannbench && ASCEND_VISIBLE_DEVICES=0 python3 -m cannbench capture-output --backend ascend --prepared-input .cannbench-runs/softmax-run/prepared.json --output .cannbench-runs/softmax-run/output --deploy-custom-op",
+            "cd /opt/cannbench && ASCEND_VISIBLE_DEVICES=0 python3 -m cannbench internal-run --backend ascend --prepared-input .cannbench-runs/softmax-run/prepared.json --output-dir .cannbench-runs/softmax-run/output --run-name captured-output --deploy-custom-op",
         ],
         [
             "scp",

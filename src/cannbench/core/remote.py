@@ -161,10 +161,11 @@ def collect_remote_artifacts(
         command = (
             f"{_remote_command_prefix(endpoint)}"
             f"{_remote_command_env(endpoint.env)}"
-            f"{shlex.quote(endpoint.python)} -m cannbench capture-output "
+            f"{shlex.quote(endpoint.python)} -m cannbench internal-run "
             f"--backend {shlex.quote(endpoint.backend)} "
             f"--prepared-input {shlex.quote(relative_prepared)} "
-            f"--output {shlex.quote(relative_output)}"
+            f"--output-dir {shlex.quote(relative_output)} "
+            "--run-name captured-output"
         )
         if deploy_custom_op:
             command = f"{command} --deploy-custom-op"

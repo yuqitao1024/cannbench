@@ -172,20 +172,16 @@ def build_parser() -> argparse.ArgumentParser:
     prepare.add_argument("--seed", type=_non_negative_int, default=0)
     prepare.add_argument("--output", type=Path, required=True)
 
-    capture = subparsers.add_parser("capture-output")
-    capture.add_argument("--backend", choices=["nvidia", "ascend"], required=True)
-    capture.add_argument("--op", choices=list_operator_names())
-    capture.add_argument("--dtype", default="float16")
-    capture.add_argument("--dataset", choices=["smoke", "realistic", "stress"], default="realistic")
-    capture.add_argument("--case-id")
-    capture.add_argument("--prepared-input", type=Path)
-    capture.add_argument("--seed", type=_non_negative_int, default=0)
-    capture.add_argument("--deploy-custom-op", action="store_true", default=False)
-    capture.add_argument("--output", type=Path, required=True)
-
-    compare = subparsers.add_parser("compare-output")
-    compare.add_argument("--left", type=Path, required=True)
-    compare.add_argument("--right", type=Path, required=True)
+    compare = subparsers.add_parser("compare")
+    compare.add_argument("--left-backend", choices=["nvidia", "ascend"], required=True)
+    compare.add_argument("--right-backend", choices=["nvidia", "ascend"], required=True)
+    compare.add_argument("--op", choices=list_operator_names(), required=True)
+    compare.add_argument("--dtype", default="float16")
+    compare.add_argument("--dataset", choices=["smoke", "realistic", "stress"], default="realistic")
+    compare.add_argument("--case-id", required=True)
+    compare.add_argument("--seed", type=_non_negative_int, default=0)
+    compare.add_argument("--left-deploy-custom-op", action="store_true", default=False)
+    compare.add_argument("--right-deploy-custom-op", action="store_true", default=False)
     compare.add_argument("--rtol", type=_non_negative_float, default=0.001)
     compare.add_argument("--atol", type=_non_negative_float, default=0.001)
     compare.add_argument("--output", type=Path, required=True)
@@ -206,11 +202,6 @@ def build_parser() -> argparse.ArgumentParser:
     report.add_argument("--ascend", type=Path, required=True)
     report.add_argument("--accuracy", type=Path, required=True)
     report.add_argument("--output", type=Path, required=True)
-
-    summarize_profile = subparsers.add_parser("summarize-profile")
-    summarize_profile.add_argument("--backend", choices=["nvidia", "ascend"], required=True)
-    summarize_profile.add_argument("--profile-dir", type=Path, required=True)
-    summarize_profile.add_argument("--output", type=Path, required=True)
 
     return parser
 
@@ -784,6 +775,40 @@ def _run_internal_command(args: argparse.Namespace) -> None:
     )
 
 
+def _run_compare_command(args: argparse.Namespace) -> None:
+    left_request = OperatorBenchmarkRequest(
+        backend=args.left_backend,
+        op=args.op,
+        dtype=args.dtype,
+        dataset=args.dataset,
+        case_id=args.case_id,
+        warmup=0,
+        iterations=1,
+        seed=args.seed,
+        deploy_custom_op=args.left_deploy_custom_op,
+    )
+    right_request = OperatorBenchmarkRequest(
+        backend=args.right_backend,
+        op=args.op,
+        dtype=args.dtype,
+        dataset=args.dataset,
+        case_id=args.case_id,
+        warmup=0,
+        iterations=1,
+        seed=args.seed,
+        deploy_custom_op=args.right_deploy_custom_op,
+    )
+    left_output = get_backend(args.left_backend).capture_operator_output(left_request)
+    right_output = get_backend(args.right_backend).capture_operator_output(right_request)
+    result = compare_operator_outputs(
+        left_output,
+        right_output,
+        rtol=args.rtol,
+        atol=args.atol,
+    )
+    write_output_comparison(args.output, result)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -806,51 +831,9 @@ def main(argv: list[str] | None = None) -> int:
             seed=args.seed,
         )
         write_prepared_operator_input(args.output, prepared)
-    elif args.command == "capture-output":
+    elif args.command == "compare":
         try:
-            if args.prepared_input is not None:
-                prepared = read_prepared_operator_input(args.prepared_input)
-                request = OperatorBenchmarkRequest(
-                    backend=args.backend,
-                    op=prepared.op,
-                    dtype=prepared.dtype,
-                    dataset=prepared.dataset,
-                    case_id=prepared.case.case_id,
-                    warmup=0,
-                    iterations=1,
-                    seed=prepared.seed,
-                    deploy_custom_op=args.deploy_custom_op,
-                )
-            else:
-                if not args.op or not args.case_id:
-                    parser.error("--op and --case-id are required unless --prepared-input is set")
-                request = OperatorBenchmarkRequest(
-                    backend=args.backend,
-                    op=args.op,
-                    dtype=args.dtype,
-                    dataset=args.dataset,
-                    case_id=args.case_id,
-                    warmup=0,
-                    iterations=1,
-                    seed=args.seed,
-                    deploy_custom_op=args.deploy_custom_op,
-                )
-            backend = get_backend(args.backend)
-            output = backend.capture_operator_output(request)
-            write_operator_output(args.output, output)
-        except (RuntimeError, ValueError) as exc:
-            parser.error(str(exc))
-    elif args.command == "compare-output":
-        try:
-            left = read_operator_output(args.left)
-            right = read_operator_output(args.right)
-            result = compare_operator_outputs(
-                left,
-                right,
-                rtol=args.rtol,
-                atol=args.atol,
-            )
-            write_output_comparison(args.output, result)
+            _run_compare_command(args)
         except (RuntimeError, ValueError) as exc:
             parser.error(str(exc))
     elif args.command == "report":
@@ -877,12 +860,6 @@ def main(argv: list[str] | None = None) -> int:
                 port=args.port,
                 enable_gpu_upload=args.enable_gpu_upload,
             )
-        except (RuntimeError, ValueError) as exc:
-            parser.error(str(exc))
-    elif args.command == "summarize-profile":
-        try:
-            summary = read_device_profile(args.profile_dir, backend=args.backend)
-            write_device_profile_summary(args.output, summary)
         except (RuntimeError, ValueError) as exc:
             parser.error(str(exc))
     return 0
