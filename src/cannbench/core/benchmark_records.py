@@ -33,6 +33,10 @@ def _device_class(device_name: str) -> str:
     upper = name.upper()
     if "H800" in upper:
         return "H800"
+    if "950PR" in upper:
+        return "950PR"
+    if "910B" in upper:
+        return "910B"
     if "ASCEND" in upper:
         return "Ascend"
     return name
@@ -47,7 +51,7 @@ def _implementation_and_version(
     if backend == "ascend":
         if implementation == "simt":
             return "simt", "v1"
-        return "cann_ops_library", "cann"
+        return "cann_ops_library", "cannops"
     if backend == "nvidia":
         return "ncu", "ncu"
     return implementation or "unknown", implementation or "unknown"

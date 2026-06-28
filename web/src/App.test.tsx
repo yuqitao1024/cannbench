@@ -3,7 +3,13 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
-import { DEFAULT_PUBLISHED_RUN } from "./data/benchmarkRecordsApi";
+
+const publishedRuns = {
+  runs: [
+    "opbench-ascend-950pr-cann-cannops-softmax-realistic-float16",
+    "opbench-ascend-950pr-simt-v1-softmax-realistic-float16"
+  ]
+};
 
 const benchmarkPayload = {
   records: [
@@ -31,29 +37,7 @@ const benchmarkPayload = {
     },
     {
       schema_version: 1,
-      run_id: "opbench-nvidia-h800-cuda-pytorch",
-      operator: "softmax",
-      family: "attention",
-      dataset: "realistic",
-      case_id: "gptj_attention",
-      shape: [1, 16, 128, 128],
-      dtype: "float16",
-      backend: "nvidia",
-      device_class: "H800",
-      implementation: "ncu",
-      implementation_version: "pytorch",
-      source_kind: "real_model",
-      source_project: "TritonBench",
-      source_model: "GPTJForCausalLM",
-      source_file: "hf_train/GPTJForCausalLM_train.json",
-      source_op: "aten._softmax.default",
-      metrics: { latency_ms_avg: 0.011, latency_ms_p50: 0.011, latency_ms_p95: 0.012, sample_count: 1 },
-      accuracy: { passed: true, max_abs_error: 0, max_rel_error: 0 },
-      diff_ref: null
-    },
-    {
-      schema_version: 1,
-      run_id: "opbench-ascend-950pr-cann-cannops",
+      run_id: "opbench-ascend-950pr-cann-cannops-softmax-realistic-float16",
       operator: "softmax",
       family: "attention",
       dataset: "realistic",
@@ -75,7 +59,7 @@ const benchmarkPayload = {
     },
     {
       schema_version: 1,
-      run_id: "opbench-ascend-950pr-simt-v1",
+      run_id: "opbench-ascend-950pr-simt-v1-softmax-realistic-float16",
       operator: "softmax",
       family: "attention",
       dataset: "realistic",
@@ -95,30 +79,21 @@ const benchmarkPayload = {
       accuracy: { passed: true, max_abs_error: 0.0004, max_rel_error: 0.0008 },
       diff_ref: "softmax/simt/v1"
     },
-    {
-      schema_version: 1,
-      run_id: "opbench-nvidia-h800-cuda-pytorch",
-      operator: "embedding",
-      family: "token_lookup",
-      dataset: "realistic",
-      case_id: "bert_token_embedding",
-      shape: [16, 128, 768],
-      dtype: "float16",
-      backend: "nvidia",
-      device_class: "H800",
-      implementation: "ncu",
-      implementation_version: "pytorch",
-      source_kind: "real_model",
-      source_project: "TritonBench",
-      source_model: "BERT_pytorch",
-      source_file: "torchbench_train/BERT_pytorch_train.json",
-      source_op: "torch.nn.Embedding",
-      metrics: { latency_ms_avg: 0.021, latency_ms_p50: 0.021, latency_ms_p95: 0.023, sample_count: 1 },
-      accuracy: { passed: true, max_abs_error: 0, max_rel_error: 0 },
-      diff_ref: null
-    }
   ]
 };
+
+const payloadByRun = {
+  "opbench-ascend-950pr-cann-cannops-softmax-realistic-float16": {
+    records: benchmarkPayload.records.filter(
+      (record) => record.run_id === "opbench-ascend-950pr-cann-cannops-softmax-realistic-float16"
+    )
+  },
+  "opbench-ascend-950pr-simt-v1-softmax-realistic-float16": {
+    records: benchmarkPayload.records.filter(
+      (record) => record.run_id === "opbench-ascend-950pr-simt-v1-softmax-realistic-float16"
+    )
+  }
+} satisfies Record<string, { records: typeof benchmarkPayload.records }>;
 
 beforeAll(() => {
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
@@ -130,11 +105,19 @@ beforeAll(() => {
     "fetch",
     vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
-      if (url === `/published/${DEFAULT_PUBLISHED_RUN}/meta/benchmark-records.json`) {
+      if (url === "/published/index.json") {
         return {
           ok: true,
-          json: async () => benchmarkPayload
+          json: async () => publishedRuns
         };
+      }
+      for (const [runName, payload] of Object.entries(payloadByRun)) {
+        if (url === `/published/${runName}/meta/benchmark-records.json`) {
+          return {
+            ok: true,
+            json: async () => payload
+          };
+        }
       }
       if (url.includes("/api/simt-versions")) {
         return {
@@ -179,35 +162,27 @@ describe("App", () => {
 
     expect(screen.getByRole("heading", { name: /^CANNBench$/i })).toBeInTheDocument();
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /softmax/i })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByRole("button", { name: /^softmax\s+1 cases/i })).toHaveAttribute("aria-pressed", "true");
     });
     expect(screen.getByRole("cell", { name: /gptj_attention/i })).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: /^embedding\s+1 cases/i }));
-
-    expect(screen.getByRole("button", { name: /^embedding\s+1 cases/i })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("cell", { name: /bert_token_embedding/i })).toBeInTheDocument();
   });
 
   it("renders metric, split, and series filters plus coverage-first case rows", async () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /^softmax\s+2 cases/i })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByRole("button", { name: /^softmax\s+1 cases/i })).toHaveAttribute("aria-pressed", "true");
     });
 
     expect(screen.getByRole("button", { name: /^Latency$/i })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: /^ALL$/i })).toHaveAttribute("aria-pressed", "true");
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /^NVIDIA H800 PyTorch$/i })).toHaveAttribute("aria-pressed", "true");
       expect(screen.getByRole("button", { name: /^Ascend 950PR CANN Ops$/i })).toHaveAttribute("aria-pressed", "true");
       expect(screen.getByRole("button", { name: /^Ascend 950PR SIMT v1$/i })).toHaveAttribute("aria-pressed", "true");
     });
 
     expect(screen.getByRole("cell", { name: /TritonBench \/ GPTJForCausalLM/i })).toBeInTheDocument();
     expect(screen.getByRole("cell", { name: /real-model coverage/i })).toBeInTheDocument();
-    expect(screen.getByRole("cell", { name: /cannbench \/ smoke_fixture/i })).toBeInTheDocument();
-    expect(screen.getByRole("cell", { name: /smoke coverage/i })).toBeInTheDocument();
   });
 
   it("opens the GPU JSON import dialog after three title clicks in light theme", async () => {
@@ -268,7 +243,31 @@ describe("App", () => {
   it("does not render the diff card when the selected operator has only one simt version", async () => {
     vi.mocked(fetch).mockImplementationOnce(async (input: string | URL | Request) => {
       const url = String(input);
-      if (url === `/published/${DEFAULT_PUBLISHED_RUN}/meta/benchmark-records.json`) {
+      if (url === "/published/index.json") {
+        return {
+          ok: true,
+          status: 200,
+          headers: {
+            get: () => "application/json"
+          },
+          text: async () => JSON.stringify(publishedRuns),
+          json: async () => publishedRuns
+        } as unknown as Response;
+      }
+      if (url === "/published/opbench-ascend-950pr-cann-cannops-softmax-realistic-float16/meta/benchmark-records.json") {
+        return {
+          ok: true,
+          status: 200,
+          headers: {
+            get: () => "application/json"
+          },
+          text: async () => JSON.stringify(payloadByRun["opbench-ascend-950pr-cann-cannops-softmax-realistic-float16"]),
+          json: async () => ({
+            records: payloadByRun["opbench-ascend-950pr-cann-cannops-softmax-realistic-float16"].records
+          })
+        } as unknown as Response;
+      }
+      if (url === "/published/opbench-ascend-950pr-simt-v1-softmax-realistic-float16/meta/benchmark-records.json") {
         return {
           ok: true,
           status: 200,
@@ -277,10 +276,14 @@ describe("App", () => {
           },
           text: async () =>
             JSON.stringify({
-              records: benchmarkPayload.records.filter((record) => record.operator !== "softmax" || record.implementation !== "simt")
+              records: payloadByRun["opbench-ascend-950pr-simt-v1-softmax-realistic-float16"].records.filter(
+                (record) => record.implementation !== "simt"
+              )
             }),
           json: async () => ({
-            records: benchmarkPayload.records.filter((record) => record.operator !== "softmax" || record.implementation !== "simt")
+            records: payloadByRun["opbench-ascend-950pr-simt-v1-softmax-realistic-float16"].records.filter(
+              (record) => record.implementation !== "simt"
+            )
           })
         } as unknown as Response;
       }
@@ -291,10 +294,7 @@ describe("App", () => {
     await waitFor(() => {
       expect(screen.queryByLabelText(/simt operator diff/i)).not.toBeInTheDocument();
     });
-    expect(vi.mocked(fetch)).toHaveBeenCalledWith(
-      `/published/${DEFAULT_PUBLISHED_RUN}/meta/benchmark-records.json`,
-      expect.any(Object)
-    );
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith("/published/index.json", expect.any(Object));
   });
 
   it("resets the hidden click streak when the theme changes", async () => {

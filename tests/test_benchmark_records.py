@@ -31,17 +31,17 @@ def test_build_collect_benchmark_record_for_ascend_simt():
     )
 
     record = build_collect_benchmark_record(
-        run_id="softmax-realistic-simt",
+        run_id="opbench-ascend-950pr-simt-v1-softmax-realistic-float16",
         backend="ascend",
         implementation="simt",
         prepared=prepared,
-        perf_payload={"device_name": "Ascend 910B"},
+        perf_payload={"device_name": "Ascend950PR_9589"},
         profile_summary=profile_summary,
     )
 
     assert record["implementation"] == "simt"
     assert record["implementation_version"] == "v1"
-    assert record["device_class"] == "Ascend"
+    assert record["device_class"] == "950PR"
     assert record["shape"] == [4, 8, 1024, 1024]
     assert record["family"] == "attention"
     assert record["source_kind"] == "real_model"
@@ -50,6 +50,38 @@ def test_build_collect_benchmark_record_for_ascend_simt():
     assert record["source_file"] == "hf_train/T5Small_train.json"
     assert record["source_op"] == "aten._softmax.default"
     assert record["diff_ref"] == "softmax/simt/v1"
+
+
+def test_build_collect_benchmark_record_for_ascend_cann_ops():
+    prepared = build_prepared_operator_input(
+        op="softmax",
+        dtype="float16",
+        dataset="realistic",
+        case_id="t5_attention",
+        seed=7,
+    )
+    profile_summary = DeviceProfileSummary(
+        backend="ascend",
+        sample_count=2,
+        latency_ms_avg=0.9,
+        latency_ms_p50=0.9,
+        latency_ms_p95=1.0,
+        latency_ms_p99=1.1,
+        source_files=("op_summary.csv",),
+    )
+
+    record = build_collect_benchmark_record(
+        run_id="opbench-ascend-950pr-cann-cannops-softmax-realistic-float16",
+        backend="ascend",
+        implementation="cann_ops_library",
+        prepared=prepared,
+        perf_payload={"device_name": "Ascend950PR_9589"},
+        profile_summary=profile_summary,
+    )
+
+    assert record["implementation"] == "cann_ops_library"
+    assert record["implementation_version"] == "cannops"
+    assert record["device_class"] == "950PR"
 
 
 def test_build_benchmark_record_for_nvidia_ncu():

@@ -1,0 +1,6 @@
+{
+  "runs": [
+    "opbench-ascend-950pr-cann-cannops-softmax-realistic-float16",
+    "opbench-ascend-950pr-simt-v1-softmax-realistic-float16"
+  ]
+}
