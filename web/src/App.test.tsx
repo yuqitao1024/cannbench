@@ -124,6 +124,8 @@ beforeAll(() => {
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
     measureText: (text: string) => ({ width: text.length * 8 })
   } as CanvasRenderingContext2D);
+  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(960);
+  vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(360);
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: string | URL | Request) => {
