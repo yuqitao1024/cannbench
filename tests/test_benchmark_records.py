@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from cannbench.core.benchmark_records import (
+    build_benchmark_record,
     build_collect_benchmark_record,
     read_profile_summary,
     write_benchmark_records_json,
@@ -43,6 +44,40 @@ def test_build_collect_benchmark_record_for_ascend_simt():
     assert record["device_class"] == "Ascend"
     assert record["shape"] == [4, 8, 1024, 1024]
     assert record["diff_ref"] == "softmax/simt/v1"
+
+
+def test_build_benchmark_record_for_nvidia_ncu():
+    prepared = build_prepared_operator_input(
+        op="softmax",
+        dtype="float16",
+        dataset="realistic",
+        case_id="t5_attention",
+        seed=7,
+    )
+    profile_summary = DeviceProfileSummary(
+        backend="nvidia",
+        sample_count=2,
+        latency_ms_avg=0.2,
+        latency_ms_p50=0.2,
+        latency_ms_p95=0.3,
+        latency_ms_p99=0.4,
+        source_files=("ncu.csv",),
+    )
+
+    record = build_benchmark_record(
+        run_id="softmax-realistic-ncu",
+        backend="nvidia",
+        implementation=None,
+        prepared=prepared,
+        device_name="NVIDIA H800 PCIe",
+        profile_summary=profile_summary,
+    )
+
+    assert record["implementation"] == "ncu"
+    assert record["implementation_version"] == "ncu"
+    assert record["device_class"] == "H800"
+    assert record["shape"] == [4, 8, 1024, 1024]
+    assert record["diff_ref"] is None
 
 
 def test_read_profile_summary_and_write_benchmark_records_json(tmp_path: Path):

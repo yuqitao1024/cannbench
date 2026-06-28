@@ -21,6 +21,12 @@ class BenchExecutionArtifacts:
     profile: BenchProfileArtifacts | None = None
 
 
+@dataclass(frozen=True)
+class BenchCaseExecutionResult:
+    artifacts: BenchExecutionArtifacts
+    result_path: Path | None = None
+
+
 RemoteProfileArtifacts = BenchProfileArtifacts
 RemoteExecutionArtifacts = BenchExecutionArtifacts
 

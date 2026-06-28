@@ -60,7 +60,7 @@ class NvidiaBackend(TorchOperatorBackend):
                 "python3",
                 "-m",
                 "cannbench",
-                "operator",
+                "internal-run",
                 "--backend",
                 "nvidia",
                 "--prepared-input",

@@ -1218,3 +1218,67 @@ def test_backend_rejects_negative_warmup():
             warmup=-1,
             iterations=1,
         )
+
+
+def test_nvidia_profile_operator_device_time_invokes_internal_run(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeCuda:
+        @staticmethod
+        def is_available():
+            return True
+
+        @staticmethod
+        def synchronize():
+            return None
+
+        @staticmethod
+        def get_device_name(device):
+            del device
+            return "NVIDIA H800 PCIe"
+
+    class FakeTorch:
+        cuda = FakeCuda()
+        device = staticmethod(lambda kind: kind)
+
+    monkeypatch.setitem(sys.modules, "torch", FakeTorch())
+
+    from cannbench.backends.pytorch_backend import NvidiaBackend
+
+    def fake_run(command, cwd=None, text=None, capture_output=None, check=None):
+        del text, capture_output, check
+        captured["command"] = command
+        captured["cwd"] = cwd
+        profile_dir = cwd / "profile"
+        perf_dir = cwd / "perf"
+        profile_dir.mkdir(parents=True, exist_ok=True)
+        perf_dir.mkdir(parents=True, exist_ok=True)
+        (profile_dir / "ncu.csv").write_text(
+            "Kernel Name,Metric Name,Metric Unit,Metric Value\n"
+            "softmax,gpu__time_duration.sum,nsecond,100000\n",
+            encoding="utf-8",
+        )
+        (perf_dir / "benchmark.json").write_text(
+            '{"device_name":"NVIDIA H800 PCIe"}\n',
+            encoding="utf-8",
+        )
+        return SimpleNamespace(returncode=0, stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    backend = NvidiaBackend()
+    request = OperatorBenchmarkRequest(
+        backend="nvidia",
+        op="softmax",
+        dtype="float16",
+        dataset="smoke",
+        case_id="tiny_logits",
+        warmup=2,
+        iterations=3,
+    )
+
+    result = backend.profile_operator_device_time(request)
+
+    assert result.profile.device_name == "NVIDIA H800 PCIe"
+    assert "internal-run" in " ".join(captured["command"])
+    assert " operator " not in f" {' '.join(captured['command'])} "

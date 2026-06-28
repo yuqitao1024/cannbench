@@ -1,6 +1,11 @@
 from pathlib import Path
 
-from cannbench.core.execution import BenchExecutionArtifacts, BenchProfileArtifacts, read_artifact_tree
+from cannbench.core.execution import (
+    BenchCaseExecutionResult,
+    BenchExecutionArtifacts,
+    BenchProfileArtifacts,
+    read_artifact_tree,
+)
 from cannbench.core.profile import DeviceProfileSummary
 
 
@@ -43,3 +48,22 @@ def test_bench_execution_artifacts_can_represent_profiled_case():
 
     assert artifacts.profile is profile
     assert artifacts.output_artifacts[0][0] == "tensor.json"
+
+
+def test_bench_case_execution_result_keeps_result_path():
+    result = BenchCaseExecutionResult(
+        artifacts=BenchExecutionArtifacts(),
+        result_path=Path("perf/softmax.json"),
+    )
+
+    assert result.result_path == Path("perf/softmax.json")
+
+
+def test_bench_case_execution_result_can_store_output_artifacts_without_profile():
+    result = BenchCaseExecutionResult(
+        artifacts=BenchExecutionArtifacts(output_artifacts=(("tensor.json", b"{}"),)),
+        result_path=Path("output/softmax.json"),
+    )
+
+    assert result.artifacts.profile is None
+    assert result.artifacts.output_artifacts == (("tensor.json", b"{}"),)
