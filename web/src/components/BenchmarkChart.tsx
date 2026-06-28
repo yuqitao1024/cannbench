@@ -44,7 +44,7 @@ export function BenchmarkChart({ series, segments }: BenchmarkChartProps) {
     }
 
     const chart = echarts.init(chartRef.current, undefined, { renderer: "svg" });
-    const caseIds = series[0]?.points.map((point) => point.caseId) ?? [];
+    const caseMarkers = series[0]?.points.map((_, index) => index + 1) ?? [];
     chart.setOption({
       color: SERIES_COLORS,
       backgroundColor: "transparent",
@@ -62,8 +62,9 @@ export function BenchmarkChart({ series, segments }: BenchmarkChartProps) {
       grid: { top: 62, right: 20, bottom: 72, left: 62 },
       xAxis: {
         type: "category",
-        data: caseIds,
-        axisLabel: { color: "#a89984", rotate: 22, interval: 0 },
+        data: caseMarkers,
+        axisLabel: { show: false },
+        axisTick: { show: false },
         axisLine: { lineStyle: { color: "rgba(168, 153, 132, 0.24)" } }
       },
       yAxis: {
