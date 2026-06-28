@@ -99,11 +99,6 @@ def _resolve_deploy_custom_op(backend: str, implementation: str | None, deploy_c
     return deploy_custom_op
 
 
-def _prepared_input_path(output_dir: Path, op: str, dataset: str, case_id: str, dtype: str, seed: int) -> Path:
-    layout = build_run_layout(output_dir, "_prepared")
-    return layout.root / op / dataset / f"{case_id}-{dtype}-seed{seed}.json"
-
-
 def _prepared_manifest_path(base_dir: Path, op: str, dataset: str, case_id: str, dtype: str, seed: int) -> Path:
     return base_dir / op / dataset / f"{case_id}-{dtype}-seed{seed}.json"
 
@@ -278,6 +273,38 @@ def _prepared_reference_for_plan(
     return prepared_path, _relative_artifact_path(layout_root, prepared_path) or prepared_path.name
 
 
+def _single_case_plan_from_args(args: argparse.Namespace) -> PreparedInputPlan:
+    if args.prepared_input is not None:
+        plans = expand_prepared_input_plans(
+            op=args.op,
+            dtype=args.dtype,
+            dataset=args.dataset,
+            case_id=args.case_id,
+            seed=args.seed,
+            prepared_input=args.prepared_input,
+        )
+        if len(plans) != 1:
+            raise ValueError("single-case bench requires exactly one prepared input plan")
+        return plans[0]
+
+    request = _build_request_from_args(args)
+    prepared = build_prepared_operator_input(
+        op=request.op,
+        dtype=request.dtype,
+        dataset=request.dataset,
+        case_id=request.case_id,
+        seed=request.seed,
+    )
+    return PreparedInputPlan(
+        op=prepared.op,
+        dataset=prepared.dataset,
+        case_id=prepared.case.case_id,
+        dtype=prepared.dtype,
+        seed=prepared.seed,
+        prepared=prepared,
+    )
+
+
 def _execute_benchmark_case(
     backend,
     request: OperatorBenchmarkRequest,
@@ -329,43 +356,6 @@ def _validate_unique_batch_artifact_stems(plans: list) -> None:
                 f"{stem!r} from prepared inputs {previous_ref!r} and {plan_ref!r}"
             )
         seen[stem] = plan_ref
-
-
-def _copy_directory_contents(source_dir: Path, dest_dir: Path) -> None:
-    if not source_dir.is_dir():
-        return
-    shutil.copytree(source_dir, dest_dir, dirs_exist_ok=True)
-
-
-def _copy_batch_collect_perf_artifacts(
-    source_dir: Path,
-    dest_dir: Path,
-    artifact_stem: str,
-) -> Path | None:
-    if not source_dir.is_dir():
-        return None
-
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    preferred_result_path: Path | None = None
-    copied_any = False
-
-    for source_path in sorted(source_dir.iterdir()):
-        if not source_path.is_file():
-            continue
-        if source_path.name.startswith("benchmark."):
-            dest_path = dest_dir / f"{artifact_stem}{source_path.suffix}"
-        else:
-            dest_path = dest_dir / f"{artifact_stem}-{source_path.name}"
-        shutil.copy2(source_path, dest_path)
-        copied_any = True
-        if source_path.suffix == ".json":
-            preferred_result_path = dest_path
-        elif preferred_result_path is None:
-            preferred_result_path = dest_path
-
-    if not copied_any:
-        return None
-    return preferred_result_path
 
 
 def _write_perf_artifacts(
@@ -782,80 +772,23 @@ def _run_batch_remote_bench(args: argparse.Namespace) -> None:
     )
 
 
-def _run_single_local_bench(args: argparse.Namespace) -> None:
+def _run_single_bench(args: argparse.Namespace) -> None:
     run_name = args.run_name or "operator-benchmark"
-    if args.prepared_input is None:
-        request = _build_request_from_args(args)
-        prepared = build_prepared_operator_input(
-            op=request.op,
-            dtype=request.dtype,
-            dataset=request.dataset,
-            case_id=request.case_id,
-            seed=request.seed,
+    if args.endpoint is None:
+        _run_local_bench_with_plans(
+            args,
+            plans=[_single_case_plan_from_args(args)],
+            run_name=run_name,
         )
-        plans = [
-            PreparedInputPlan(
-                op=prepared.op,
-                dataset=prepared.dataset,
-                case_id=prepared.case.case_id,
-                dtype=prepared.dtype,
-                seed=prepared.seed,
-                prepared=prepared,
-            )
-        ]
-    else:
-        plans = expand_prepared_input_plans(
-            op=args.op,
-            dtype=args.dtype,
-            dataset=args.dataset,
-            case_id=args.case_id,
-            seed=args.seed,
-            prepared_input=args.prepared_input,
-        )
-    if len(plans) != 1:
-        raise ValueError("single-case local bench requires exactly one prepared input plan")
-    _run_local_bench_with_plans(args, plans=plans, run_name=run_name)
+        return
 
-
-def _run_single_remote_bench(args: argparse.Namespace) -> None:
     run_name = args.run_name or args.run_id
     endpoint = read_remote_endpoint(args.endpoint)
     if not run_name:
         raise ValueError("single-case remote bench requires --run-name or --run-id")
-    if args.prepared_input is None:
-        if not args.dataset or not args.case_id:
-            raise ValueError("--dataset and --case-id are required for single-case execution")
-        prepared = build_prepared_operator_input(
-            op=args.op,
-            dtype=args.dtype,
-            dataset=args.dataset,
-            case_id=args.case_id,
-            seed=args.seed,
-        )
-        plans = [
-            PreparedInputPlan(
-                op=prepared.op,
-                dataset=prepared.dataset,
-                case_id=prepared.case.case_id,
-                dtype=prepared.dtype,
-                seed=prepared.seed,
-                prepared=prepared,
-            )
-        ]
-    else:
-        plans = expand_prepared_input_plans(
-            op=args.op,
-            dtype=args.dtype,
-            dataset=args.dataset,
-            case_id=args.case_id,
-            seed=args.seed,
-            prepared_input=args.prepared_input,
-        )
-    if len(plans) != 1:
-        raise ValueError("single-case remote bench requires exactly one prepared input plan")
     _run_remote_bench_with_plans(
         args,
-        plans=plans,
+        plans=[_single_case_plan_from_args(args)],
         run_name=run_name,
         endpoint=endpoint,
         parent_run_id=args.run_id or run_name,
@@ -876,10 +809,7 @@ def main(argv: list[str] | None = None) -> int:
                     _run_batch_remote_bench(args)
                 return 0
             if args.command == "bench":
-                if args.endpoint is None:
-                    _run_single_local_bench(args)
-                else:
-                    _run_single_remote_bench(args)
+                _run_single_bench(args)
                 return 0
             request = _build_request_from_args(args)
             backend = get_backend(args.backend)

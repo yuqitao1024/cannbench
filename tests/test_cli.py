@@ -712,6 +712,56 @@ def test_main_runs_single_remote_bench_with_profile_layout_and_meta(tmp_path, mo
     assert failures["failure_count"] == 0
 
 
+def test_main_single_local_bench_builds_prepared_plan_from_args(tmp_path, monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeBackend:
+        def run_operator(self, request):
+            return result_for_request(request)
+
+    monkeypatch.setattr("cannbench.cli.get_backend", lambda name: FakeBackend())
+
+    def fake_build_prepared_operator_input(**kwargs):
+        captured["built_kwargs"] = kwargs
+        return build_prepared_operator_input(**kwargs)
+
+    monkeypatch.setattr(
+        "cannbench.cli.build_prepared_operator_input",
+        fake_build_prepared_operator_input,
+    )
+
+    exit_code = main(
+        [
+            "bench",
+            "--backend",
+            "nvidia",
+            "--op",
+            "softmax",
+            "--dtype",
+            "float16",
+            "--dataset",
+            "smoke",
+            "--case-id",
+            "tiny_logits",
+            "--seed",
+            "7",
+            "--output-dir",
+            str(tmp_path),
+            "--run-name",
+            "single-local-plan",
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured["built_kwargs"] == {
+        "op": "softmax",
+        "dtype": "float16",
+        "dataset": "smoke",
+        "case_id": "tiny_logits",
+        "seed": 7,
+    }
+
+
 def test_main_single_bench_uses_single_result_metadata_shape(tmp_path, monkeypatch):
     result = sample_result()
 
