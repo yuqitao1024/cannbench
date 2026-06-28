@@ -122,11 +122,11 @@ def remote_collect_result(
     )
 
 
-def test_build_parser_exposes_operator_subcommand():
+def test_build_parser_exposes_internal_run_subcommand():
     parser = build_parser()
     args = parser.parse_args(
         [
-            "operator",
+            "internal-run",
             "--backend",
             "nvidia",
             "--op",
@@ -138,7 +138,7 @@ def test_build_parser_exposes_operator_subcommand():
         ]
     )
 
-    assert args.command == "operator"
+    assert args.command == "internal-run"
     assert args.backend == "nvidia"
     assert args.op == "softmax"
     assert args.dataset == "realistic"
@@ -154,6 +154,8 @@ def test_build_parser_exposes_bench_subcommand():
             "ascend",
             "--implementation",
             "simt",
+            "--endpoint",
+            "configs/ascend.json",
             "--op",
             "softmax",
             "--dataset",
@@ -166,14 +168,15 @@ def test_build_parser_exposes_bench_subcommand():
     assert args.command == "bench"
     assert args.backend == "ascend"
     assert args.implementation == "simt"
+    assert args.endpoint == Path("configs/ascend.json")
     assert args.op == "softmax"
 
 
-def test_build_parser_accepts_embedding_operator():
+def test_build_parser_accepts_embedding_internal_run():
     parser = build_parser()
     args = parser.parse_args(
         [
-            "operator",
+            "internal-run",
             "--backend",
             "nvidia",
             "--op",
@@ -254,41 +257,10 @@ def test_build_parser_exposes_compare_output_subcommand():
     assert args.atol == 0.001
 
 
-def test_build_parser_exposes_collect_subcommand():
+def test_build_parser_rejects_collect_subcommand():
     parser = build_parser()
-    args = parser.parse_args(
-        [
-            "collect",
-            "--endpoint",
-            "configs/ascend.json",
-            "--output-dir",
-            "results/ascend-softmax",
-            "--run-id",
-            "softmax-run",
-            "--op",
-            "softmax",
-            "--dataset",
-            "realistic",
-            "--case-id",
-            "t5_attention",
-            "--capture-output",
-            "--profile-device-time",
-            "--summarize-profile",
-            "--warmup",
-            "3",
-            "--iterations",
-            "5",
-            "--deploy-custom-op",
-        ]
-    )
-
-    assert args.command == "collect"
-    assert args.capture_output is True
-    assert args.profile_device_time is True
-    assert args.summarize_profile is True
-    assert args.warmup == 3
-    assert args.iterations == 5
-    assert args.deploy_custom_op is True
+    with pytest.raises(SystemExit):
+        parser.parse_args(["collect"])
 
 
 def test_build_parser_accepts_prepared_dir_for_bench():
@@ -311,15 +283,15 @@ def test_build_parser_accepts_prepared_dir_for_bench():
     assert args.run_name == "softmax-batch"
 
 
-def test_build_parser_accepts_prepared_dir_for_collect():
+def test_build_parser_accepts_prepared_dir_for_remote_bench():
     parser = build_parser()
     args = parser.parse_args(
         [
-            "collect",
+            "bench",
+            "--backend",
+            "ascend",
             "--endpoint",
             "configs/ascend.json",
-            "--output-dir",
-            "results/ascend-softmax",
             "--op",
             "softmax",
             "--prepared-dir",
@@ -375,11 +347,11 @@ def test_build_parser_exposes_serve_subcommand():
     assert args.enable_gpu_upload is True
 
 
-def test_build_parser_defaults_operator_iterations_to_one():
+def test_build_parser_defaults_internal_run_iterations_to_one():
     parser = build_parser()
     args = parser.parse_args(
         [
-            "operator",
+            "internal-run",
             "--backend",
             "nvidia",
             "--op",
@@ -394,22 +366,21 @@ def test_build_parser_defaults_operator_iterations_to_one():
     assert args.iterations == 1
 
 
-def test_build_parser_defaults_collect_iterations_to_one():
+def test_build_parser_defaults_bench_iterations_to_one():
     parser = build_parser()
     args = parser.parse_args(
         [
-            "collect",
+            "bench",
+            "--backend",
+            "ascend",
             "--endpoint",
             "configs/ascend.json",
-            "--output-dir",
-            "results/ascend-softmax",
             "--op",
             "softmax",
             "--dataset",
             "smoke",
             "--case-id",
             "tiny_logits",
-            "--profile-device-time",
         ]
     )
 
@@ -458,7 +429,7 @@ def test_build_parser_accepts_ascend_backend():
     parser = build_parser()
     args = parser.parse_args(
         [
-            "operator",
+            "internal-run",
             "--backend",
             "ascend",
             "--op",
@@ -477,7 +448,7 @@ def test_build_parser_exposes_boolean_custom_op_deployment_flag():
     parser = build_parser()
     args = parser.parse_args(
         [
-            "operator",
+            "internal-run",
             "--backend",
             "ascend",
             "--op",
@@ -493,7 +464,7 @@ def test_build_parser_exposes_boolean_custom_op_deployment_flag():
     assert args.deploy_custom_op is True
 
 
-def test_main_runs_operator_benchmark_and_writes_outputs(tmp_path, monkeypatch):
+def test_main_runs_internal_run_and_writes_outputs(tmp_path, monkeypatch):
     captured: dict[str, object] = {}
     result = sample_result()
 
@@ -515,7 +486,7 @@ def test_main_runs_operator_benchmark_and_writes_outputs(tmp_path, monkeypatch):
 
     exit_code = main(
         [
-            "operator",
+            "internal-run",
             "--backend",
             "nvidia",
             "--op",
@@ -674,7 +645,7 @@ def test_main_runs_single_bench_with_profile_layout_and_meta(tmp_path, monkeypat
     assert failures["failure_count"] == 0
 
 
-def test_main_runs_single_collect_with_profile_layout_and_meta(tmp_path, monkeypatch):
+def test_main_runs_single_remote_bench_with_profile_layout_and_meta(tmp_path, monkeypatch):
     endpoint = RemoteEndpoint(
         name="ascend-a2",
         backend="ascend",
@@ -704,7 +675,9 @@ def test_main_runs_single_collect_with_profile_layout_and_meta(tmp_path, monkeyp
 
     exit_code = main(
         [
-            "collect",
+            "bench",
+            "--backend",
+            "ascend",
             "--endpoint",
             str(tmp_path / "ascend.json"),
             "--output-dir",
@@ -720,8 +693,6 @@ def test_main_runs_single_collect_with_profile_layout_and_meta(tmp_path, monkeyp
             "--case-id",
             "tiny_logits",
             "--capture-output",
-            "--profile-device-time",
-            "--summarize-profile",
         ]
     )
 
@@ -741,7 +712,7 @@ def test_main_runs_single_collect_with_profile_layout_and_meta(tmp_path, monkeyp
     assert failures["failure_count"] == 0
 
 
-def test_main_passes_custom_op_deployment_flag_to_request(tmp_path, monkeypatch):
+def test_main_passes_custom_op_deployment_flag_to_internal_run_request(tmp_path, monkeypatch):
     captured: dict[str, object] = {}
     result = sample_result()
 
@@ -758,7 +729,7 @@ def test_main_passes_custom_op_deployment_flag_to_request(tmp_path, monkeypatch)
 
     exit_code = main(
         [
-            "operator",
+            "internal-run",
             "--backend",
             "ascend",
             "--op",
@@ -923,7 +894,7 @@ def test_main_compare_output_writes_report(tmp_path, monkeypatch):
     assert captured["comparison"] is comparison
 
 
-def test_main_collect_invokes_remote_collection(tmp_path, monkeypatch):
+def test_main_bench_invokes_remote_collection(tmp_path, monkeypatch):
     captured: dict[str, object] = {}
     endpoint_path = tmp_path / "ascend.json"
     prepared_path = tmp_path / "prepared.json"
@@ -967,7 +938,9 @@ def test_main_collect_invokes_remote_collection(tmp_path, monkeypatch):
 
     exit_code = main(
         [
-            "collect",
+            "bench",
+            "--backend",
+            "ascend",
             "--endpoint",
             str(endpoint_path),
             "--prepared-input",
@@ -977,8 +950,6 @@ def test_main_collect_invokes_remote_collection(tmp_path, monkeypatch):
             "--run-id",
             "softmax-run",
             "--capture-output",
-            "--profile-device-time",
-            "--summarize-profile",
             "--warmup",
             "3",
             "--iterations",
@@ -995,13 +966,12 @@ def test_main_collect_invokes_remote_collection(tmp_path, monkeypatch):
     assert captured["run_id"] == "softmax-run"
     assert captured["capture_output"] is True
     assert captured["profile_device_time"] is True
-    assert captured["summarize_profile"] is True
     assert captured["warmup"] == 3
     assert captured["iterations"] == 5
     assert captured["deploy_custom_op"] is False
 
 
-def test_main_collect_builds_prepared_input_when_case_is_provided(tmp_path, monkeypatch):
+def test_main_remote_bench_builds_prepared_input_when_case_is_provided(tmp_path, monkeypatch):
     captured: dict[str, object] = {}
     endpoint_path = tmp_path / "ascend.json"
     output_dir = tmp_path / "results"
@@ -1052,7 +1022,9 @@ def test_main_collect_builds_prepared_input_when_case_is_provided(tmp_path, monk
 
     exit_code = main(
         [
-            "collect",
+            "bench",
+            "--backend",
+            "ascend",
             "--endpoint",
             str(endpoint_path),
             "--output-dir",
@@ -1069,7 +1041,6 @@ def test_main_collect_builds_prepared_input_when_case_is_provided(tmp_path, monk
             "tiny_logits",
             "--seed",
             "7",
-            "--profile-device-time",
         ]
     )
 
@@ -1087,7 +1058,7 @@ def test_main_collect_builds_prepared_input_when_case_is_provided(tmp_path, monk
     assert captured["prepared_input"] == written_path
 
 
-def test_main_runs_batch_collect_and_writes_aggregated_artifacts(tmp_path, monkeypatch):
+def test_main_runs_batch_remote_bench_and_writes_aggregated_artifacts(tmp_path, monkeypatch):
     endpoint = RemoteEndpoint(
         name="ascend-a2",
         backend="ascend",
@@ -1141,7 +1112,9 @@ def test_main_runs_batch_collect_and_writes_aggregated_artifacts(tmp_path, monke
 
     exit_code = main(
         [
-            "collect",
+            "bench",
+            "--backend",
+            "ascend",
             "--endpoint",
             str(tmp_path / "ascend.json"),
             "--output-dir",
@@ -1155,8 +1128,6 @@ def test_main_runs_batch_collect_and_writes_aggregated_artifacts(tmp_path, monke
             "--prepared-dir",
             str(prepared_dir),
             "--capture-output",
-            "--profile-device-time",
-            "--summarize-profile",
             "--implementation",
             "simt",
         ]
@@ -1202,7 +1173,7 @@ def test_main_runs_batch_collect_and_writes_aggregated_artifacts(tmp_path, monke
     assert failures["records"] == []
 
 
-def test_main_batch_collect_records_failures_and_continues(tmp_path, monkeypatch, capsys):
+def test_main_batch_remote_bench_records_failures_and_continues(tmp_path, monkeypatch, capsys):
     endpoint = RemoteEndpoint(
         name="ascend-a2",
         backend="ascend",
@@ -1257,7 +1228,9 @@ def test_main_batch_collect_records_failures_and_continues(tmp_path, monkeypatch
     with pytest.raises(SystemExit) as excinfo:
         main(
             [
-                "collect",
+                "bench",
+                "--backend",
+                "ascend",
                 "--endpoint",
                 str(tmp_path / "ascend.json"),
                 "--output-dir",
@@ -1268,7 +1241,6 @@ def test_main_batch_collect_records_failures_and_continues(tmp_path, monkeypatch
                 "softmax",
                 "--prepared-dir",
                 str(prepared_dir),
-                "--profile-device-time",
             ]
         )
 
@@ -1286,36 +1258,32 @@ def test_main_batch_collect_records_failures_and_continues(tmp_path, monkeypatch
     assert failures["failure_count"] == 1
     assert failures["records"][0]["case_id"] == "tiny_logits"
     assert failures["records"][0]["error"] == "ssh timeout"
-    assert "batch collect completed with 1 failures" in captured.err
+    assert "batch bench completed with 1 failures" in captured.err
 
 
-def test_main_rejects_batch_collect_without_collection_mode(tmp_path, capsys):
+def test_main_remote_bench_requires_endpoint(tmp_path, capsys):
     prepared_dir = tmp_path / "prepared"
     prepared_dir.mkdir()
 
-    with pytest.raises(SystemExit) as excinfo:
+    with pytest.raises(FileNotFoundError):
         main(
             [
-                "collect",
-                "--endpoint",
-                str(tmp_path / "ascend.json"),
-                "--output-dir",
-                str(tmp_path / "results"),
-                "--run-name",
-                "softmax-remote-batch",
+                "bench",
+                "--backend",
+                "ascend",
                 "--op",
                 "softmax",
-                "--prepared-dir",
-                str(prepared_dir),
+                "--dataset",
+                "smoke",
+                "--case-id",
+                "tiny_logits",
+                "--endpoint",
+                str(tmp_path / "missing.json"),
             ]
         )
 
-    captured = capsys.readouterr()
-    assert excinfo.value.code == 2
-    assert "collect requires --capture-output or --profile-device-time" in captured.err
 
-
-def test_main_runs_batch_collect_from_selection_expansion(tmp_path, monkeypatch):
+def test_main_runs_batch_remote_bench_from_selection_expansion(tmp_path, monkeypatch):
     endpoint = RemoteEndpoint(
         name="ascend-a2",
         backend="ascend",
@@ -1347,7 +1315,9 @@ def test_main_runs_batch_collect_from_selection_expansion(tmp_path, monkeypatch)
 
     exit_code = main(
         [
-            "collect",
+            "bench",
+            "--backend",
+            "ascend",
             "--endpoint",
             str(tmp_path / "ascend.json"),
             "--output-dir",
@@ -1358,7 +1328,6 @@ def test_main_runs_batch_collect_from_selection_expansion(tmp_path, monkeypatch)
             "softmax",
             "--dataset",
             "smoke",
-            "--profile-device-time",
         ]
     )
 
@@ -1370,7 +1339,7 @@ def test_main_runs_batch_collect_from_selection_expansion(tmp_path, monkeypatch)
     assert (layout.prepared_dir / "softmax" / "smoke" / "tiny_logits-float16-seed0.json").exists()
 
 
-def test_main_rejects_batch_collect_when_run_directory_exists(tmp_path, monkeypatch, capsys):
+def test_main_rejects_batch_remote_bench_when_run_directory_exists(tmp_path, monkeypatch, capsys):
     endpoint = RemoteEndpoint(
         name="ascend-a2",
         backend="ascend",
@@ -1398,7 +1367,9 @@ def test_main_rejects_batch_collect_when_run_directory_exists(tmp_path, monkeypa
     with pytest.raises(SystemExit) as excinfo:
         main(
             [
-                "collect",
+                "bench",
+                "--backend",
+                "ascend",
                 "--endpoint",
                 str(tmp_path / "ascend.json"),
                 "--output-dir",
@@ -1409,7 +1380,6 @@ def test_main_rejects_batch_collect_when_run_directory_exists(tmp_path, monkeypa
                 "softmax",
                 "--prepared-dir",
                 str(prepared_dir),
-                "--profile-device-time",
             ]
         )
 
@@ -1542,7 +1512,7 @@ def test_main_summarize_profile_writes_summary(tmp_path, monkeypatch):
     assert captured["actual_summary"] is summary
 
 
-def test_main_runs_operator_benchmark_from_prepared_input(tmp_path, monkeypatch):
+def test_main_runs_internal_run_from_prepared_input(tmp_path, monkeypatch):
     captured: dict[str, object] = {}
     prepared_path = tmp_path / "prepared-softmax.json"
     prepared_path.write_text(
@@ -1588,7 +1558,7 @@ def test_main_runs_operator_benchmark_from_prepared_input(tmp_path, monkeypatch)
 
     exit_code = main(
         [
-            "operator",
+            "internal-run",
             "--backend",
             "nvidia",
             "--prepared-input",
@@ -1619,7 +1589,7 @@ def test_main_rejects_zero_iterations():
     with pytest.raises(SystemExit):
         main(
             [
-                "operator",
+                "internal-run",
                 "--backend",
                 "nvidia",
                 "--op",
@@ -1638,7 +1608,7 @@ def test_main_rejects_negative_warmup():
     with pytest.raises(SystemExit):
         main(
             [
-                "operator",
+                "internal-run",
                 "--backend",
                 "nvidia",
                 "--op",
@@ -1766,14 +1736,14 @@ def test_main_rejects_batch_bench_without_op(tmp_path, capsys):
     assert "--op is required with --prepared-dir" in captured.err
 
 
-def test_main_rejects_operator_prepared_dir(tmp_path, capsys):
+def test_main_rejects_internal_run_prepared_dir(tmp_path, capsys):
     prepared_dir = tmp_path / "prepared"
     prepared_dir.mkdir()
 
     with pytest.raises(SystemExit) as excinfo:
         main(
             [
-                "operator",
+                "internal-run",
                 "--backend",
                 "nvidia",
                 "--op",
@@ -1787,7 +1757,7 @@ def test_main_rejects_operator_prepared_dir(tmp_path, capsys):
 
     captured = capsys.readouterr()
     assert excinfo.value.code == 2
-    assert "--prepared-dir is only supported for bench and collect" in captured.err
+    assert "--prepared-dir is only supported for bench" in captured.err
 
 
 def test_main_rejects_dataset_with_prepared_dir(tmp_path, capsys):
@@ -1816,7 +1786,7 @@ def test_main_rejects_dataset_with_prepared_dir(tmp_path, capsys):
     assert "--dataset cannot be used with --prepared-input or --prepared-dir" in captured.err
 
 
-def test_main_rejects_prepared_input_operator_mismatch(tmp_path, capsys):
+def test_main_rejects_prepared_input_internal_run_mismatch(tmp_path, capsys):
     prepared_path = tmp_path / "prepared-softmax.json"
     prepared_path.write_text(
         """{
@@ -1845,7 +1815,7 @@ def test_main_rejects_prepared_input_operator_mismatch(tmp_path, capsys):
     with pytest.raises(SystemExit) as excinfo:
         main(
             [
-                "operator",
+                "internal-run",
                 "--backend",
                 "nvidia",
                 "--op",
@@ -2113,7 +2083,7 @@ def test_main_converts_backend_runtime_failure_to_cli_error(monkeypatch, capsys)
     with pytest.raises(SystemExit) as excinfo:
         main(
             [
-                "operator",
+                "internal-run",
                 "--backend",
                 "nvidia",
                 "--op",

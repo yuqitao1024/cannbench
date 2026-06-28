@@ -130,7 +130,7 @@ def collect_remote_artifacts(
             raise ValueError("endpoint or endpoint_path is required")
         endpoint = read_remote_endpoint(endpoint_path)
     if not capture_output and not profile_device_time:
-        raise ValueError("collect requires --capture-output or --profile-device-time")
+        raise ValueError("remote bench requires --capture-output or device profiling")
 
     actual_run_id = run_id or uuid.uuid4().hex
     remote_run_dir = f"{endpoint.workdir}/.cannbench-runs/{actual_run_id}"
@@ -176,7 +176,7 @@ def collect_remote_artifacts(
 
     if profile_device_time:
         base_operator = (
-            f"{shlex.quote(endpoint.python)} -m cannbench operator "
+            f"{shlex.quote(endpoint.python)} -m cannbench internal-run "
             f"--backend {shlex.quote(endpoint.backend)} "
             f"--prepared-input {shlex.quote(relative_prepared)} "
             f"--warmup {warmup} "

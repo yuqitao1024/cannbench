@@ -78,6 +78,7 @@ def _benchmark_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--dtype", default="float16")
     parser.add_argument("--dataset", choices=["smoke", "realistic", "stress"])
     parser.add_argument("--case-id")
+    parser.add_argument("--seed", type=_non_negative_int, default=0)
     parser.add_argument("--prepared-input", type=Path)
     parser.add_argument("--prepared-dir", type=Path)
     parser.add_argument("--deploy-custom-op", action="store_true", default=False)
@@ -157,9 +158,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     bench = subparsers.add_parser("bench")
     _benchmark_args(bench)
+    bench.add_argument("--endpoint", type=Path)
+    bench.add_argument("--run-id")
+    bench.add_argument("--capture-output", action="store_true", default=False)
 
-    operator = subparsers.add_parser("operator")
-    _benchmark_args(operator)
+    internal_run = subparsers.add_parser("internal-run")
+    _benchmark_args(internal_run)
 
     prepare = subparsers.add_parser("prepare")
     prepare.add_argument("--op", choices=list_operator_names(), required=True)
@@ -186,26 +190,6 @@ def build_parser() -> argparse.ArgumentParser:
     compare.add_argument("--rtol", type=_non_negative_float, default=0.001)
     compare.add_argument("--atol", type=_non_negative_float, default=0.001)
     compare.add_argument("--output", type=Path, required=True)
-
-    collect = subparsers.add_parser("collect")
-    collect.add_argument("--endpoint", type=Path, required=True)
-    collect.add_argument("--output-dir", type=Path, required=True)
-    collect.add_argument("--run-id")
-    collect.add_argument("--run-name")
-    collect.add_argument("--capture-output", action="store_true", default=False)
-    collect.add_argument("--profile-device-time", action="store_true", default=False)
-    collect.add_argument("--summarize-profile", action="store_true", default=False)
-    collect.add_argument("--implementation", choices=["cann_ops_library", "simt"])
-    collect.add_argument("--op", choices=list_operator_names())
-    collect.add_argument("--dtype", default="float16")
-    collect.add_argument("--dataset", choices=["smoke", "realistic", "stress"])
-    collect.add_argument("--case-id")
-    collect.add_argument("--seed", type=_non_negative_int, default=0)
-    collect.add_argument("--prepared-input", type=Path)
-    collect.add_argument("--prepared-dir", type=Path)
-    collect.add_argument("--warmup", type=_non_negative_int, default=10)
-    collect.add_argument("--iterations", type=_positive_int, default=1)
-    collect.add_argument("--deploy-custom-op", action="store_true", default=False)
 
     publish = subparsers.add_parser("publish")
     publish.add_argument("--source", type=Path, required=True)
@@ -260,7 +244,7 @@ def _validate_benchmark_selection(
     if prepared_input is None and not op:
         raise ValueError("--op is required unless --prepared-input is set")
     if not allow_batch and prepared_dir is not None:
-        raise ValueError("--prepared-dir is only supported for bench and collect")
+        raise ValueError("--prepared-dir is only supported for bench")
     if allow_batch and _is_batch_mode(args) and not getattr(args, "run_name", None):
         raise ValueError("--run-name is required for batch execution")
 
@@ -457,7 +441,7 @@ def _write_single_case_metadata(
     write_batch_failures_json(layout.meta_dir / "failures.json", failure_rows, metadata)
 
 
-def _run_batch_bench(args: argparse.Namespace) -> None:
+def _run_batch_local_bench(args: argparse.Namespace) -> None:
     plans = expand_prepared_input_plans(
         op=args.op,
         dtype=args.dtype,
@@ -574,9 +558,7 @@ def _run_batch_bench(args: argparse.Namespace) -> None:
         )
 
 
-def _run_batch_collect(args: argparse.Namespace) -> None:
-    if not args.capture_output and not args.profile_device_time:
-        raise ValueError("collect requires --capture-output or --profile-device-time")
+def _run_batch_remote_bench(args: argparse.Namespace) -> None:
     plans = expand_prepared_input_plans(
         op=args.op,
         dtype=args.dtype,
@@ -615,8 +597,7 @@ def _run_batch_collect(args: argparse.Namespace) -> None:
                     output_dir=temp_dir,
                     run_id=remote_run_id,
                     capture_output=args.capture_output,
-                    profile_device_time=args.profile_device_time,
-                    summarize_profile=args.summarize_profile,
+                    profile_device_time=True,
                     warmup=args.warmup,
                     iterations=args.iterations,
                     deploy_custom_op=_resolve_deploy_custom_op(
@@ -629,27 +610,26 @@ def _run_batch_collect(args: argparse.Namespace) -> None:
                     execution_result=remote_result,
                     capture_output=args.capture_output,
                 )
-                if args.profile_device_time and result_path is None:
+                if result_path is None:
                     raise RuntimeError(
-                        f"missing perf artifacts for profiled collect case {artifact_stem}"
+                        f"missing perf artifacts for profiled remote bench case {artifact_stem}"
                     )
-                if args.profile_device_time:
-                    if remote_result.artifacts.profile is None:
-                        raise RuntimeError(
-                            f"missing profile summary for profiled collect case {artifact_stem}"
-                        )
-                    benchmark_records.append(
-                        build_collect_benchmark_record(
-                            run_id=remote_run_id,
-                            backend=endpoint.backend,
-                            implementation=args.implementation,
-                            prepared=plan.prepared,
-                            perf_payload=json.loads(
-                                dict(remote_result.artifacts.profile.perf_artifacts)["benchmark.json"].decode("utf-8")
-                            ),
-                            profile_summary=remote_result.artifacts.profile.profile_summary,
-                        )
+                if remote_result.artifacts.profile is None:
+                    raise RuntimeError(
+                        f"missing profile summary for profiled remote bench case {artifact_stem}"
                     )
+                benchmark_records.append(
+                    build_collect_benchmark_record(
+                        run_id=remote_run_id,
+                        backend=endpoint.backend,
+                        implementation=args.implementation,
+                        prepared=plan.prepared,
+                        perf_payload=json.loads(
+                            dict(remote_result.artifacts.profile.perf_artifacts)["benchmark.json"].decode("utf-8")
+                        ),
+                        profile_summary=remote_result.artifacts.profile.profile_summary,
+                    )
+                )
 
             summary_rows.append(
                 BatchResultRecord(
@@ -703,11 +683,11 @@ def _run_batch_collect(args: argparse.Namespace) -> None:
     failures_path = write_batch_failures_json(layout.meta_dir / "failures.json", failure_rows, metadata)
     if failure_rows:
         raise RuntimeError(
-            f"batch collect completed with {len(failure_rows)} failures; see {failures_path}"
+            f"batch bench completed with {len(failure_rows)} failures; see {failures_path}"
         )
 
 
-def _run_single_bench(args: argparse.Namespace) -> None:
+def _run_single_local_bench(args: argparse.Namespace) -> None:
     run_name = args.run_name or "operator-benchmark"
     layout = _prepare_batch_run_layout(args.output_dir, run_name)
     backend = get_backend(args.backend)
@@ -820,14 +800,12 @@ def _run_single_bench(args: argparse.Namespace) -> None:
         )
 
 
-def _run_single_collect(args: argparse.Namespace) -> None:
-    if not args.capture_output and not args.profile_device_time:
-        raise ValueError("collect requires --capture-output or --profile-device-time")
+def _run_single_remote_bench(args: argparse.Namespace) -> None:
     run_name = args.run_name or args.run_id
-    if not run_name:
-        raise ValueError("single-case collect requires --run-name or --run-id")
-    layout = _prepare_batch_run_layout(args.output_dir, run_name)
     endpoint = read_remote_endpoint(args.endpoint)
+    if not run_name:
+        raise ValueError("single-case remote bench requires --run-name or --run-id")
+    layout = _prepare_batch_run_layout(args.output_dir, run_name)
     prepared_input = args.prepared_input
     if prepared_input is None:
         if not args.dataset or not args.case_id:
@@ -874,8 +852,7 @@ def _run_single_collect(args: argparse.Namespace) -> None:
                 output_dir=temp_dir,
                 run_id=args.run_id or run_name,
                 capture_output=args.capture_output,
-                profile_device_time=args.profile_device_time,
-                summarize_profile=args.summarize_profile,
+                profile_device_time=True,
                 warmup=args.warmup,
                 iterations=args.iterations,
                 deploy_custom_op=_resolve_deploy_custom_op(
@@ -888,21 +865,20 @@ def _run_single_collect(args: argparse.Namespace) -> None:
                 execution_result=remote_result,
                 capture_output=args.capture_output,
             )
-            if args.profile_device_time:
-                if remote_result.artifacts.profile is None:
-                    raise RuntimeError("missing profile summary for profiled collect case")
-                benchmark_records.append(
-                    build_collect_benchmark_record(
-                        run_id=args.run_id or run_name,
-                        backend=endpoint.backend,
-                        implementation=args.implementation,
-                        prepared=prepared,
-                        perf_payload=json.loads(
-                            dict(remote_result.artifacts.profile.perf_artifacts)["benchmark.json"].decode("utf-8")
-                        ),
-                        profile_summary=remote_result.artifacts.profile.profile_summary,
-                    )
+            if remote_result.artifacts.profile is None:
+                raise RuntimeError("missing profile summary for profiled remote bench case")
+            benchmark_records.append(
+                build_collect_benchmark_record(
+                    run_id=args.run_id or run_name,
+                    backend=endpoint.backend,
+                    implementation=args.implementation,
+                    prepared=prepared,
+                    perf_payload=json.loads(
+                        dict(remote_result.artifacts.profile.perf_artifacts)["benchmark.json"].decode("utf-8")
+                    ),
+                    profile_summary=remote_result.artifacts.profile.profile_summary,
                 )
+            )
         row = BatchResultRecord(
             op=prepared.op,
             dataset=prepared.dataset,
@@ -947,7 +923,7 @@ def _run_single_collect(args: argparse.Namespace) -> None:
     )
     if failure_rows:
         raise RuntimeError(
-            f"single collect completed with {len(failure_rows)} failures; "
+            f"single bench completed with {len(failure_rows)} failures; "
             f"see {layout.meta_dir / 'failures.json'}"
         )
 
@@ -956,20 +932,26 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    if args.command in {"bench", "operator"}:
+    if args.command in {"bench", "internal-run"}:
         try:
             _validate_benchmark_selection(args, allow_batch=args.command == "bench")
             if args.command == "bench" and _is_batch_mode(args):
-                _run_batch_bench(args)
+                if args.endpoint is None:
+                    _run_batch_local_bench(args)
+                else:
+                    _run_batch_remote_bench(args)
                 return 0
             if args.command == "bench":
-                _run_single_bench(args)
+                if args.endpoint is None:
+                    _run_single_local_bench(args)
+                else:
+                    _run_single_remote_bench(args)
                 return 0
             request = _build_request_from_args(args)
             backend = get_backend(args.backend)
             result = backend.run_operator(request)
             write_benchmark_outputs(
-                args.output_dir, args.run_name or "operator-benchmark", result, request.output_formats
+                args.output_dir, args.run_name or "internal-run-benchmark", result, request.output_formats
             )
         except (RuntimeError, ValueError) as exc:
             parser.error(str(exc))
@@ -1027,15 +1009,6 @@ def main(argv: list[str] | None = None) -> int:
                 atol=args.atol,
             )
             write_output_comparison(args.output, result)
-        except (RuntimeError, ValueError) as exc:
-            parser.error(str(exc))
-    elif args.command == "collect":
-        try:
-            _validate_benchmark_selection(args, allow_batch=True)
-            if _is_batch_mode(args):
-                _run_batch_collect(args)
-                return 0
-            _run_single_collect(args)
         except (RuntimeError, ValueError) as exc:
             parser.error(str(exc))
     elif args.command == "report":
