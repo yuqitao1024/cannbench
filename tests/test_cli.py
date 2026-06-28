@@ -592,6 +592,151 @@ def test_main_bench_single_dispatches_through_single_bench_helper(tmp_path, monk
     assert captured["single"].command == "bench"
 
 
+def test_main_local_bench_uses_local_executor(tmp_path, monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeExecutor:
+        def __init__(self, backend, write_outputs):
+            captured["backend"] = backend
+            captured["write_outputs"] = write_outputs
+
+        def execute_case(self, request, *, output_dir, run_name):
+            captured["request"] = request
+            captured["output_dir"] = output_dir
+            captured["run_name"] = run_name
+            return type(
+                "ExecResult",
+                (),
+                {
+                    "artifacts": type("Artifacts", (), {"profile": None})(),
+                    "result_path": output_dir / f"{run_name}.json",
+                },
+            )()
+
+    class FakeBackend:
+        pass
+
+    monkeypatch.setattr("cannbench.cli.get_backend", lambda name: FakeBackend())
+    monkeypatch.setattr("cannbench.cli.LocalBenchExecutor", FakeExecutor)
+
+    exit_code = main(
+        [
+            "bench",
+            "--backend",
+            "nvidia",
+            "--op",
+            "softmax",
+            "--dataset",
+            "smoke",
+            "--case-id",
+            "tiny_logits",
+            "--output-dir",
+            str(tmp_path),
+            "--run-name",
+            "executor-local",
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured["run_name"] == "softmax-smoke-tiny_logits-float16-seed0"
+
+
+def test_main_remote_bench_uses_remote_executor(tmp_path, monkeypatch):
+    captured: dict[str, object] = {}
+    endpoint = RemoteEndpoint(
+        name="ascend-a2",
+        backend="ascend",
+        host="user@ascend-host",
+        workdir="/opt/cannbench",
+        python="python3",
+        env={},
+    )
+
+    class FakeExecutor:
+        def __init__(self, collect_remote_artifacts, actual_endpoint, endpoint_path=None):
+            captured["endpoint"] = actual_endpoint
+            captured["endpoint_path"] = endpoint_path
+
+        def execute_case(
+            self,
+            *,
+            prepared_input,
+            layout_root,
+            artifact_stem,
+            run_id,
+            capture_output,
+            warmup,
+            iterations,
+            deploy_custom_op,
+        ):
+            captured["prepared_input"] = prepared_input
+            captured["layout_root"] = layout_root
+            captured["artifact_stem"] = artifact_stem
+            captured["run_id"] = run_id
+            captured["capture_output"] = capture_output
+            captured["warmup"] = warmup
+            captured["iterations"] = iterations
+            captured["deploy_custom_op"] = deploy_custom_op
+            return type(
+                "ExecResult",
+                (),
+                {
+                    "artifacts": type(
+                        "Artifacts",
+                        (),
+                        {
+                            "profile": type(
+                                "Profile",
+                                (),
+                                {
+                                    "device_name": "Ascend 910B",
+                                    "profile_summary": DeviceProfileSummary(
+                                        backend="ascend",
+                                        sample_count=1,
+                                        latency_ms_avg=1.0,
+                                        latency_ms_p50=1.0,
+                                        latency_ms_p95=1.0,
+                                        latency_ms_p99=1.0,
+                                        source_files=("op_summary.csv",),
+                                    ),
+                                    "profile_artifacts": (("op_summary.csv", b"Op Name,Task Duration(us)\nsoftmax,1000\n"),),
+                                    "perf_artifacts": (("benchmark.json", b"{}\n"),),
+                                },
+                            )()
+                        },
+                    )(),
+                    "result_path": None,
+                },
+            )()
+
+    monkeypatch.setattr("cannbench.cli.read_remote_endpoint", lambda path: endpoint)
+    monkeypatch.setattr("cannbench.cli.RemoteBenchExecutor", FakeExecutor)
+
+    exit_code = main(
+        [
+            "bench",
+            "--backend",
+            "ascend",
+            "--endpoint",
+            str(tmp_path / "ascend.json"),
+            "--op",
+            "softmax",
+            "--dataset",
+            "smoke",
+            "--case-id",
+            "tiny_logits",
+            "--output-dir",
+            str(tmp_path),
+            "--run-id",
+            "executor-remote",
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured["endpoint"] == endpoint
+    assert captured["run_id"] == "executor-remote"
+
+
 def test_main_runs_single_bench_with_profile_layout_and_meta(tmp_path, monkeypatch):
     captured: dict[str, object] = {}
     result = sample_result()

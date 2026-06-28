@@ -1,7 +1,6 @@
 import argparse
 import json
 import shutil
-import tempfile
 from pathlib import Path
 
 from cannbench.backends import get_backend
@@ -47,7 +46,11 @@ from cannbench.core.output import (
     build_benchmark_artifact_stem,
     write_benchmark_outputs,
 )
-from cannbench.core.execution import BenchCaseExecutionResult, BenchExecutionArtifacts
+from cannbench.core.execution import (
+    BenchCaseExecutionResult,
+    LocalBenchExecutor,
+    RemoteBenchExecutor,
+)
 from cannbench.operators import list_operator_names
 
 
@@ -305,35 +308,6 @@ def _single_case_plan_from_args(args: argparse.Namespace) -> PreparedInputPlan:
     )
 
 
-def _execute_benchmark_case(
-    backend,
-    request: OperatorBenchmarkRequest,
-    *,
-    output_dir: Path,
-    run_name: str,
-) -> BenchCaseExecutionResult:
-    result = backend.run_operator(request)
-    outputs = write_benchmark_outputs(output_dir, run_name, result, request.output_formats)
-    result_path = outputs.get("json")
-    if result_path is None and outputs:
-        result_path = next(iter(outputs.values()))
-    return BenchCaseExecutionResult(
-        artifacts=BenchExecutionArtifacts(),
-        result_path=result_path,
-    )
-
-
-def _profile_local_benchmark_case(
-    backend,
-    request: OperatorBenchmarkRequest,
-) -> BenchExecutionArtifacts:
-    try:
-        profile_result = backend.profile_operator_device_time(request)
-    except (NotImplementedError, AttributeError):
-        return BenchExecutionArtifacts()
-    return BenchExecutionArtifacts(profile=profile_result.profile)
-
-
 def _validate_unique_batch_artifact_stems(plans: list) -> None:
     seen: dict[str, str] = {}
     for plan in plans:
@@ -549,6 +523,7 @@ def _run_local_bench_with_plans(
     _validate_unique_batch_artifact_stems(plans)
     layout = _prepare_batch_run_layout(args.output_dir, run_name)
     backend = get_backend(args.backend)
+    executor = LocalBenchExecutor(backend, write_benchmark_outputs)
     summary_rows: list[BatchResultRecord] = []
     benchmark_records: list[dict[str, object]] = []
     failure_rows: list[BatchFailureRecord] = []
@@ -566,16 +541,10 @@ def _run_local_bench_with_plans(
             seed=plan.seed,
         )
         try:
-            execution_result = _execute_benchmark_case(
-                backend,
+            execution_result = executor.execute_case(
                 request,
                 output_dir=layout.perf_dir,
                 run_name=artifact_stem,
-            )
-            profile_artifacts = _profile_local_benchmark_case(backend, request)
-            execution_result = BenchCaseExecutionResult(
-                artifacts=profile_artifacts,
-                result_path=execution_result.result_path,
             )
             result_path = _finalize_local_execution_artifacts(
                 layout=layout,
@@ -641,6 +610,11 @@ def _run_remote_bench_with_plans(
 ) -> None:
     _validate_unique_batch_artifact_stems(plans)
     layout = _prepare_batch_run_layout(args.output_dir, run_name)
+    executor = RemoteBenchExecutor(
+        collect_remote_artifacts,
+        endpoint,
+        endpoint_path=args.endpoint,
+    )
     summary_rows: list[BatchResultRecord] = []
     benchmark_records: list[dict[str, object]] = []
     failure_rows: list[BatchFailureRecord] = []
@@ -658,49 +632,45 @@ def _run_remote_bench_with_plans(
         )
         remote_run_id = f"{parent_run_id}/{artifact_stem}" if len(plans) > 1 else parent_run_id
         try:
-            with tempfile.TemporaryDirectory(prefix=f"{artifact_stem}-", dir=layout.root) as temp_dir_name:
-                temp_dir = Path(temp_dir_name)
-                remote_result = collect_remote_artifacts(
-                    endpoint=endpoint,
-                    endpoint_path=args.endpoint,
-                    prepared_input=prepared_path,
-                    output_dir=temp_dir,
+            execution_result = executor.execute_case(
+                prepared_input=prepared_path,
+                layout_root=layout.root,
+                artifact_stem=artifact_stem,
+                run_id=remote_run_id,
+                capture_output=args.capture_output,
+                warmup=args.warmup,
+                iterations=args.iterations,
+                deploy_custom_op=_resolve_deploy_custom_op(
+                    endpoint.backend, args.implementation, args.deploy_custom_op
+                ),
+            )
+            result_path = _finalize_remote_execution_artifacts(
+                layout=layout,
+                artifact_stem=artifact_stem,
+                execution_result=execution_result,
+                capture_output=args.capture_output,
+            )
+            execution_result = BenchCaseExecutionResult(
+                artifacts=execution_result.artifacts,
+                result_path=result_path,
+            )
+            if execution_result.result_path is None:
+                raise RuntimeError(
+                    f"missing perf artifacts for profiled remote bench case {artifact_stem}"
+                )
+            if execution_result.artifacts.profile is None:
+                raise RuntimeError(
+                    f"missing profile summary for profiled remote bench case {artifact_stem}"
+                )
+            benchmark_records.append(
+                _build_benchmark_record_entry(
                     run_id=remote_run_id,
-                    capture_output=args.capture_output,
-                    profile_device_time=True,
-                    warmup=args.warmup,
-                    iterations=args.iterations,
-                    deploy_custom_op=_resolve_deploy_custom_op(
-                        endpoint.backend, args.implementation, args.deploy_custom_op
-                    ),
+                    backend=endpoint.backend,
+                    implementation=args.implementation,
+                    prepared=plan.prepared,
+                    execution_result=execution_result,
                 )
-                result_path = _finalize_remote_execution_artifacts(
-                    layout=layout,
-                    artifact_stem=artifact_stem,
-                    execution_result=remote_result,
-                    capture_output=args.capture_output,
-                )
-                execution_result = BenchCaseExecutionResult(
-                    artifacts=remote_result.artifacts,
-                    result_path=result_path,
-                )
-                if execution_result.result_path is None:
-                    raise RuntimeError(
-                        f"missing perf artifacts for profiled remote bench case {artifact_stem}"
-                    )
-                if execution_result.artifacts.profile is None:
-                    raise RuntimeError(
-                        f"missing profile summary for profiled remote bench case {artifact_stem}"
-                    )
-                benchmark_records.append(
-                    _build_benchmark_record_entry(
-                        run_id=remote_run_id,
-                        backend=endpoint.backend,
-                        implementation=args.implementation,
-                        prepared=plan.prepared,
-                        execution_result=execution_result,
-                    )
-                )
+            )
             summary_rows.append(
                 _build_success_row(
                     plan=plan,

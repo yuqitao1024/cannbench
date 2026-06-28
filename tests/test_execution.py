@@ -1,6 +1,9 @@
 from pathlib import Path
 
+import pytest
+
 from cannbench.core.execution import (
+    BenchCaseExecutor,
     BenchCaseExecutionResult,
     BenchExecutionArtifacts,
     BenchProfileArtifacts,
@@ -67,3 +70,10 @@ def test_bench_case_execution_result_can_store_output_artifacts_without_profile(
 
     assert result.artifacts.profile is None
     assert result.artifacts.output_artifacts == (("tensor.json", b"{}"),)
+
+
+def test_bench_case_executor_requires_execute_case():
+    executor = BenchCaseExecutor()
+
+    with pytest.raises(NotImplementedError):
+        executor.execute_case()
