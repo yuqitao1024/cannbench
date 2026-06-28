@@ -271,10 +271,18 @@ describe("App", () => {
       if (url === `/published/${DEFAULT_PUBLISHED_RUN}/meta/benchmark-records.json`) {
         return {
           ok: true,
+          status: 200,
+          headers: {
+            get: () => "application/json"
+          },
+          text: async () =>
+            JSON.stringify({
+              records: benchmarkPayload.records.filter((record) => record.operator !== "softmax" || record.implementation !== "simt")
+            }),
           json: async () => ({
             records: benchmarkPayload.records.filter((record) => record.operator !== "softmax" || record.implementation !== "simt")
           })
-        };
+        } as unknown as Response;
       }
       throw new Error(`unexpected fetch: ${url}`);
     });
