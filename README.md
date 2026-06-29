@@ -245,6 +245,14 @@ deploy/systemd/cannbench-serve.service
 
 Update `User`, `Group`, `WorkingDirectory`, `PYTHONPATH`, and `ExecStart` for the target machine before installing it under `/etc/systemd/system/`.
 
+The release package also includes an `install.sh` helper. After unpacking the release in any directory, run:
+
+```bash
+sudo ./install.sh
+```
+
+This installs the release under `/opt/cannbench/cannbench-release`, installs the `systemd` unit, reloads `systemd`, and starts `cannbench-serve`.
+
 ### Run a benchmark
 
 `bench` is the user-facing execution command for both local and remote runs. It selects shapes from built-in operator datasets instead of raw ad hoc shape CLI arguments.
