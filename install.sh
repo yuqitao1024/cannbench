@@ -8,8 +8,7 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_DIR="${SCRIPT_DIR}"
-INSTALL_ROOT="/opt/cannbench"
-INSTALL_DIR="${INSTALL_ROOT}/cannbench-release"
+INSTALL_DIR="/opt/cannbench"
 SERVICE_SRC="${SOURCE_DIR}/deploy/systemd/cannbench-serve.service"
 SERVICE_DEST="/etc/systemd/system/cannbench-serve.service"
 
@@ -23,7 +22,6 @@ if [[ ! -f "${SERVICE_SRC}" ]]; then
   exit 1
 fi
 
-mkdir -p "${INSTALL_ROOT}"
 rm -rf "${INSTALL_DIR}"
 mkdir -p "${INSTALL_DIR}"
 cp -a "${SOURCE_DIR}/." "${INSTALL_DIR}/"

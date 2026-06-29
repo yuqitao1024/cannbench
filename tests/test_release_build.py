@@ -35,6 +35,27 @@ def test_stage_release_tree_copies_project_files_and_generates_prepared_inputs(t
     assert result.prepared_input_count > 0
 
 
+def test_release_install_assets_target_opt_cannbench(tmp_path):
+    repo_root = Path.cwd()
+    stage_dir = tmp_path / "cannbench-release"
+
+    stage_release_tree(
+        repo_root=repo_root,
+        stage_dir=stage_dir,
+        dtype="float16",
+        seed=7,
+    )
+
+    install_script = (stage_dir / "install.sh").read_text(encoding="utf-8")
+    service_unit = (stage_dir / "deploy" / "systemd" / "cannbench-serve.service").read_text(encoding="utf-8")
+
+    assert 'INSTALL_DIR="/opt/cannbench"' in install_script
+    assert "WorkingDirectory=/opt/cannbench" in service_unit
+    assert "PYTHONPATH=/opt/cannbench/src" in service_unit
+    assert "/opt/cannbench/cannbench-release" not in install_script
+    assert "/opt/cannbench/cannbench-release" not in service_unit
+
+
 def test_build_release_script_runs_from_repo_root(tmp_path):
     result = subprocess.run(
         [sys.executable, "tools/build_release.py", "--output-dir", str(tmp_path)],
