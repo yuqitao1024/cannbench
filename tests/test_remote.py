@@ -220,7 +220,9 @@ def test_collect_remote_artifacts_runs_nvidia_ncu_profile(tmp_path):
             profile_dir = tmp_path / "results" / "profile"
             profile_dir.mkdir(parents=True)
             (profile_dir / "ncu.csv").write_text(
-                "Kernel Name,Duration (ns)\nsoftmax,1000000\n"
+                '"ID","Kernel Name","gpu__time_duration.avg"\n'
+                '"","","usecond"\n'
+                '"1","softmax","1000"\n'
             )
         if command[:2] == ["scp", "-r"] and command[-1].endswith("/perf"):
             perf_dir = tmp_path / "results" / "perf"

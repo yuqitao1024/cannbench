@@ -8,6 +8,7 @@ import type { ChartSegment, ChartSeries } from "../types";
 echarts.use([GridComponent, LegendComponent, TooltipComponent, MarkLineComponent, LineChart, SVGRenderer]);
 
 const SERIES_COLORS = ["#b8bb26", "#fe8019", "#83a598", "#689d6a", "#d3869b"];
+const MS_TO_US = 1000;
 
 interface BenchmarkChartProps {
   series: ChartSeries[];
@@ -26,7 +27,7 @@ function tooltipHtml(params: Array<{ seriesName: string; value: number | null; d
       return [
         `<strong>${param.seriesName}</strong>`,
         `case: ${record.case_id}`,
-        `latency: ${point.latencyMs.toFixed(4)} ms`,
+        `latency: ${(point.latencyMs * MS_TO_US).toFixed(2)} us`,
         `shape: ${record.shape.join(" x ")}`,
         `dtype: ${record.dtype}`
       ].join("<br/>");
@@ -73,7 +74,7 @@ export function BenchmarkChart({ series, segments }: BenchmarkChartProps) {
       },
       yAxis: {
         type: "value",
-        name: "latency ms",
+        name: "latency us",
         nameTextStyle: { color: "#a89984", fontFamily: "JetBrains Mono, monospace" },
         axisLabel: { color: "#a89984" },
         splitLine: { lineStyle: { color: "rgba(168, 153, 132, 0.12)" } }
@@ -85,7 +86,7 @@ export function BenchmarkChart({ series, segments }: BenchmarkChartProps) {
         smooth: false,
         showSymbol: true,
         symbolSize: 7,
-        data: item.points.map((point) => point.latencyMs),
+        data: item.points.map((point) => (point.latencyMs === null ? null : point.latencyMs * MS_TO_US)),
         markLine:
           segments.length > 1
             ? {

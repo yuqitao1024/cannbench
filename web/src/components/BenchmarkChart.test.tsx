@@ -55,6 +55,8 @@ describe("BenchmarkChart", () => {
     const option = setOption.mock.calls.at(-1)?.[0];
     expect(option.xAxis.data).toEqual([1, 2]);
     expect(option.xAxis.axisLabel.show).toBe(false);
+    expect(option.yAxis.name).toBe("latency us");
+    expect(option.series[0].data).toEqual([10, 710]);
   });
 
   it("allows dense multi-series tooltips to be pinned and scrolled", async () => {

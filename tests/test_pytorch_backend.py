@@ -471,7 +471,7 @@ def test_nvidia_backend_profiles_softmax_with_ncu(monkeypatch, tmp_path, capsys)
                 0,
                 (
                     "Kernel Name,Metric Name,Metric Unit,Metric Value\n"
-                    "softmax,gpu__time_duration.sum,nsecond,1000000\n"
+                    "softmax,gpu__time_duration.avg,usecond,1000\n"
                 ),
                 "render-warning\n",
             )
@@ -1310,7 +1310,7 @@ def test_nvidia_profile_operator_device_time_invokes_internal_run(monkeypatch):
                 returncode=0,
                 stdout=(
                     "Kernel Name,Metric Name,Metric Unit,Metric Value\n"
-                    "softmax,gpu__time_duration.sum,nsecond,100000\n"
+                    "softmax,gpu__time_duration.avg,usecond,100\n"
                 ),
                 stderr="",
             )

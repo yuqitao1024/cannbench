@@ -10,6 +10,8 @@ from pathlib import Path
 from cannbench.core.result import OperatorBenchmarkResult
 from cannbench.core.timing import summarize_timings_ms
 
+NVIDIA_TIME_DURATION_AVG = "gpu__time_duration.avg"
+
 
 @dataclass(frozen=True)
 class DeviceProfileSummary:
@@ -100,11 +102,17 @@ def _parse_float(value: object) -> float | None:
     return parsed
 
 
-def _duration_from_metric_row(row: dict[str, str]) -> float | None:
+def _duration_from_metric_row(row: dict[str, str], *, backend: str) -> float | None:
     lower = {key.strip().lower(): value for key, value in row.items()}
     metric_name = lower.get("metric name") or lower.get("metric")
     metric_value = lower.get("metric value") or lower.get("value")
-    if not metric_name or "duration" not in metric_name.lower() or metric_value is None:
+    if not metric_name or metric_value is None:
+        return None
+    normalized_metric = metric_name.strip().lower()
+    if backend == "nvidia":
+        if normalized_metric != NVIDIA_TIME_DURATION_AVG:
+            return None
+    elif "duration" not in normalized_metric:
         return None
     parsed = _parse_float(metric_value)
     if parsed is None:
@@ -113,7 +121,17 @@ def _duration_from_metric_row(row: dict[str, str]) -> float | None:
     return _to_ms(parsed, unit)
 
 
-def _duration_from_wide_row(row: dict[str, str]) -> float | None:
+def _duration_from_wide_row(row: dict[str, str], *, backend: str, units: dict[str, str] | None = None) -> float | None:
+    if backend == "nvidia":
+        value = row.get(NVIDIA_TIME_DURATION_AVG)
+        if value is None:
+            return None
+        parsed = _parse_float(value)
+        if parsed is None:
+            return None
+        unit = (units or {}).get(NVIDIA_TIME_DURATION_AVG, _unit_from_text(NVIDIA_TIME_DURATION_AVG))
+        return _to_ms(parsed, unit)
+
     for key, value in row.items():
         lowered = key.strip().lower()
         if "duration" not in lowered and "elapsed" not in lowered:
@@ -125,14 +143,25 @@ def _duration_from_wide_row(row: dict[str, str]) -> float | None:
     return None
 
 
-def _read_csv_durations(path: Path) -> list[float]:
+def _looks_like_ncu_unit_row(row: dict[str, str]) -> bool:
+    value = row.get(NVIDIA_TIME_DURATION_AVG)
+    return value is not None and _parse_float(value) is None and _unit_from_text(value) != "ms"
+
+
+def _read_csv_durations(path: Path, *, backend: str) -> list[float]:
     durations: list[float] = []
     with path.open(newline="") as handle:
         reader = csv.DictReader(handle)
+        units: dict[str, str] = {}
         for row in reader:
-            duration = _duration_from_metric_row(row)
+            normalized_row = {key.strip().lower(): value for key, value in row.items() if key is not None}
+            if backend == "nvidia" and _looks_like_ncu_unit_row(normalized_row):
+                units = {key: value for key, value in normalized_row.items() if value}
+                continue
+
+            duration = _duration_from_metric_row(row, backend=backend)
             if duration is None:
-                duration = _duration_from_wide_row(row)
+                duration = _duration_from_wide_row(normalized_row, backend=backend, units=units)
             if duration is not None:
                 durations.append(duration)
     return durations
@@ -143,7 +172,7 @@ def read_device_profile(profile_dir: Path, *, backend: str) -> DeviceProfileSumm
     samples: list[float] = []
     source_files: list[str] = []
     for csv_file in csv_files:
-        durations = _read_csv_durations(csv_file)
+        durations = _read_csv_durations(csv_file, backend=backend)
         if durations:
             samples.extend(durations)
             source_files.append(str(csv_file.relative_to(profile_dir)))
