@@ -18,9 +18,14 @@ const initialResult: ValidationResult = {
 export function GpuBenchmarkImport({ uploadEnabled, open, onClose }: GpuBenchmarkImportProps) {
   const [result, setResult] = useState<ValidationResult>(initialResult);
   const [jsonText, setJsonText] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [savedPath, setSavedPath] = useState<string | null>(null);
 
   function validateText(value: string): void {
     setJsonText(value);
+    setSubmitError(null);
+    setSavedPath(null);
     if (!value.trim()) {
       setResult(initialResult);
       return;
@@ -44,6 +49,31 @@ export function GpuBenchmarkImport({ uploadEnabled, open, onClose }: GpuBenchmar
         errors: ["text must be valid JSON"],
         warnings: []
       });
+    }
+  }
+
+  async function submitUpload(): Promise<void> {
+    setSubmitting(true);
+    setSubmitError(null);
+    setSavedPath(null);
+    try {
+      const response = await fetch("/api/gpu-results", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: jsonText
+      });
+      if (!response.ok) {
+        const message = await response.text();
+        throw new Error(message || `upload failed with HTTP ${response.status}`);
+      }
+      const payload = (await response.json()) as { path?: string };
+      setSavedPath(payload.path ?? "server storage");
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : "upload failed");
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -99,8 +129,25 @@ export function GpuBenchmarkImport({ uploadEnabled, open, onClose }: GpuBenchmar
             </p>
           </div>
         )}
-        <button type="button" className="upload-button" disabled={!uploadEnabled || !result.ok}>
-          Submit
+        {savedPath ? (
+          <div className="validation-summary validation-summary--ok" role="status">
+            saved to {savedPath}
+          </div>
+        ) : null}
+        {submitError ? (
+          <div className="validation-summary validation-summary--blocked" role="alert">
+            {submitError}
+          </div>
+        ) : null}
+        <button
+          type="button"
+          className="upload-button"
+          disabled={!uploadEnabled || !result.ok || submitting}
+          onClick={() => {
+            void submitUpload();
+          }}
+        >
+          {submitting ? "Submitting..." : "Submit"}
         </button>
       </section>
     </div>,

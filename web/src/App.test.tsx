@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
@@ -105,6 +105,12 @@ beforeAll(() => {
     "fetch",
     vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
+      if (url === "/api/config") {
+        return {
+          ok: true,
+          json: async () => ({ gpu_upload_enabled: false })
+        };
+      }
       if (url === "/published/index.json") {
         return {
           ok: true,
@@ -209,6 +215,66 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: /^Submit$/i })).toBeDisabled();
   });
 
+  it("enables GPU JSON submit when the server config allows uploads", async () => {
+    vi.mocked(fetch).mockImplementation(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === "/api/config") {
+        return {
+          ok: true,
+          json: async () => ({ gpu_upload_enabled: true })
+        } as Response;
+      }
+      if (url === "/published/index.json") {
+        return {
+          ok: true,
+          json: async () => publishedRuns
+        } as Response;
+      }
+      for (const [runName, payload] of Object.entries(payloadByRun)) {
+        if (url === `/published/${runName}/meta/benchmark-records.json`) {
+          return {
+            ok: true,
+            json: async () => payload
+          } as Response;
+        }
+      }
+      if (url.includes("/api/simt-versions")) {
+        return {
+          ok: true,
+          json: async () => ({ operator: "softmax", versions: ["v1", "v2"] })
+        } as Response;
+      }
+      if (url.includes("/api/simt-diff")) {
+        return {
+          ok: true,
+          json: async () => ({
+            operator: "softmax",
+            base_version: "v1",
+            compare_version: "v2",
+            patch: "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-old\n+new\n"
+          })
+        } as Response;
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    const titleTrigger = screen.getByRole("button", { name: /^CANNBench$/i });
+    await user.click(titleTrigger);
+    await user.click(titleTrigger);
+    await user.click(titleTrigger);
+    fireEvent.change(screen.getByLabelText(/Paste GPU benchmark JSON/i), {
+      target: {
+        value: JSON.stringify({ records: [benchmarkPayload.records[0]] })
+      }
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /^Submit$/i })).toBeEnabled();
+    });
+  });
+
   it("opens the CUDA treasure map dialog after three title clicks in dark theme", async () => {
     vi.setSystemTime(new Date(2024, 0, 1, 22, 0, 0));
     const user = userEvent.setup();
@@ -243,6 +309,17 @@ describe("App", () => {
   it("does not render the diff card when the selected operator has only one simt version", async () => {
     vi.mocked(fetch).mockImplementationOnce(async (input: string | URL | Request) => {
       const url = String(input);
+      if (url === "/api/config") {
+        return {
+          ok: true,
+          status: 200,
+          headers: {
+            get: () => "application/json"
+          },
+          text: async () => JSON.stringify({ gpu_upload_enabled: false }),
+          json: async () => ({ gpu_upload_enabled: false })
+        } as unknown as Response;
+      }
       if (url === "/published/index.json") {
         return {
           ok: true,
@@ -319,10 +396,22 @@ describe("App", () => {
   });
 
   it("shows a load failure state when published benchmark records cannot be fetched", async () => {
-    vi.mocked(fetch).mockImplementationOnce(async () => ({
-      ok: false,
-      status: 404
-    } as Response));
+    vi.mocked(fetch).mockImplementation(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === "/api/config") {
+        return {
+          ok: true,
+          json: async () => ({ gpu_upload_enabled: false })
+        } as Response;
+      }
+      if (url === "/published/index.json") {
+        return {
+          ok: false,
+          status: 404
+        } as Response;
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
 
     render(<App />);
 

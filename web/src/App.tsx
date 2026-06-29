@@ -33,6 +33,7 @@ function defaultDatasetName(records: BenchmarkRecord[], operator: string): strin
 export function App() {
   const [benchmarkRecords, setBenchmarkRecords] = useState<BenchmarkRecord[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [gpuUploadEnabled, setGpuUploadEnabled] = useState(false);
   const [operatorSearch, setOperatorSearch] = useState("");
   const [importOpen, setImportOpen] = useState(false);
   const [treasureMapOpen, setTreasureMapOpen] = useState(false);
@@ -71,6 +72,21 @@ export function App() {
 
   useEffect(() => {
     const controller = new AbortController();
+    fetch("/api/config", { signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error("failed to load runtime config");
+        }
+        return response.json() as Promise<{ gpu_upload_enabled?: boolean }>;
+      })
+      .then((config) => {
+        setGpuUploadEnabled(config.gpu_upload_enabled === true);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setGpuUploadEnabled(false);
+        }
+      });
     loadBenchmarkRecords(controller.signal)
       .then((records) => {
         setBenchmarkRecords(records);
@@ -234,7 +250,7 @@ export function App() {
           )}
         </section>
       </div>
-      <GpuBenchmarkImport uploadEnabled={false} open={importOpen} onClose={() => setImportOpen(false)} />
+      <GpuBenchmarkImport uploadEnabled={gpuUploadEnabled} open={importOpen} onClose={() => setImportOpen(false)} />
       <CudaTreasureMapModal open={treasureMapOpen} onClose={() => setTreasureMapOpen(false)} />
     </main>
   );

@@ -386,6 +386,9 @@ class CannBenchRequestHandler(SimpleHTTPRequestHandler):
 
     def do_GET(self) -> None:
         parsed = urlsplit(self.path)
+        if parsed.path == "/api/config":
+            self._handle_config()
+            return
         if parsed.path == "/api/simt-versions":
             self._handle_simt_versions(parsed.query)
             return
@@ -397,6 +400,14 @@ class CannBenchRequestHandler(SimpleHTTPRequestHandler):
         else:
             self.path = parsed.path
         super().do_GET()
+
+    def _handle_config(self) -> None:
+        response = json.dumps({"gpu_upload_enabled": self._enable_gpu_upload}).encode()
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(response)))
+        self.end_headers()
+        self.wfile.write(response)
 
     def do_POST(self) -> None:
         if self.path != "/api/gpu-results":

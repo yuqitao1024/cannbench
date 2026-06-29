@@ -2,6 +2,7 @@ from pathlib import Path
 
 from cannbench.serve import (
     build_simt_operator_diff,
+    CannBenchRequestHandler,
     list_simt_operator_versions,
     validate_gpu_benchmark_upload,
 )
@@ -134,3 +135,39 @@ def test_build_simt_operator_diff_uses_real_version_directories(tmp_path: Path):
     assert "src/cannbench/datasets/data/softmax/custom_ops/ascend/aten_softmax/csrc/simt/spatial_softmax.asc" in diff.patch
     assert "-beta" in diff.patch
     assert "+gamma" in diff.patch
+
+
+def test_request_handler_returns_runtime_config(tmp_path: Path):
+    class _Headers(dict):
+        def get(self, key, default=None):
+            return super().get(key, default)
+
+    class _FakeHandler:
+        def __init__(self) -> None:
+            self.path = "/api/config"
+            self.headers = _Headers()
+            self.wfile = type("Writer", (), {"write": lambda self, data: setattr(self, "data", data)})()
+            self._frontend_dir = tmp_path
+            self._published_dir = tmp_path
+            self._enable_gpu_upload = True
+            self.status = None
+            self.sent_headers: list[tuple[str, str]] = []
+
+        def send_response(self, status):
+            self.status = status
+
+        def send_header(self, key, value):
+            self.sent_headers.append((key, value))
+
+        def end_headers(self):
+            return None
+
+        def _handle_config(self):
+            return CannBenchRequestHandler._handle_config(self)  # type: ignore[misc]
+
+    handler = _FakeHandler()
+
+    CannBenchRequestHandler.do_GET(handler)  # type: ignore[misc]
+
+    assert handler.status == 200
+    assert b'"gpu_upload_enabled": true' in handler.wfile.data
