@@ -237,6 +237,14 @@ cannbench serve \
   --enable-gpu-upload
 ```
 
+For public cloud deployment, the release package also includes a `systemd` unit template at:
+
+```text
+deploy/systemd/cannbench-serve.service
+```
+
+Update `User`, `Group`, `WorkingDirectory`, `PYTHONPATH`, and `ExecStart` for the target machine before installing it under `/etc/systemd/system/`.
+
 ### Run a benchmark
 
 `bench` is the user-facing execution command for both local and remote runs. It selects shapes from built-in operator datasets instead of raw ad hoc shape CLI arguments.
