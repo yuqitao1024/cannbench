@@ -16,6 +16,27 @@ interface BenchmarkChartProps {
   segments: ChartSegment[];
 }
 
+interface TooltipPositionSize {
+  contentSize?: [number, number];
+  viewSize?: [number, number];
+}
+
+function tooltipPosition(anchor: [number, number], size?: TooltipPositionSize): [number, number] {
+  const [contentWidth = 0, contentHeight = 0] = size?.contentSize ?? [];
+  const [viewWidth = 0, viewHeight = 0] = size?.viewSize ?? [];
+  let x = anchor[0] + TOOLTIP_OFFSET;
+  let y = anchor[1] + TOOLTIP_OFFSET;
+
+  if (viewWidth > 0 && contentWidth > 0 && x + contentWidth + TOOLTIP_OFFSET > viewWidth) {
+    x = anchor[0] - contentWidth - TOOLTIP_OFFSET;
+  }
+  if (viewHeight > 0 && contentHeight > 0 && y + contentHeight + TOOLTIP_OFFSET > viewHeight) {
+    y = anchor[1] - contentHeight - TOOLTIP_OFFSET;
+  }
+
+  return [Math.max(TOOLTIP_OFFSET, x), Math.max(TOOLTIP_OFFSET, y)];
+}
+
 function tooltipHtml(params: Array<{ seriesName: string; value: number | null; dataIndex: number }>, series: ChartSeries[]) {
   const lines = params
     .map((param) => {
@@ -46,7 +67,11 @@ export function BenchmarkChart({ series, segments }: BenchmarkChartProps) {
     }
 
     const chart = echarts.init(chartRef.current, undefined, { renderer: "svg" });
-    let pinnedTooltipPosition: [number, number] | null = null;
+    let pinnedTooltipAnchor: [number, number] | null = null;
+    const hidePinnedTooltip = () => {
+      pinnedTooltipAnchor = null;
+      chart.dispatchAction({ type: "hideTip" });
+    };
     const pinTooltip = (params: unknown) => {
       const point = params as {
         componentType?: string;
@@ -63,7 +88,7 @@ export function BenchmarkChart({ series, segments }: BenchmarkChartProps) {
       ) {
         return;
       }
-      pinnedTooltipPosition = [point.event.offsetX + TOOLTIP_OFFSET, point.event.offsetY + TOOLTIP_OFFSET];
+      pinnedTooltipAnchor = [point.event.offsetX, point.event.offsetY];
       chart.dispatchAction({
         type: "showTip",
         seriesIndex: point.seriesIndex,
@@ -74,7 +99,13 @@ export function BenchmarkChart({ series, segments }: BenchmarkChartProps) {
       if (event?.target) {
         return;
       }
-      pinnedTooltipPosition = null;
+      hidePinnedTooltip();
+    };
+    const clearPinnedTooltipOnDocumentClick = (event: PointerEvent) => {
+      if (chartRef.current?.contains(event.target as Node | null)) {
+        return;
+      }
+      hidePinnedTooltip();
     };
     const caseMarkers = series[0]?.points.map((_, index) => index + 1) ?? [];
     chart.setOption({
@@ -89,8 +120,9 @@ export function BenchmarkChart({ series, segments }: BenchmarkChartProps) {
         borderColor: "rgba(235, 219, 178, 0.12)",
         textStyle: { color: "#ebdbb2", fontFamily: "JetBrains Mono, monospace" },
         extraCssText: "max-height: 260px; overflow-y:auto; max-width: 420px;",
-        position: (point: number[]) =>
-          pinnedTooltipPosition ?? [point[0] + TOOLTIP_OFFSET, point[1] + TOOLTIP_OFFSET],
+        confine: true,
+        position: (point: number[], _params: unknown, _dom: unknown, _rect: unknown, size?: TooltipPositionSize) =>
+          tooltipPosition(pinnedTooltipAnchor ?? [point[0], point[1]], size),
         formatter: (params: unknown) => tooltipHtml(params as Array<{ seriesName: string; value: number | null; dataIndex: number }>, series)
       },
       legend: {
@@ -133,11 +165,13 @@ export function BenchmarkChart({ series, segments }: BenchmarkChartProps) {
     });
     chart.on("click", pinTooltip);
     chart.getZr().on("click", clearPinnedTooltip);
+    document.addEventListener("pointerdown", clearPinnedTooltipOnDocumentClick);
 
     const resize = () => chart.resize();
     window.addEventListener("resize", resize);
     return () => {
       window.removeEventListener("resize", resize);
+      document.removeEventListener("pointerdown", clearPinnedTooltipOnDocumentClick);
       chart.off("click", pinTooltip);
       chart.getZr().off("click", clearPinnedTooltip);
       chart.dispose();

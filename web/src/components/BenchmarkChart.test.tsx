@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, waitFor } from "@testing-library/react";
+import { fireEvent, render, waitFor } from "@testing-library/react";
 import { BenchmarkChart } from "./BenchmarkChart";
 import type { ChartSegment, ChartSeries } from "../types";
 
@@ -139,7 +139,7 @@ describe("BenchmarkChart", () => {
     const option = setOption.mock.calls.at(-1)?.[0];
     const clickHandler = on.mock.calls.find(([eventName]) => eventName === "click")?.[1];
 
-    expect(option.tooltip.position([40, 50])).toEqual([52, 62]);
+    expect(option.tooltip.position([40, 50], null, null, null, { contentSize: [180, 100], viewSize: [800, 400] })).toEqual([52, 62]);
     clickHandler({
       componentType: "series",
       seriesIndex: 0,
@@ -147,11 +147,72 @@ describe("BenchmarkChart", () => {
       event: { offsetX: 100, offsetY: 120 }
     });
 
-    expect(option.tooltip.position([40, 50])).toEqual([112, 132]);
+    expect(option.tooltip.position([40, 50], null, null, null, { contentSize: [180, 100], viewSize: [800, 400] })).toEqual([112, 132]);
     expect(dispatchAction).toHaveBeenCalledWith({
       type: "showTip",
       seriesIndex: 0,
       dataIndex: 0
     });
+  });
+
+  it("keeps pinned tooltips inside the chart viewport", async () => {
+    const series: ChartSeries[] = [
+      {
+        key: "nvidia-h800-cuda-pytorch",
+        name: "NVIDIA H800 PyTorch",
+        records: [],
+        points: [{ caseId: "right_edge_case", latencyMs: 0.01, record: null }]
+      }
+    ];
+    const segments: ChartSegment[] = [{ key: "realistic", label: "realistic", start: 0, end: 0 }];
+
+    render(<BenchmarkChart series={series} segments={segments} />);
+
+    await waitFor(() => {
+      expect(setOption).toHaveBeenCalled();
+    });
+
+    const option = setOption.mock.calls.at(-1)?.[0];
+    const clickHandler = on.mock.calls.find(([eventName]) => eventName === "click")?.[1];
+
+    clickHandler({
+      componentType: "series",
+      seriesIndex: 0,
+      dataIndex: 0,
+      event: { offsetX: 760, offsetY: 350 }
+    });
+
+    expect(option.tooltip.position([760, 350], null, null, null, { contentSize: [180, 100], viewSize: [800, 400] })).toEqual([568, 238]);
+  });
+
+  it("hides a pinned tooltip when clicking outside the chart", async () => {
+    const series: ChartSeries[] = [
+      {
+        key: "nvidia-h800-cuda-pytorch",
+        name: "NVIDIA H800 PyTorch",
+        records: [],
+        points: [{ caseId: "bert_pytorch_attention", latencyMs: 0.01, record: null }]
+      }
+    ];
+    const segments: ChartSegment[] = [{ key: "realistic", label: "realistic", start: 0, end: 0 }];
+
+    render(<BenchmarkChart series={series} segments={segments} />);
+
+    await waitFor(() => {
+      expect(setOption).toHaveBeenCalled();
+    });
+
+    const clickHandler = on.mock.calls.find(([eventName]) => eventName === "click")?.[1];
+    clickHandler({
+      componentType: "series",
+      seriesIndex: 0,
+      dataIndex: 0,
+      event: { offsetX: 100, offsetY: 120 }
+    });
+    dispatchAction.mockClear();
+
+    fireEvent.pointerDown(document.body);
+
+    expect(dispatchAction).toHaveBeenCalledWith({ type: "hideTip" });
   });
 });
