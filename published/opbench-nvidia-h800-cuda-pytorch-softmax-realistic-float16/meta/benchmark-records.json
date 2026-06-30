@@ -24,10 +24,10 @@
       "source_file": "torchbench_train/BERT_pytorch_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms_avg": 18.50766027272727,
-        "latency_ms_p50": 18.520552,
-        "latency_ms_p95": 18.7329,
-        "sample_count": 11
+        "latency_ms_avg": 0.010048,
+        "latency_ms_p50": 0.010048,
+        "latency_ms_p95": 0.010048,
+        "sample_count": 1
       },
       "accuracy": {
         "passed": true,
@@ -58,10 +58,10 @@
       "source_file": "hf_train/CamemBert_train.json",
       "source_op": "aten._log_softmax.default",
       "metrics": {
-        "latency_ms_avg": 43.70508454545455,
-        "latency_ms_p50": 43.672407,
-        "latency_ms_p95": 44.009977,
-        "sample_count": 11
+        "latency_ms_avg": 0.6994239999999999,
+        "latency_ms_p50": 0.6994239999999999,
+        "latency_ms_p95": 0.6994239999999999,
+        "sample_count": 1
       },
       "accuracy": {
         "passed": true,
@@ -94,10 +94,10 @@
       "source_file": "hf_train/YituTechConvBert_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms_avg": 51.01281354545455,
-        "latency_ms_p50": 51.051179,
-        "latency_ms_p95": 51.483506,
-        "sample_count": 11
+        "latency_ms_avg": 0.048415999999999994,
+        "latency_ms_p50": 0.048415999999999994,
+        "latency_ms_p95": 0.048415999999999994,
+        "sample_count": 1
       },
       "accuracy": {
         "passed": true,
@@ -129,10 +129,10 @@
       "source_file": "hf_train/YituTechConvBert_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms_avg": 4.783911909090909,
-        "latency_ms_p50": 4.787176,
-        "latency_ms_p95": 4.817161,
-        "sample_count": 11
+        "latency_ms_avg": 0.005568,
+        "latency_ms_p50": 0.005568,
+        "latency_ms_p95": 0.005568,
+        "sample_count": 1
       },
       "accuracy": {
         "passed": true,
@@ -163,10 +163,10 @@
       "source_file": "hf_train/YituTechConvBert_train.json",
       "source_op": "aten._log_softmax.default",
       "metrics": {
-        "latency_ms_avg": 44.936961545454544,
-        "latency_ms_p50": 44.941312,
-        "latency_ms_p95": 45.0490715,
-        "sample_count": 11
+        "latency_ms_avg": 0.655264,
+        "latency_ms_p50": 0.655264,
+        "latency_ms_p95": 0.655264,
+        "sample_count": 1
       },
       "accuracy": {
         "passed": true,
@@ -199,10 +199,10 @@
       "source_file": "timm_train/crossvit_9_240_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms_avg": 2.9964082727272725,
-        "latency_ms_p50": 2.997109,
-        "latency_ms_p95": 3.0241,
-        "sample_count": 11
+        "latency_ms_avg": 0.004032,
+        "latency_ms_p50": 0.004032,
+        "latency_ms_p95": 0.004032,
+        "sample_count": 1
       },
       "accuracy": {
         "passed": true,
@@ -235,10 +235,10 @@
       "source_file": "hf_train/DebertaV2ForMaskedLM_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms_avg": 37.156586,
-        "latency_ms_p50": 37.112968,
-        "latency_ms_p95": 37.464496,
-        "sample_count": 11
+        "latency_ms_avg": 0.027136,
+        "latency_ms_p50": 0.027136,
+        "latency_ms_p95": 0.027136,
+        "sample_count": 1
       },
       "accuracy": {
         "passed": true,
@@ -271,10 +271,10 @@
       "source_file": "hf_train/ElectraForCausalLM_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms_avg": 54.99502,
-        "latency_ms_p50": 55.131382,
-        "latency_ms_p95": 55.390829,
-        "sample_count": 11
+        "latency_ms_avg": 0.063904,
+        "latency_ms_p50": 0.063904,
+        "latency_ms_p95": 0.063904,
+        "sample_count": 1
       },
       "accuracy": {
         "passed": true,
@@ -307,10 +307,10 @@
       "source_file": "hf_train/GPTJForCausalLM_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms_avg": 3.429587818181818,
-        "latency_ms_p50": 3.439145,
-        "latency_ms_p95": 3.4748075,
-        "sample_count": 11
+        "latency_ms_avg": 0.00464,
+        "latency_ms_p50": 0.00464,
+        "latency_ms_p95": 0.00464,
+        "sample_count": 1
       },
       "accuracy": {
         "passed": true,
@@ -343,10 +343,10 @@
       "source_file": "hf_train/GPTNeoForCausalLM_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms_avg": 26.332014,
-        "latency_ms_p50": 26.319384,
-        "latency_ms_p95": 26.6920205,
-        "sample_count": 11
+        "latency_ms_avg": 0.02096,
+        "latency_ms_p50": 0.02096,
+        "latency_ms_p95": 0.02096,
+        "sample_count": 1
       },
       "accuracy": {
         "passed": true,
@@ -379,10 +379,10 @@
       "source_file": "timm_train/eca_halonext26ts_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms_avg": 39.18334081818182,
-        "latency_ms_p50": 39.217692,
-        "latency_ms_p95": 39.2787915,
-        "sample_count": 11
+        "latency_ms_avg": 0.102912,
+        "latency_ms_p50": 0.102912,
+        "latency_ms_p95": 0.102912,
+        "sample_count": 1
       },
       "accuracy": {
         "passed": true,
@@ -415,10 +415,10 @@
       "source_file": "hf_train/LayoutLMForMaskedLM_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms_avg": 59.19615745454546,
-        "latency_ms_p50": 59.207122,
-        "latency_ms_p95": 59.804374,
-        "sample_count": 11
+        "latency_ms_avg": 0.092352,
+        "latency_ms_p50": 0.092352,
+        "latency_ms_p95": 0.092352,
+        "sample_count": 1
       },
       "accuracy": {
         "passed": true,
@@ -451,10 +451,10 @@
       "source_file": "timm_train/levit_128_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms_avg": 51.71368663636364,
-        "latency_ms_p50": 51.692514,
-        "latency_ms_p95": 51.8105045,
-        "sample_count": 11
+        "latency_ms_avg": 0.35254399999999997,
+        "latency_ms_p50": 0.35254399999999997,
+        "latency_ms_p95": 0.35254399999999997,
+        "sample_count": 1
       },
       "accuracy": {
         "passed": true,
@@ -487,10 +487,10 @@
       "source_file": "timm_train/levit_128_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms_avg": 49.60137936363636,
-        "latency_ms_p50": 49.620025,
-        "latency_ms_p95": 49.760965,
-        "sample_count": 11
+        "latency_ms_avg": 0.179072,
+        "latency_ms_p50": 0.179072,
+        "latency_ms_p95": 0.179072,
+        "sample_count": 1
       },
       "accuracy": {
         "passed": true,
@@ -521,10 +521,10 @@
       "source_file": "hf_train/AllenaiLongformerBase_train.json",
       "source_op": "aten._log_softmax.default",
       "metrics": {
-        "latency_ms_avg": 57.22273781818182,
-        "latency_ms_p50": 57.205129,
-        "latency_ms_p95": 57.337583,
-        "sample_count": 11
+        "latency_ms_avg": 0.435488,
+        "latency_ms_p50": 0.435488,
+        "latency_ms_p95": 0.435488,
+        "sample_count": 1
       },
       "accuracy": {
         "passed": true,
@@ -555,10 +555,10 @@
       "source_file": "hf_train/M2M100ForConditionalGeneration_train.json",
       "source_op": "aten._log_softmax.default",
       "metrics": {
-        "latency_ms_avg": 80.79986245454546,
-        "latency_ms_p50": 80.77312,
-        "latency_ms_p95": 80.958486,
-        "sample_count": 11
+        "latency_ms_avg": 0.728384,
+        "latency_ms_p50": 0.728384,
+        "latency_ms_p95": 0.728384,
+        "sample_count": 1
       },
       "accuracy": {
         "passed": true,
@@ -591,10 +591,10 @@
       "source_file": "hf_train/MobileBertForMaskedLM_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms_avg": 26.40850172727273,
-        "latency_ms_p50": 26.420752,
-        "latency_ms_p95": 26.670988,
-        "sample_count": 11
+        "latency_ms_avg": 0.020896,
+        "latency_ms_p50": 0.020896,
+        "latency_ms_p95": 0.020896,
+        "sample_count": 1
       },
       "accuracy": {
         "passed": true,
@@ -625,10 +625,10 @@
       "source_file": "hf_train/MT5ForConditionalGeneration_train.json",
       "source_op": "aten._log_softmax.default",
       "metrics": {
-        "latency_ms_avg": 86.96952318181818,
-        "latency_ms_p50": 86.964237,
-        "latency_ms_p95": 87.033659,
-        "sample_count": 11
+        "latency_ms_avg": 1.385888,
+        "latency_ms_p50": 1.385888,
+        "latency_ms_p95": 1.385888,
+        "sample_count": 1
       },
       "accuracy": {
         "passed": true,
@@ -659,10 +659,10 @@
       "source_file": "hf_train/OPTForCausalLM_train.json",
       "source_op": "aten._log_softmax.default",
       "metrics": {
-        "latency_ms_avg": 58.86128336363636,
-        "latency_ms_p50": 58.845568,
-        "latency_ms_p95": 59.033044,
-        "sample_count": 11
+        "latency_ms_avg": 0.433184,
+        "latency_ms_p50": 0.433184,
+        "latency_ms_p95": 0.433184,
+        "sample_count": 1
       },
       "accuracy": {
         "passed": true,
@@ -694,10 +694,10 @@
       "source_file": "hf_train/PegasusForConditionalGeneration_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms_avg": 25.429671454545453,
-        "latency_ms_p50": 25.516361,
-        "latency_ms_p95": 25.731488,
-        "sample_count": 11
+        "latency_ms_avg": 0.020928000000000002,
+        "latency_ms_p50": 0.020928000000000002,
+        "latency_ms_p95": 0.020928000000000002,
+        "sample_count": 1
       },
       "accuracy": {
         "passed": true,
@@ -729,10 +729,10 @@
       "source_file": "hf_train/PLBartForCausalLM_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms_avg": 61.758860454545456,
-        "latency_ms_p50": 61.720432,
-        "latency_ms_p95": 61.9839445,
-        "sample_count": 11
+        "latency_ms_avg": 0.18745599999999998,
+        "latency_ms_p50": 0.18745599999999998,
+        "latency_ms_p95": 0.18745599999999998,
+        "sample_count": 1
       },
       "accuracy": {
         "passed": true,
@@ -763,10 +763,10 @@
       "source_file": "hf_train/PLBartForCausalLM_train.json",
       "source_op": "aten._log_softmax.default",
       "metrics": {
-        "latency_ms_avg": 54.31831745454545,
-        "latency_ms_p50": 54.329731,
-        "latency_ms_p95": 54.39992,
-        "sample_count": 11
+        "latency_ms_avg": 0.946496,
+        "latency_ms_p50": 0.946496,
+        "latency_ms_p95": 0.946496,
+        "sample_count": 1
       },
       "accuracy": {
         "passed": true,
@@ -798,10 +798,10 @@
       "source_file": "torchbench_train/speech_transformer_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms_avg": 18.94054390909091,
-        "latency_ms_p50": 18.945631,
-        "latency_ms_p95": 19.121427,
-        "sample_count": 11
+        "latency_ms_avg": 0.01056,
+        "latency_ms_p50": 0.01056,
+        "latency_ms_p95": 0.01056,
+        "sample_count": 1
       },
       "accuracy": {
         "passed": true,
@@ -834,10 +834,10 @@
       "source_file": "timm_train/swin_base_patch4_window7_224_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms_avg": 20.694736090909092,
-        "latency_ms_p50": 20.709179,
-        "latency_ms_p95": 20.8259845,
-        "sample_count": 11
+        "latency_ms_avg": 0.034783999999999995,
+        "latency_ms_p50": 0.034783999999999995,
+        "latency_ms_p95": 0.034783999999999995,
+        "sample_count": 1
       },
       "accuracy": {
         "passed": true,
@@ -870,10 +870,10 @@
       "source_file": "hf_train/T5Small_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms_avg": 52.54513372727273,
-        "latency_ms_p50": 52.569544,
-        "latency_ms_p95": 52.795331,
-        "sample_count": 11
+        "latency_ms_avg": 0.065536,
+        "latency_ms_p50": 0.065536,
+        "latency_ms_p95": 0.065536,
+        "sample_count": 1
       },
       "accuracy": {
         "passed": true,
@@ -904,10 +904,10 @@
       "source_file": "hf_train/T5Small_train.json",
       "source_op": "aten._log_softmax.default",
       "metrics": {
-        "latency_ms_avg": 41.796211,
-        "latency_ms_p50": 41.798187,
-        "latency_ms_p95": 41.8503455,
-        "sample_count": 11
+        "latency_ms_avg": 0.358976,
+        "latency_ms_p50": 0.358976,
+        "latency_ms_p95": 0.358976,
+        "sample_count": 1
       },
       "accuracy": {
         "passed": true,
@@ -939,10 +939,10 @@
       "source_file": "hf_train/TrOCRForCausalLM_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms_avg": 53.03646118181818,
-        "latency_ms_p50": 53.02482,
-        "latency_ms_p95": 53.4782125,
-        "sample_count": 11
+        "latency_ms_avg": 0.06614400000000001,
+        "latency_ms_p50": 0.06614400000000001,
+        "latency_ms_p95": 0.06614400000000001,
+        "sample_count": 1
       },
       "accuracy": {
         "passed": true,
@@ -975,10 +975,10 @@
       "source_file": "timm_train/xcit_large_24_p8_224_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms_avg": 2.335428909090909,
-        "latency_ms_p50": 2.33857,
-        "latency_ms_p95": 2.369242,
-        "sample_count": 11
+        "latency_ms_avg": 0.0038399999999999997,
+        "latency_ms_p50": 0.0038399999999999997,
+        "latency_ms_p95": 0.0038399999999999997,
+        "sample_count": 1
       },
       "accuracy": {
         "passed": true,
@@ -1009,10 +1009,10 @@
       "source_file": "hf_train/XGLMForCausalLM_train.json",
       "source_op": "aten._log_softmax.default",
       "metrics": {
-        "latency_ms_avg": 84.39972627272728,
-        "latency_ms_p50": 84.374507,
-        "latency_ms_p95": 84.5634725,
-        "sample_count": 11
+        "latency_ms_avg": 0.725696,
+        "latency_ms_p50": 0.725696,
+        "latency_ms_p95": 0.725696,
+        "sample_count": 1
       },
       "accuracy": {
         "passed": true,
@@ -1045,10 +1045,10 @@
       "source_file": "hf_train/XLNetLMHeadModel_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms_avg": 55.18839009090909,
-        "latency_ms_p50": 55.364579,
-        "latency_ms_p95": 55.7620975,
-        "sample_count": 11
+        "latency_ms_avg": 0.06336,
+        "latency_ms_p50": 0.06336,
+        "latency_ms_p95": 0.06336,
+        "sample_count": 1
       },
       "accuracy": {
         "passed": true,
