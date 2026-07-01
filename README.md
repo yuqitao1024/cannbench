@@ -327,7 +327,7 @@ cannbench bench \
 When `--implementation simt` is set, CannBench deploys the selected SIMT version. The default version is `v1`; pass `--implementation-version v2` to select `v2`. CannBench looks for:
 
 ```text
-src/cannbench/datasets/data/<operator>/custom_ops/ascend/<version>/install.sh
+src/cannbench/datasets/data/<operator>/simt/<version>/install.sh
 ```
 
 SIMT operator versions use versioned Python packages and torch namespaces, for example `aten_softmax` for `v1` and `aten_softmax_v2` for `v2`. This allows different SIMT versions to be installed and profiled concurrently in the same Python environment when the target devices and profiler output directories are isolated.
@@ -370,7 +370,7 @@ cannbench compare \
   --output results/softmax-accuracy.json
 ```
 
-If the Ascend side should use a SIMT implementation instead of the CANN ops library, add `--left-deploy-custom-op` or `--right-deploy-custom-op` on the corresponding side.
+If the Ascend side should use a SIMT implementation instead of the CANN ops library baseline, add `--left-deploy-simt-op` or `--right-deploy-simt-op` on the corresponding side.
 
 Generate a local Markdown report from collected NVIDIA and Ascend run directories:
 
@@ -459,8 +459,8 @@ Implemented now:
 - Normalized benchmark record generation for publish and frontend loading
 - Static frontend performance viewer with chart, case table, repository diff panel, and GPU JSON upload validation
 - NVIDIA PyTorch backend for single-card operator tests
-- Ascend PyTorch backend adapter with optional default custom-op deployment hook
-- Built-in Ascend custom `softmax` operator source project
+- Ascend PyTorch backend adapter with optional SIMT operator deployment
+- Built-in Ascend SIMT `softmax` operator source project
 - Built-in operator datasets and dispatch for:
   - `softmax`
   - `embedding`
@@ -477,7 +477,7 @@ Implemented now:
 Planned next:
 
 - Harden profiler parsers against real `msprof op` and `ncu` output variants from target machines
-- Built-in Ascend custom operator projects for more operator datasets
+- Built-in Ascend SIMT operator projects for more operator datasets
 - Real-hardware validation on NVIDIA CUDA and Ascend NPU hosts
 - Model-level TTFS / TPS benchmarks
 
@@ -490,7 +490,7 @@ Planned next:
 
 ## Roadmap
 
-- Add built-in Ascend custom operator examples beyond `softmax`
+- Add built-in Ascend SIMT operator examples beyond `softmax`
 - Expand operator datasets and realistic shape coverage
 - Add TTFS and TPS model benchmark pipeline
 - Standardize result schema
@@ -512,7 +512,7 @@ The following projects and documents are useful references for CannBench design 
 - TritonBench
   https://github.com/meta-pytorch/tritonbench
 
-  Useful as a reference for operator-focused benchmarking, example inputs, and performance comparison workflows for PyTorch custom operators.
+  Useful as a reference for operator-focused benchmarking, example inputs, and performance comparison workflows for PyTorch operators.
 
 - DeepSpeedExamples Benchmarks
   https://github.com/deepspeedai/DeepSpeedExamples/tree/master/benchmarks
@@ -533,7 +533,7 @@ This repository is in the first implementation stage. The current scope is:
 - Single-card benchmarking only
 - First operator benchmark framework for NVIDIA and Ascend backends
 - Shared schema, timing, and report output layers
-- A built-in Ascend custom `softmax` operator source project is included
+- A built-in Ascend SIMT `softmax` operator source project is included
 - Static frontend performance result viewing is included
 - Model TTFS/TPS benchmarking is not implemented yet
 

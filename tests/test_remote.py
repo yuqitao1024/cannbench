@@ -116,7 +116,7 @@ def test_collect_remote_artifacts_runs_capture_and_downloads_output(tmp_path):
         output_dir=tmp_path / "results",
         run_id="softmax-run",
         capture_output=True,
-        deploy_custom_op=True,
+        deploy_simt_op=True,
         runner=fake_runner,
     )
 
@@ -136,7 +136,7 @@ def test_collect_remote_artifacts_runs_capture_and_downloads_output(tmp_path):
         [
             "ssh",
             "user@ascend-host",
-            "cd /opt/cannbench && ASCEND_VISIBLE_DEVICES=0 python3 -m cannbench internal-run --backend ascend --prepared-input .cannbench-runs/softmax-run/prepared.json --output-dir .cannbench-runs/softmax-run/output --run-name captured-output --deploy-custom-op",
+            "cd /opt/cannbench && ASCEND_VISIBLE_DEVICES=0 python3 -m cannbench internal-run --backend ascend --prepared-input .cannbench-runs/softmax-run/prepared.json --output-dir .cannbench-runs/softmax-run/output --run-name captured-output --deploy-simt-op",
         ],
         [
             "scp",
@@ -227,7 +227,7 @@ def test_collect_remote_artifacts_runs_ascend_profile_and_downloads_profile(tmp_
     ]
 
 
-def test_collect_remote_artifacts_passes_custom_op_version_to_internal_run(tmp_path):
+def test_collect_remote_artifacts_passes_simt_op_version_to_internal_run(tmp_path):
     commands: list[list[str]] = []
 
     def fake_runner(command):
@@ -269,12 +269,12 @@ def test_collect_remote_artifacts_passes_custom_op_version_to_internal_run(tmp_p
         run_id="softmax-run",
         capture_output=False,
         profile_device_time=True,
-        deploy_custom_op=True,
+        deploy_simt_op=True,
         implementation_version="v2",
         runner=fake_runner,
     )
 
-    assert "--implementation-version v2 --deploy-custom-op" in commands[2][2]
+    assert "--implementation-version v2 --deploy-simt-op" in commands[2][2]
 
 
 def test_collect_remote_artifacts_runs_nvidia_ncu_profile(tmp_path):

@@ -24,11 +24,11 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "cannbench.datasets.data.*" = ["*.json"]
-"cannbench.datasets.data.*.custom_ops.ascend.*" = [
+"cannbench.datasets.data.*.simt.*" = [
   "*",
-  "aten_softmax/*",
-  "aten_softmax/csrc/*",
-  "aten_softmax/csrc/simt/*",
+  "*/*",
+  "*/csrc/*",
+  "*/csrc/simt/*",
   "scripts/*",
 ]
 

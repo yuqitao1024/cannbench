@@ -115,7 +115,7 @@ inf: 0
 
 ### Profiler target validated
 
-`msprof op` confirmed that the SIMT test was profiling the custom row-wise
+`msprof op` confirmed that the SIMT test was profiling the SIMT row-wise
 kernel, not CANN library softmax and not a Cast kernel:
 
 ```text
@@ -132,7 +132,7 @@ SIMT kernel: row_softmax_forward_kernel
 Task Duration(us): 6661.099121
 ```
 
-This confirms that V1 is now measuring the intended custom kernel, but the
+This confirms that V1 is now measuring the intended SIMT kernel, but the
 current SIMT implementation is still far slower than the optimized CANN ops
 library implementation.
 
@@ -254,7 +254,7 @@ should explicitly design the row-wise softmax launch policy:
 3. Preserve correctness first by requiring all 30 realistic fp16 cases to pass.
 4. Use `scripts/ascend_softmax_accuracy.py` as the V2 correctness regression
    gate across smoke, realistic, and stress cases.
-5. Add profiler validation to ensure SIMT runs profile the custom kernel name.
+5. Add profiler validation to ensure SIMT runs profile the SIMT kernel name.
 6. Then optimize performance against:
    - CANN ops library softmax on Ascend 950PR;
    - PyTorch CUDA softmax on H800;

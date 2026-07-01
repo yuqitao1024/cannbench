@@ -181,7 +181,7 @@ def test_ascend_backend_materializes_softmax_inputs_from_seed(monkeypatch):
     assert captured["values"]
 
 
-def test_ascend_backend_skips_custom_op_deployment_when_disabled(monkeypatch):
+def test_ascend_backend_skips_simt_op_deployment_when_disabled(monkeypatch):
     captured: dict[str, object] = {}
 
     class FakeTensor:
@@ -209,7 +209,7 @@ def test_ascend_backend_skips_custom_op_deployment_when_disabled(monkeypatch):
     backend = AscendBackend()
     monkeypatch.setattr(
         backend,
-        "_deploy_custom_op",
+        "_deploy_simt_op",
         lambda request, op_name: captured.setdefault("called", True),
     )
 
@@ -229,7 +229,7 @@ def test_ascend_backend_skips_custom_op_deployment_when_disabled(monkeypatch):
     assert "called" not in captured
 
 
-def test_ascend_backend_deploys_v1_custom_op_when_enabled(monkeypatch, tmp_path):
+def test_ascend_backend_deploys_v1_simt_op_when_enabled(monkeypatch, tmp_path):
     captured: dict[str, object] = {}
     op_dir = (
         tmp_path
@@ -238,8 +238,7 @@ def test_ascend_backend_deploys_v1_custom_op_when_enabled(monkeypatch, tmp_path)
         / "datasets"
         / "data"
         / "softmax"
-        / "custom_ops"
-        / "ascend"
+        / "simt"
         / "v1"
     )
     op_dir.mkdir(parents=True)
@@ -264,15 +263,15 @@ def test_ascend_backend_deploys_v1_custom_op_when_enabled(monkeypatch, tmp_path)
     from cannbench.backends.pytorch_backend import AscendBackend
 
     backend = AscendBackend()
-    monkeypatch.setattr(backend, "_custom_op_ascend_root", lambda op_name: op_dir.parent)
+    monkeypatch.setattr(backend, "_simt_op_root", lambda op_name: op_dir.parent)
     monkeypatch.setattr(
         backend,
-        "_run_custom_op_install",
+        "_run_simt_op_install",
         lambda script: captured.setdefault("script", script),
     )
     monkeypatch.setattr(
         backend,
-        "_load_custom_op_module",
+        "_load_simt_op_module",
         lambda request, op_name: captured.setdefault(
             "loaded", (op_name, request.implementation_version or "v1")
         ),
@@ -292,7 +291,7 @@ def test_ascend_backend_deploys_v1_custom_op_when_enabled(monkeypatch, tmp_path)
         warmup=1,
         iterations=1,
         seed=7,
-        deploy_custom_op=True,
+        deploy_simt_op=True,
     )
 
     backend.run_softmax(request)
@@ -301,7 +300,7 @@ def test_ascend_backend_deploys_v1_custom_op_when_enabled(monkeypatch, tmp_path)
     assert captured["loaded"] == ("softmax", "v1")
 
 
-def test_ascend_backend_deploys_requested_custom_op_version(monkeypatch, tmp_path):
+def test_ascend_backend_deploys_requested_simt_op_version(monkeypatch, tmp_path):
     captured: dict[str, object] = {}
     root = (
         tmp_path
@@ -310,8 +309,7 @@ def test_ascend_backend_deploys_requested_custom_op_version(monkeypatch, tmp_pat
         / "datasets"
         / "data"
         / "softmax"
-        / "custom_ops"
-        / "ascend"
+        / "simt"
     )
     op_dir = root / "v2"
     op_dir.mkdir(parents=True)
@@ -321,15 +319,15 @@ def test_ascend_backend_deploys_requested_custom_op_version(monkeypatch, tmp_pat
     from cannbench.backends.pytorch_backend import AscendBackend
 
     backend = AscendBackend()
-    monkeypatch.setattr(backend, "_custom_op_ascend_root", lambda op_name: root)
+    monkeypatch.setattr(backend, "_simt_op_root", lambda op_name: root)
     monkeypatch.setattr(
         backend,
-        "_run_custom_op_install",
+        "_run_simt_op_install",
         lambda script: captured.setdefault("script", script),
     )
     monkeypatch.setattr(
         backend,
-        "_load_custom_op_module",
+        "_load_simt_op_module",
         lambda request, op_name: captured.setdefault(
             "loaded", (op_name, request.implementation_version)
         ),
@@ -344,11 +342,11 @@ def test_ascend_backend_deploys_requested_custom_op_version(monkeypatch, tmp_pat
         warmup=1,
         iterations=1,
         seed=7,
-        deploy_custom_op=True,
+        deploy_simt_op=True,
         implementation_version="v2",
     )
 
-    backend._deploy_custom_op(request, "softmax")
+    backend._deploy_simt_op(request, "softmax")
 
     assert captured["script"] == install_script
     assert captured["loaded"] == ("softmax", "v2")
@@ -393,7 +391,7 @@ def test_ascend_backend_runs_simt_softmax_through_registered_op(monkeypatch):
     from cannbench.backends.pytorch_backend import AscendBackend
 
     backend = AscendBackend()
-    monkeypatch.setattr(backend, "_deploy_custom_op", lambda request, op_name: None)
+    monkeypatch.setattr(backend, "_deploy_simt_op", lambda request, op_name: None)
     request = OperatorBenchmarkRequest(
         backend="ascend",
         op="softmax",
@@ -403,7 +401,7 @@ def test_ascend_backend_runs_simt_softmax_through_registered_op(monkeypatch):
         warmup=2,
         iterations=3,
         seed=7,
-        deploy_custom_op=True,
+        deploy_simt_op=True,
     )
 
     backend.run_softmax(request)
@@ -462,7 +460,7 @@ def test_ascend_backend_runs_simt_softmax_v2_through_versioned_module(monkeypatc
     from cannbench.backends.pytorch_backend import AscendBackend
 
     backend = AscendBackend()
-    monkeypatch.setattr(backend, "_deploy_custom_op", lambda request, op_name: None)
+    monkeypatch.setattr(backend, "_deploy_simt_op", lambda request, op_name: None)
     request = OperatorBenchmarkRequest(
         backend="ascend",
         op="softmax",
@@ -472,7 +470,7 @@ def test_ascend_backend_runs_simt_softmax_v2_through_versioned_module(monkeypatc
         warmup=2,
         iterations=3,
         seed=7,
-        deploy_custom_op=True,
+        deploy_simt_op=True,
         implementation_version="v2",
     )
 
@@ -541,7 +539,7 @@ def test_ascend_backend_captures_simt_softmax_through_registered_op(monkeypatch)
     from cannbench.backends.pytorch_backend import AscendBackend
 
     backend = AscendBackend()
-    monkeypatch.setattr(backend, "_deploy_custom_op", lambda request, op_name: None)
+    monkeypatch.setattr(backend, "_deploy_simt_op", lambda request, op_name: None)
     request = OperatorBenchmarkRequest(
         backend="ascend",
         op="softmax",
@@ -551,7 +549,7 @@ def test_ascend_backend_captures_simt_softmax_through_registered_op(monkeypatch)
         warmup=0,
         iterations=1,
         seed=7,
-        deploy_custom_op=True,
+        deploy_simt_op=True,
     )
 
     output = backend.capture_operator_output(request)

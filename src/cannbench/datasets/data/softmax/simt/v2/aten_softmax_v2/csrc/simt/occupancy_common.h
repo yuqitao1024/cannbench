@@ -8,7 +8,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace aten_softmax_v2_v2::simt {
+namespace aten_softmax_v2::simt {
 
 constexpr int64_t kMaxThreads = 1024;
 constexpr int64_t kDefaultMaxBlocksPerCoreCap = 4;
@@ -285,4 +285,4 @@ inline SpatialLaunchConfig spatial_launch_config_impl(
   };
 }
 
-} // namespace aten_softmax_v2_v2_v2::simt
+} // namespace aten_softmax_v2::simt

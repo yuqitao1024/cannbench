@@ -109,7 +109,7 @@ Current mapping:
     - `implementation: "cann_ops_library"`
     - `implementation_version: "cannops"`
 - `simt-v1`
-  - Ascend SIMT custom operator lane
+  - Ascend SIMT operator lane
   - benchmark records under this run currently use:
     - `implementation: "simt"`
     - `implementation_version: "v1"`

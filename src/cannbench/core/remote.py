@@ -124,7 +124,7 @@ def collect_remote_artifacts(
     summarize_profile: bool = False,
     warmup: int = 10,
     iterations: int = 1,
-    deploy_custom_op: bool = False,
+    deploy_simt_op: bool = False,
     implementation_version: str | None = None,
     run_id: str | None = None,
     endpoint: RemoteEndpoint | None = None,
@@ -178,8 +178,8 @@ def collect_remote_artifacts(
             f"--output-dir {shlex.quote(relative_output)} "
             f"--run-name captured-output{implementation_version_arg}"
         )
-        if deploy_custom_op:
-            command = f"{command} --deploy-custom-op"
+        if deploy_simt_op:
+            command = f"{command} --deploy-simt-op"
         runner(_ssh_command(endpoint, command))
         runner(
             _scp_download_command(endpoint, remote_output, output_dir / "output")
@@ -196,8 +196,8 @@ def collect_remote_artifacts(
             f"--output-dir {shlex.quote(relative_perf)} "
             f"--run-name benchmark{implementation_version_arg}"
         )
-        if deploy_custom_op:
-            base_operator = f"{base_operator} --deploy-custom-op"
+        if deploy_simt_op:
+            base_operator = f"{base_operator} --deploy-simt-op"
         if endpoint.backend == "ascend":
             profiled_operator = (
                 f"msprof op --output={shlex.quote(remote_profile)} {base_operator}"
@@ -227,7 +227,7 @@ def collect_remote_artifacts(
         )
         runner(_scp_download_command(endpoint, remote_perf, output_dir / "perf"))
         prepared = read_prepared_operator_input(prepared_input)
-        implementation = "simt" if deploy_custom_op else None
+        implementation = "simt" if deploy_simt_op else None
         summary = read_device_profile(
             output_dir / "profile",
             backend=endpoint.backend,

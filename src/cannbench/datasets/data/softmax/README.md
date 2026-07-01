@@ -113,12 +113,12 @@ Design intent: curated representative shapes from real traced models. All rows i
 | `xglm_logits` | `lm_logits` | `[1024, 256008]` | `1` | `XGLMForCausalLM` | `hf_train/XGLMForCausalLM_train.json` | `aten._log_softmax.default` |
 | `opt_logits` | `lm_logits` | `[4094, 50272]` | `1` | `OPTForCausalLM` | `hf_train/OPTForCausalLM_train.json` | `aten._log_softmax.default` |
 
-### Ascend Custom Softmax Realistic Performance Snapshot
+### Ascend SIMT Softmax Realistic Performance Snapshot
 
 Date: 2026-06-22
 
-Purpose: record the first broad Ascend comparison between the default Ascend
-operator library softmax and the built-in custom `aten_softmax` implementation
+Purpose: record the first broad Ascend comparison between the CANN ops library
+baseline softmax and the built-in SIMT `aten_softmax` implementation
 for the `realistic` split.
 
 Measurement settings:
@@ -142,12 +142,12 @@ Run status:
   after the long run (`LazySetDevice`, error code `507033`,
   `rtSetDevice execution failed`, `context is a null pointer`).
 
-Interpretation: completed rows show the custom implementation is broadly in the
-same performance range as the default Ascend operator library implementation.
+Interpretation: completed rows show the SIMT implementation is broadly in the
+same performance range as the CANN ops library baseline implementation.
 Because each row has one profiler sample, treat this as a checkpoint record, not
 a stable benchmark summary.
 
-| case_id | default_ms | custom_ms | custom/default | status |
+| case_id | cann_ops_library_ms | simt_v1_ms | simt_v1/cann_ops_library | status |
 | --- | ---: | ---: | ---: | --- |
 | `t5_attention` | 0.135135 | 0.138428 | 1.024x | ok |
 | `xcit_attention` | 0.003714 | 0.003626 | 0.976x | ok |

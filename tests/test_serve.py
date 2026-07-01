@@ -96,9 +96,9 @@ def test_validate_gpu_benchmark_upload_rejects_non_cuda_pytorch_implementation()
 
 def test_list_simt_operator_versions_returns_sorted_directory_names(tmp_path: Path):
     datasets_root = tmp_path / "datasets"
-    ascend_root = datasets_root / "softmax" / "custom_ops" / "ascend"
-    (ascend_root / "v2").mkdir(parents=True)
-    (ascend_root / "v1").mkdir(parents=True)
+    simt_root = datasets_root / "softmax" / "simt"
+    (simt_root / "v2").mkdir(parents=True)
+    (simt_root / "v1").mkdir(parents=True)
 
     versions = list_simt_operator_versions("softmax", datasets_root=datasets_root)
 
@@ -107,8 +107,8 @@ def test_list_simt_operator_versions_returns_sorted_directory_names(tmp_path: Pa
 
 def test_build_simt_operator_diff_uses_real_version_directories(tmp_path: Path):
     datasets_root = tmp_path / "datasets"
-    base_root = datasets_root / "softmax" / "custom_ops" / "ascend" / "v1"
-    compare_root = datasets_root / "softmax" / "custom_ops" / "ascend" / "v2"
+    base_root = datasets_root / "softmax" / "simt" / "v1"
+    compare_root = datasets_root / "softmax" / "simt" / "v2"
     base_root.mkdir(parents=True)
     compare_root.mkdir(parents=True)
 
@@ -129,10 +129,10 @@ def test_build_simt_operator_diff_uses_real_version_directories(tmp_path: Path):
     assert diff.base_version == "v1"
     assert diff.compare_version == "v2"
     assert diff.patch.startswith(
-        "diff --git a/src/cannbench/datasets/data/softmax/custom_ops/ascend/aten_softmax/csrc/simt/spatial_softmax.asc "
-        "b/src/cannbench/datasets/data/softmax/custom_ops/ascend/aten_softmax/csrc/simt/spatial_softmax.asc"
+        "diff --git a/src/cannbench/datasets/data/softmax/simt/aten_softmax/csrc/simt/spatial_softmax.asc "
+        "b/src/cannbench/datasets/data/softmax/simt/aten_softmax/csrc/simt/spatial_softmax.asc"
     )
-    assert "src/cannbench/datasets/data/softmax/custom_ops/ascend/aten_softmax/csrc/simt/spatial_softmax.asc" in diff.patch
+    assert "src/cannbench/datasets/data/softmax/simt/aten_softmax/csrc/simt/spatial_softmax.asc" in diff.patch
     assert "-beta" in diff.patch
     assert "+gamma" in diff.patch
 

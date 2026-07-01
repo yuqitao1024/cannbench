@@ -111,7 +111,7 @@ def _resolve_simt_operator_dir(operator: str, version: str, datasets_root: Path 
     safe_operator = _validate_component(operator, "operator")
     safe_version = _validate_component(version, "version")
     root = (datasets_root or _datasets_root()).resolve()
-    target = (root / safe_operator / "custom_ops" / "ascend" / safe_version).resolve()
+    target = (root / safe_operator / "simt" / safe_version).resolve()
     try:
         target.relative_to(root)
     except ValueError as exc:
@@ -127,7 +127,7 @@ def list_simt_operator_versions(
 ) -> tuple[str, ...]:
     safe_operator = _validate_component(operator, "operator")
     root = (datasets_root or _datasets_root()).resolve()
-    target = (root / safe_operator / "custom_ops" / "ascend").resolve()
+    target = (root / safe_operator / "simt").resolve()
     try:
         target.relative_to(root)
     except ValueError as exc:
@@ -170,7 +170,7 @@ def build_simt_operator_diff(
     compare_files = _iter_version_files(compare_dir)
     patch_chunks: list[str] = []
 
-    logical_root = Path("src") / "cannbench" / "datasets" / "data" / operator / "custom_ops" / "ascend"
+    logical_root = Path("src") / "cannbench" / "datasets" / "data" / operator / "simt"
     for relative_path in sorted(set(base_files) | set(compare_files)):
         base_path = base_files.get(relative_path)
         compare_path = compare_files.get(relative_path)

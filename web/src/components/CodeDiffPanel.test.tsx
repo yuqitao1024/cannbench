@@ -29,9 +29,9 @@ beforeEach(() => {
           operator: "softmax",
           base_version: "v1",
           compare_version: "v2",
-          patch: `diff --git a/src/cannbench/datasets/data/softmax/custom_ops/ascend/aten_softmax/csrc/simt/spatial_softmax.asc b/src/cannbench/datasets/data/softmax/custom_ops/ascend/aten_softmax/csrc/simt/spatial_softmax.asc
---- a/src/cannbench/datasets/data/softmax/custom_ops/ascend/aten_softmax/csrc/simt/spatial_softmax.asc
-+++ b/src/cannbench/datasets/data/softmax/custom_ops/ascend/aten_softmax/csrc/simt/spatial_softmax.asc
+          patch: `diff --git a/src/cannbench/datasets/data/softmax/simt/aten_softmax/csrc/simt/spatial_softmax.asc b/src/cannbench/datasets/data/softmax/simt/aten_softmax/csrc/simt/spatial_softmax.asc
+--- a/src/cannbench/datasets/data/softmax/simt/aten_softmax/csrc/simt/spatial_softmax.asc
++++ b/src/cannbench/datasets/data/softmax/simt/aten_softmax/csrc/simt/spatial_softmax.asc
 @@ -1,2 +1,2 @@
 -alpha
 +beta

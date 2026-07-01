@@ -17,7 +17,7 @@ class OperatorBenchmarkRequest:
     warmup: int
     iterations: int
     seed: int = 0
-    deploy_custom_op: bool = False
+    deploy_simt_op: bool = False
     implementation_version: str | None = None
     output_formats: tuple[str, ...] = field(
         default_factory=lambda: ("json", "csv", "md")

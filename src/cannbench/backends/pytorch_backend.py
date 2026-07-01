@@ -20,7 +20,7 @@ from cannbench.core.profile import (
 )
 from cannbench.core.result import OperatorBenchmarkResult, OperatorCase
 
-_ASCEND_CUSTOM_OP_MODULES = {
+_ASCEND_SIMT_OP_MODULES = {
     ("softmax", "v1"): "aten_softmax",
     ("softmax", "v2"): "aten_softmax_v2",
 }
@@ -199,40 +199,38 @@ class AscendBackend(TorchOperatorBackend):
         return "Ascend NPU is required for the ascend backend"
 
     def _before_run_operator(self, request: OperatorBenchmarkRequest) -> None:
-        if request.deploy_custom_op:
-            self._deploy_custom_op(request, request.op)
+        if request.deploy_simt_op:
+            self._deploy_simt_op(request, request.op)
 
-    def _custom_op_ascend_root(self, op_name: str):
-        return files("cannbench.datasets.data").joinpath(
-            op_name, "custom_ops", "ascend"
-        )
+    def _simt_op_root(self, op_name: str):
+        return files("cannbench.datasets.data").joinpath(op_name, "simt")
 
-    def _custom_op_base_dir(self, request: OperatorBenchmarkRequest, op_name: str):
+    def _simt_op_base_dir(self, request: OperatorBenchmarkRequest, op_name: str):
         version = request.implementation_version or "v1"
-        return self._custom_op_ascend_root(op_name).joinpath(version)
+        return self._simt_op_root(op_name).joinpath(version)
 
-    def _deploy_custom_op(self, request: OperatorBenchmarkRequest, op_name: str) -> None:
-        custom_op_dir = self._custom_op_base_dir(request, op_name)
-        if not custom_op_dir.is_dir():
+    def _deploy_simt_op(self, request: OperatorBenchmarkRequest, op_name: str) -> None:
+        simt_op_dir = self._simt_op_base_dir(request, op_name)
+        if not simt_op_dir.is_dir():
             raise RuntimeError(
-                "Ascend custom op deployment requested but default custom op "
-                f"directory was not found for {op_name}: {custom_op_dir}"
+                "Ascend SIMT operator deployment requested but SIMT operator "
+                f"directory was not found for {op_name}: {simt_op_dir}"
             )
-        install_script = custom_op_dir.joinpath("install.sh")
+        install_script = simt_op_dir.joinpath("install.sh")
         if not install_script.is_file():
             raise RuntimeError(
-                "Ascend custom op deployment requested but install.sh was not "
+                "Ascend SIMT operator deployment requested but install.sh was not "
                 f"found for {op_name}: {install_script}"
             )
         with as_file(install_script) as script_path:
-            self._run_custom_op_install(script_path)
-        self._load_custom_op_module(request, op_name)
+            self._run_simt_op_install(script_path)
+        self._load_simt_op_module(request, op_name)
 
-    def _custom_op_module_name(self, op_name: str, version: str | None) -> str | None:
-        return _ASCEND_CUSTOM_OP_MODULES.get((op_name, version or "v1"))
+    def _simt_op_module_name(self, op_name: str, version: str | None) -> str | None:
+        return _ASCEND_SIMT_OP_MODULES.get((op_name, version or "v1"))
 
-    def _load_custom_op_module(self, request: OperatorBenchmarkRequest, op_name: str) -> None:
-        module_name = self._custom_op_module_name(op_name, request.implementation_version)
+    def _load_simt_op_module(self, request: OperatorBenchmarkRequest, op_name: str) -> None:
+        module_name = self._simt_op_module_name(op_name, request.implementation_version)
         if module_name is None:
             return
         importlib.invalidate_caches()
@@ -240,11 +238,11 @@ class AscendBackend(TorchOperatorBackend):
             importlib.import_module(module_name)
         except ModuleNotFoundError as exc:
             raise RuntimeError(
-                "Ascend custom op deployment completed but Python module "
+                "Ascend SIMT operator deployment completed but Python module "
                 f"{module_name!r} could not be imported"
             ) from exc
 
-    def _run_custom_op_install(self, script_path: Path) -> None:
+    def _run_simt_op_install(self, script_path: Path) -> None:
         result = subprocess.run(
             [str(script_path)],
             cwd=script_path.parent,
@@ -254,16 +252,16 @@ class AscendBackend(TorchOperatorBackend):
         )
         if result.returncode != 0:
             raise RuntimeError(
-                "Ascend custom op deployment failed "
+                "Ascend SIMT operator deployment failed "
                 f"({script_path}, exit {result.returncode}): {result.stderr.strip()}"
             )
 
     def _softmax(self, torch, tensor, dim: int | None, request: OperatorBenchmarkRequest):
-        if request.deploy_custom_op:
-            module_name = self._custom_op_module_name(request.op, request.implementation_version)
+        if request.deploy_simt_op:
+            module_name = self._simt_op_module_name(request.op, request.implementation_version)
             if module_name is None:
                 raise RuntimeError(
-                    "Ascend SIMT softmax requested but no custom op module is "
+                    "Ascend SIMT softmax requested but no SIMT operator module is "
                     f"registered for version {request.implementation_version or 'v1'}"
                 )
             try:

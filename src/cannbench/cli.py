@@ -102,21 +102,21 @@ def _benchmark_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--seed", type=_non_negative_int, default=0)
     parser.add_argument("--prepared-input", type=Path)
     parser.add_argument("--prepared-dir", type=Path)
-    parser.add_argument("--deploy-custom-op", action="store_true", default=False)
+    parser.add_argument("--deploy-simt-op", action="store_true", default=False)
     parser.add_argument("--warmup", type=_non_negative_int, default=10)
     parser.add_argument("--iterations", type=_positive_int, default=1)
     parser.add_argument("--output-dir", type=Path, default=Path("results"))
     parser.add_argument("--run-name")
 
 
-def _resolve_deploy_custom_op(backend: str, implementation: str | None, deploy_custom_op: bool) -> bool:
+def _resolve_deploy_simt_op(backend: str, implementation: str | None, deploy_simt_op: bool) -> bool:
     if backend != "ascend":
-        return deploy_custom_op
+        return deploy_simt_op
     if implementation == "simt":
         return True
     if implementation == "cann_ops_library":
         return False
-    return deploy_custom_op
+    return deploy_simt_op
 
 
 def _resolve_implementation_version(implementation: str | None, version: str | None) -> str | None:
@@ -146,8 +146,8 @@ def _build_request_from_prepared(
         warmup=args.warmup,
         iterations=args.iterations,
         seed=prepared.seed,
-        deploy_custom_op=_resolve_deploy_custom_op(
-            args.backend, getattr(args, "implementation", None), args.deploy_custom_op
+        deploy_simt_op=_resolve_deploy_simt_op(
+            args.backend, getattr(args, "implementation", None), args.deploy_simt_op
         ),
         implementation_version=_resolve_implementation_version(
             getattr(args, "implementation", None),
@@ -172,8 +172,8 @@ def _build_request_from_args(args: argparse.Namespace) -> OperatorBenchmarkReque
         warmup=args.warmup,
         iterations=args.iterations,
         seed=getattr(args, "seed", 0),
-        deploy_custom_op=_resolve_deploy_custom_op(
-            args.backend, getattr(args, "implementation", None), args.deploy_custom_op
+        deploy_simt_op=_resolve_deploy_simt_op(
+            args.backend, getattr(args, "implementation", None), args.deploy_simt_op
         ),
         implementation_version=_resolve_implementation_version(
             getattr(args, "implementation", None),
@@ -211,8 +211,8 @@ def build_parser() -> argparse.ArgumentParser:
     compare.add_argument("--dataset", choices=["smoke", "realistic", "stress"], default="realistic")
     compare.add_argument("--case-id", required=True)
     compare.add_argument("--seed", type=_non_negative_int, default=0)
-    compare.add_argument("--left-deploy-custom-op", action="store_true", default=False)
-    compare.add_argument("--right-deploy-custom-op", action="store_true", default=False)
+    compare.add_argument("--left-deploy-simt-op", action="store_true", default=False)
+    compare.add_argument("--right-deploy-simt-op", action="store_true", default=False)
     compare.add_argument("--rtol", type=_non_negative_float, default=0.001)
     compare.add_argument("--atol", type=_non_negative_float, default=0.001)
     compare.add_argument("--output", type=Path, required=True)
@@ -759,8 +759,8 @@ def _run_remote_bench_with_plans(
                 capture_output=args.capture_output,
                 warmup=args.warmup,
                 iterations=args.iterations,
-                deploy_custom_op=_resolve_deploy_custom_op(
-                    endpoint.backend, args.implementation, args.deploy_custom_op
+                deploy_simt_op=_resolve_deploy_simt_op(
+                    endpoint.backend, args.implementation, args.deploy_simt_op
                 ),
                 implementation_version=_resolve_implementation_version(
                     args.implementation,
@@ -924,7 +924,7 @@ def _run_compare_command(args: argparse.Namespace) -> None:
         warmup=0,
         iterations=1,
         seed=args.seed,
-        deploy_custom_op=args.left_deploy_custom_op,
+        deploy_simt_op=args.left_deploy_simt_op,
     )
     right_request = OperatorBenchmarkRequest(
         backend=args.right_backend,
@@ -935,7 +935,7 @@ def _run_compare_command(args: argparse.Namespace) -> None:
         warmup=0,
         iterations=1,
         seed=args.seed,
-        deploy_custom_op=args.right_deploy_custom_op,
+        deploy_simt_op=args.right_deploy_simt_op,
     )
     left_output = get_backend(args.left_backend).capture_operator_output(left_request)
     right_output = get_backend(args.right_backend).capture_operator_output(right_request)
