@@ -2,7 +2,7 @@
   "records": [
     {
       "schema_version": 1,
-      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16",
+      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16-rerun-20260701b/softmax-realistic-bert_pytorch_attention-float16-seed7",
       "operator": "softmax",
       "dataset": "realistic",
       "case_id": "bert_pytorch_attention",
@@ -24,9 +24,9 @@
       "source_file": "torchbench_train/BERT_pytorch_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms_avg": 0.010546,
-        "latency_ms_p50": 0.010546,
-        "latency_ms_p95": 0.010546,
+        "latency_ms_avg": 1.58876001,
+        "latency_ms_p50": 1.58876001,
+        "latency_ms_p95": 1.58876001,
         "sample_count": 1
       },
       "accuracy": {
@@ -38,7 +38,7 @@
     },
     {
       "schema_version": 1,
-      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16",
+      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16-rerun-20260701b/softmax-realistic-camembert_logits-float16-seed7",
       "operator": "softmax",
       "dataset": "realistic",
       "case_id": "camembert_logits",
@@ -58,9 +58,9 @@
       "source_file": "hf_train/CamemBert_train.json",
       "source_op": "aten._log_softmax.default",
       "metrics": {
-        "latency_ms_avg": 0.714060974,
-        "latency_ms_p50": 0.714060974,
-        "latency_ms_p95": 0.714060974,
+        "latency_ms_avg": 41.872421875,
+        "latency_ms_p50": 41.872421875,
+        "latency_ms_p95": 41.872421875,
         "sample_count": 1
       },
       "accuracy": {
@@ -72,7 +72,7 @@
     },
     {
       "schema_version": 1,
-      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16",
+      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16-rerun-20260701b/softmax-realistic-convbert_attention-float16-seed7",
       "operator": "softmax",
       "dataset": "realistic",
       "case_id": "convbert_attention",
@@ -94,9 +94,9 @@
       "source_file": "hf_train/YituTechConvBert_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms_avg": 0.047602001,
-        "latency_ms_p50": 0.047602001,
-        "latency_ms_p95": 0.047602001,
+        "latency_ms_avg": 7.623561035,
+        "latency_ms_p50": 7.623561035,
+        "latency_ms_p95": 7.623561035,
         "sample_count": 1
       },
       "accuracy": {
@@ -108,7 +108,7 @@
     },
     {
       "schema_version": 1,
-      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16",
+      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16-rerun-20260701b/softmax-realistic-convbert_local_kernel-float16-seed7",
       "operator": "softmax",
       "dataset": "realistic",
       "case_id": "convbert_local_kernel",
@@ -129,9 +129,9 @@
       "source_file": "hf_train/YituTechConvBert_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms_avg": 0.005522999999999999,
-        "latency_ms_p50": 0.005522999999999999,
-        "latency_ms_p95": 0.005522999999999999,
+        "latency_ms_avg": 2.4301540530000003,
+        "latency_ms_p50": 2.4301540530000003,
+        "latency_ms_p95": 2.4301540530000003,
         "sample_count": 1
       },
       "accuracy": {
@@ -143,7 +143,7 @@
     },
     {
       "schema_version": 1,
-      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16",
+      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16-rerun-20260701b/softmax-realistic-convbert_logits-float16-seed7",
       "operator": "softmax",
       "dataset": "realistic",
       "case_id": "convbert_logits",
@@ -163,9 +163,9 @@
       "source_file": "hf_train/YituTechConvBert_train.json",
       "source_op": "aten._log_softmax.default",
       "metrics": {
-        "latency_ms_avg": 0.671427002,
-        "latency_ms_p50": 0.671427002,
-        "latency_ms_p95": 0.671427002,
+        "latency_ms_avg": 39.791425781,
+        "latency_ms_p50": 39.791425781,
+        "latency_ms_p95": 39.791425781,
         "sample_count": 1
       },
       "accuracy": {
@@ -177,7 +177,7 @@
     },
     {
       "schema_version": 1,
-      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16",
+      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16-rerun-20260701b/softmax-realistic-crossvit_cls_attention-float16-seed7",
       "operator": "softmax",
       "dataset": "realistic",
       "case_id": "crossvit_cls_attention",
@@ -199,9 +199,9 @@
       "source_file": "timm_train/crossvit_9_240_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms_avg": 0.004284,
-        "latency_ms_p50": 0.004284,
-        "latency_ms_p95": 0.004284,
+        "latency_ms_avg": 0.082848,
+        "latency_ms_p50": 0.082848,
+        "latency_ms_p95": 0.082848,
         "sample_count": 1
       },
       "accuracy": {
@@ -213,7 +213,7 @@
     },
     {
       "schema_version": 1,
-      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16",
+      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16-rerun-20260701b/softmax-realistic-deberta_attention-float16-seed7",
       "operator": "softmax",
       "dataset": "realistic",
       "case_id": "deberta_attention",
@@ -235,9 +235,9 @@
       "source_file": "hf_train/DebertaV2ForMaskedLM_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms_avg": 0.027218,
-        "latency_ms_p50": 0.027218,
-        "latency_ms_p95": 0.027218,
+        "latency_ms_avg": 3.053229004,
+        "latency_ms_p50": 3.053229004,
+        "latency_ms_p95": 3.053229004,
         "sample_count": 1
       },
       "accuracy": {
@@ -249,7 +249,7 @@
     },
     {
       "schema_version": 1,
-      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16",
+      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16-rerun-20260701b/softmax-realistic-electra_attention-float16-seed7",
       "operator": "softmax",
       "dataset": "realistic",
       "case_id": "electra_attention",
@@ -271,9 +271,9 @@
       "source_file": "hf_train/ElectraForCausalLM_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms_avg": 0.063210999,
-        "latency_ms_p50": 0.063210999,
-        "latency_ms_p95": 0.063210999,
+        "latency_ms_avg": 7.680401855,
+        "latency_ms_p50": 7.680401855,
+        "latency_ms_p95": 7.680401855,
         "sample_count": 1
       },
       "accuracy": {
@@ -285,7 +285,7 @@
     },
     {
       "schema_version": 1,
-      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16",
+      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16-rerun-20260701b/softmax-realistic-gptj_attention-float16-seed7",
       "operator": "softmax",
       "dataset": "realistic",
       "case_id": "gptj_attention",
@@ -307,9 +307,9 @@
       "source_file": "hf_train/GPTJForCausalLM_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms_avg": 0.0038239999999999997,
-        "latency_ms_p50": 0.0038239999999999997,
-        "latency_ms_p95": 0.0038239999999999997,
+        "latency_ms_avg": 0.136203003,
+        "latency_ms_p50": 0.136203003,
+        "latency_ms_p95": 0.136203003,
         "sample_count": 1
       },
       "accuracy": {
@@ -321,7 +321,7 @@
     },
     {
       "schema_version": 1,
-      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16",
+      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16-rerun-20260701b/softmax-realistic-gptneo_attention-float16-seed7",
       "operator": "softmax",
       "dataset": "realistic",
       "case_id": "gptneo_attention",
@@ -343,9 +343,9 @@
       "source_file": "hf_train/GPTNeoForCausalLM_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms_avg": 0.018639999,
-        "latency_ms_p50": 0.018639999,
-        "latency_ms_p95": 0.018639999,
+        "latency_ms_avg": 3.770217041,
+        "latency_ms_p50": 3.770217041,
+        "latency_ms_p95": 3.770217041,
         "sample_count": 1
       },
       "accuracy": {
@@ -357,7 +357,7 @@
     },
     {
       "schema_version": 1,
-      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16",
+      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16-rerun-20260701b/softmax-realistic-halonet_window_attention-float16-seed7",
       "operator": "softmax",
       "dataset": "realistic",
       "case_id": "halonet_window_attention",
@@ -379,9 +379,9 @@
       "source_file": "timm_train/eca_halonext26ts_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms_avg": 0.136384003,
-        "latency_ms_p50": 0.136384003,
-        "latency_ms_p95": 0.136384003,
+        "latency_ms_avg": 14.896393555000001,
+        "latency_ms_p50": 14.896393555000001,
+        "latency_ms_p95": 14.896393555000001,
         "sample_count": 1
       },
       "accuracy": {
@@ -393,7 +393,7 @@
     },
     {
       "schema_version": 1,
-      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16",
+      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16-rerun-20260701b/softmax-realistic-layoutlm_attention-float16-seed7",
       "operator": "softmax",
       "dataset": "realistic",
       "case_id": "layoutlm_attention",
@@ -415,9 +415,9 @@
       "source_file": "hf_train/LayoutLMForMaskedLM_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms_avg": 0.100799004,
-        "latency_ms_p50": 0.100799004,
-        "latency_ms_p95": 0.100799004,
+        "latency_ms_avg": 11.299333984,
+        "latency_ms_p50": 11.299333984,
+        "latency_ms_p95": 11.299333984,
         "sample_count": 1
       },
       "accuracy": {
@@ -429,7 +429,7 @@
     },
     {
       "schema_version": 1,
-      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16",
+      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16-rerun-20260701b/softmax-realistic-levit_global_attention-float16-seed7",
       "operator": "softmax",
       "dataset": "realistic",
       "case_id": "levit_global_attention",
@@ -451,9 +451,9 @@
       "source_file": "timm_train/levit_128_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms_avg": 0.473625977,
-        "latency_ms_p50": 0.473625977,
-        "latency_ms_p95": 0.473625977,
+        "latency_ms_avg": 53.0973125,
+        "latency_ms_p50": 53.0973125,
+        "latency_ms_p95": 53.0973125,
         "sample_count": 1
       },
       "accuracy": {
@@ -465,7 +465,7 @@
     },
     {
       "schema_version": 1,
-      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16",
+      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16-rerun-20260701b/softmax-realistic-levit_mixed_attention-float16-seed7",
       "operator": "softmax",
       "dataset": "realistic",
       "case_id": "levit_mixed_attention",
@@ -487,9 +487,9 @@
       "source_file": "timm_train/levit_128_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms_avg": 0.23270199600000002,
-        "latency_ms_p50": 0.23270199600000002,
-        "latency_ms_p95": 0.23270199600000002,
+        "latency_ms_avg": 26.656689453,
+        "latency_ms_p50": 26.656689453,
+        "latency_ms_p95": 26.656689453,
         "sample_count": 1
       },
       "accuracy": {
@@ -501,7 +501,7 @@
     },
     {
       "schema_version": 1,
-      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16",
+      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16-rerun-20260701b/softmax-realistic-longformer_logits-float16-seed7",
       "operator": "softmax",
       "dataset": "realistic",
       "case_id": "longformer_logits",
@@ -521,9 +521,9 @@
       "source_file": "hf_train/AllenaiLongformerBase_train.json",
       "source_op": "aten._log_softmax.default",
       "metrics": {
-        "latency_ms_avg": 0.5508339839999999,
-        "latency_ms_p50": 0.5508339839999999,
-        "latency_ms_p95": 0.5508339839999999,
+        "latency_ms_avg": 34.709058594000005,
+        "latency_ms_p50": 34.709058594000005,
+        "latency_ms_p95": 34.709058594000005,
         "sample_count": 1
       },
       "accuracy": {
@@ -535,7 +535,7 @@
     },
     {
       "schema_version": 1,
-      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16",
+      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16-rerun-20260701b/softmax-realistic-m2m100_logits-float16-seed7",
       "operator": "softmax",
       "dataset": "realistic",
       "case_id": "m2m100_logits",
@@ -555,9 +555,9 @@
       "source_file": "hf_train/M2M100ForConditionalGeneration_train.json",
       "source_op": "aten._log_softmax.default",
       "metrics": {
-        "latency_ms_avg": 0.7365050049999999,
-        "latency_ms_p50": 0.7365050049999999,
-        "latency_ms_p95": 0.7365050049999999,
+        "latency_ms_avg": 52.282023437999996,
+        "latency_ms_p50": 52.282023437999996,
+        "latency_ms_p95": 52.282023437999996,
         "sample_count": 1
       },
       "accuracy": {
@@ -569,7 +569,7 @@
     },
     {
       "schema_version": 1,
-      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16",
+      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16-rerun-20260701b/softmax-realistic-mobilebert_attention-float16-seed7",
       "operator": "softmax",
       "dataset": "realistic",
       "case_id": "mobilebert_attention",
@@ -591,9 +591,9 @@
       "source_file": "hf_train/MobileBertForMaskedLM_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms_avg": 0.018596001,
-        "latency_ms_p50": 0.018596001,
-        "latency_ms_p95": 0.018596001,
+        "latency_ms_avg": 3.782042969,
+        "latency_ms_p50": 3.782042969,
+        "latency_ms_p95": 3.782042969,
         "sample_count": 1
       },
       "accuracy": {
@@ -605,7 +605,7 @@
     },
     {
       "schema_version": 1,
-      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16",
+      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16-rerun-20260701b/softmax-realistic-mt5_logits-float16-seed7",
       "operator": "softmax",
       "dataset": "realistic",
       "case_id": "mt5_logits",
@@ -625,9 +625,9 @@
       "source_file": "hf_train/MT5ForConditionalGeneration_train.json",
       "source_op": "aten._log_softmax.default",
       "metrics": {
-        "latency_ms_avg": 1.460026001,
-        "latency_ms_p50": 1.460026001,
-        "latency_ms_p95": 1.460026001,
+        "latency_ms_avg": 104.182507812,
+        "latency_ms_p50": 104.182507812,
+        "latency_ms_p95": 104.182507812,
         "sample_count": 1
       },
       "accuracy": {
@@ -639,7 +639,7 @@
     },
     {
       "schema_version": 1,
-      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16",
+      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16-rerun-20260701b/softmax-realistic-opt_logits-float16-seed7",
       "operator": "softmax",
       "dataset": "realistic",
       "case_id": "opt_logits",
@@ -659,9 +659,9 @@
       "source_file": "hf_train/OPTForCausalLM_train.json",
       "source_op": "aten._log_softmax.default",
       "metrics": {
-        "latency_ms_avg": 0.547369995,
-        "latency_ms_p50": 0.547369995,
-        "latency_ms_p95": 0.547369995,
+        "latency_ms_avg": 34.694582030999996,
+        "latency_ms_p50": 34.694582030999996,
+        "latency_ms_p95": 34.694582030999996,
         "sample_count": 1
       },
       "accuracy": {
@@ -673,7 +673,7 @@
     },
     {
       "schema_version": 1,
-      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16",
+      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16-rerun-20260701b/softmax-realistic-pegasus_attention-float16-seed7",
       "operator": "softmax",
       "dataset": "realistic",
       "case_id": "pegasus_attention",
@@ -694,9 +694,9 @@
       "source_file": "hf_train/PegasusForConditionalGeneration_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms_avg": 0.018406,
-        "latency_ms_p50": 0.018406,
-        "latency_ms_p95": 0.018406,
+        "latency_ms_avg": 3.773458984,
+        "latency_ms_p50": 3.773458984,
+        "latency_ms_p95": 3.773458984,
         "sample_count": 1
       },
       "accuracy": {
@@ -708,7 +708,7 @@
     },
     {
       "schema_version": 1,
-      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16",
+      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16-rerun-20260701b/softmax-realistic-plbart_attention-float16-seed7",
       "operator": "softmax",
       "dataset": "realistic",
       "case_id": "plbart_attention",
@@ -729,9 +729,9 @@
       "source_file": "hf_train/PLBartForCausalLM_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms_avg": 0.232232986,
-        "latency_ms_p50": 0.232232986,
-        "latency_ms_p95": 0.232232986,
+        "latency_ms_avg": 19.107693359000002,
+        "latency_ms_p50": 19.107693359000002,
+        "latency_ms_p95": 19.107693359000002,
         "sample_count": 1
       },
       "accuracy": {
@@ -743,7 +743,7 @@
     },
     {
       "schema_version": 1,
-      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16",
+      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16-rerun-20260701b/softmax-realistic-plbart_logits-float16-seed7",
       "operator": "softmax",
       "dataset": "realistic",
       "case_id": "plbart_logits",
@@ -763,9 +763,9 @@
       "source_file": "hf_train/PLBartForCausalLM_train.json",
       "source_op": "aten._log_softmax.default",
       "metrics": {
-        "latency_ms_avg": 1.116522949,
-        "latency_ms_p50": 1.116522949,
-        "latency_ms_p95": 1.116522949,
+        "latency_ms_avg": 68.982617188,
+        "latency_ms_p50": 68.982617188,
+        "latency_ms_p95": 68.982617188,
         "sample_count": 1
       },
       "accuracy": {
@@ -777,7 +777,7 @@
     },
     {
       "schema_version": 1,
-      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16",
+      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16-rerun-20260701b/softmax-realistic-speech_transformer_attention-float16-seed7",
       "operator": "softmax",
       "dataset": "realistic",
       "case_id": "speech_transformer_attention",
@@ -798,9 +798,9 @@
       "source_file": "torchbench_train/speech_transformer_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms_avg": 0.014848,
-        "latency_ms_p50": 0.014848,
-        "latency_ms_p95": 0.014848,
+        "latency_ms_avg": 1.2700189210000001,
+        "latency_ms_p50": 1.2700189210000001,
+        "latency_ms_p95": 1.2700189210000001,
         "sample_count": 1
       },
       "accuracy": {
@@ -812,7 +812,7 @@
     },
     {
       "schema_version": 1,
-      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16",
+      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16-rerun-20260701b/softmax-realistic-swin_window_attention-float16-seed7",
       "operator": "softmax",
       "dataset": "realistic",
       "case_id": "swin_window_attention",
@@ -834,9 +834,9 @@
       "source_file": "timm_train/swin_base_patch4_window7_224_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms_avg": 0.036264999000000006,
-        "latency_ms_p50": 0.036264999000000006,
-        "latency_ms_p95": 0.036264999000000006,
+        "latency_ms_avg": 8.943066406,
+        "latency_ms_p50": 8.943066406,
+        "latency_ms_p95": 8.943066406,
         "sample_count": 1
       },
       "accuracy": {
@@ -848,7 +848,7 @@
     },
     {
       "schema_version": 1,
-      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16",
+      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16-rerun-20260701b/softmax-realistic-t5_attention-float16-seed7",
       "operator": "softmax",
       "dataset": "realistic",
       "case_id": "t5_attention",
@@ -870,9 +870,9 @@
       "source_file": "hf_train/T5Small_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms_avg": 0.059446999,
-        "latency_ms_p50": 0.059446999,
-        "latency_ms_p95": 0.059446999,
+        "latency_ms_avg": 6.662258301,
+        "latency_ms_p50": 6.662258301,
+        "latency_ms_p95": 6.662258301,
         "sample_count": 1
       },
       "accuracy": {
@@ -884,7 +884,7 @@
     },
     {
       "schema_version": 1,
-      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16",
+      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16-rerun-20260701b/softmax-realistic-t5_logits-float16-seed7",
       "operator": "softmax",
       "dataset": "realistic",
       "case_id": "t5_logits",
@@ -904,9 +904,9 @@
       "source_file": "hf_train/T5Small_train.json",
       "source_op": "aten._log_softmax.default",
       "metrics": {
-        "latency_ms_avg": 0.328591003,
-        "latency_ms_p50": 0.328591003,
-        "latency_ms_p95": 0.328591003,
+        "latency_ms_avg": 21.013205078,
+        "latency_ms_p50": 21.013205078,
+        "latency_ms_p95": 21.013205078,
         "sample_count": 1
       },
       "accuracy": {
@@ -918,7 +918,7 @@
     },
     {
       "schema_version": 1,
-      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16",
+      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16-rerun-20260701b/softmax-realistic-trocr_attention-float16-seed7",
       "operator": "softmax",
       "dataset": "realistic",
       "case_id": "trocr_attention",
@@ -939,9 +939,9 @@
       "source_file": "hf_train/TrOCRForCausalLM_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms_avg": 0.077466003,
-        "latency_ms_p50": 0.077466003,
-        "latency_ms_p95": 0.077466003,
+        "latency_ms_avg": 9.708289062,
+        "latency_ms_p50": 9.708289062,
+        "latency_ms_p95": 9.708289062,
         "sample_count": 1
       },
       "accuracy": {
@@ -953,7 +953,7 @@
     },
     {
       "schema_version": 1,
-      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16",
+      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16-rerun-20260701b/softmax-realistic-xcit_attention-float16-seed7",
       "operator": "softmax",
       "dataset": "realistic",
       "case_id": "xcit_attention",
@@ -975,9 +975,9 @@
       "source_file": "timm_train/xcit_large_24_p8_224_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms_avg": 0.003973,
-        "latency_ms_p50": 0.003973,
-        "latency_ms_p95": 0.003973,
+        "latency_ms_avg": 0.17670799299999998,
+        "latency_ms_p50": 0.17670799299999998,
+        "latency_ms_p95": 0.17670799299999998,
         "sample_count": 1
       },
       "accuracy": {
@@ -989,7 +989,7 @@
     },
     {
       "schema_version": 1,
-      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16",
+      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16-rerun-20260701b/softmax-realistic-xglm_logits-float16-seed7",
       "operator": "softmax",
       "dataset": "realistic",
       "case_id": "xglm_logits",
@@ -1009,9 +1009,9 @@
       "source_file": "hf_train/XGLMForCausalLM_train.json",
       "source_op": "aten._log_softmax.default",
       "metrics": {
-        "latency_ms_avg": 0.790281982,
-        "latency_ms_p50": 0.790281982,
-        "latency_ms_p95": 0.790281982,
+        "latency_ms_avg": 53.458757812,
+        "latency_ms_p50": 53.458757812,
+        "latency_ms_p95": 53.458757812,
         "sample_count": 1
       },
       "accuracy": {
@@ -1023,7 +1023,7 @@
     },
     {
       "schema_version": 1,
-      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16",
+      "run_id": "opbench-ascend-950pr-simt-v1-softmax-realistic-float16-rerun-20260701b/softmax-realistic-xlnet_attention-float16-seed7",
       "operator": "softmax",
       "dataset": "realistic",
       "case_id": "xlnet_attention",
@@ -1045,9 +1045,9 @@
       "source_file": "hf_train/XLNetLMHeadModel_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms_avg": 0.063617001,
-        "latency_ms_p50": 0.063617001,
-        "latency_ms_p95": 0.063617001,
+        "latency_ms_avg": 7.687306641,
+        "latency_ms_p50": 7.687306641,
+        "latency_ms_p95": 7.687306641,
         "sample_count": 1
       },
       "accuracy": {
