@@ -175,6 +175,7 @@ Example auto-generated names:
 - `opbench-nvidia-h800-cuda-pytorch-softmax-realistic-float16`
 - `opbench-ascend-950pr-cannops-softmax-realistic-float16`
 - `opbench-ascend-950pr-simt-v1-softmax-realistic-float16`
+- `opbench-ascend-950pr-simt-v2-softmax-realistic-float16`
 
 Use `bench` without `--case-id` to expand the selected built-in dataset split for one operator. This writes one batch run directory with per-case artifacts plus `summary.json`, `summary.csv`, and `failures.json`. When the selected backend exposes a local device-time profiling path, batch `bench` also emits normalized frontend records to `meta/benchmark-records.json`:
 
@@ -314,22 +315,22 @@ The Ascend backend is wired into the same benchmark framework as NVIDIA:
 - Same prepared-input flow
 - Same JSON / CSV / Markdown output writers
 
-Ascend execution requires a target machine with PyTorch and `torch_npu`. The repository includes a built-in Ascend SIMT `softmax` operator project under version `v1`. The SIMT deployment hook is intentionally a boolean flag:
+Ascend execution requires a target machine with PyTorch and `torch_npu`. The repository includes built-in Ascend SIMT `softmax` operator projects under versioned directories such as `v1` and `v2`. The SIMT deployment hook is intentionally a boolean flag:
 
 ```bash
 cannbench bench \
   --backend ascend \
   --prepared-input prepared-softmax.json \
-  --deploy-custom-op
+  --implementation simt
 ```
 
-When `--deploy-custom-op` is set, CannBench looks for:
+When `--implementation simt` is set, CannBench deploys the selected SIMT version. The default version is `v1`; pass `--implementation-version v2` to select `v2`. CannBench looks for:
 
 ```text
-src/cannbench/datasets/data/<operator>/custom_ops/ascend/v1/install.sh
+src/cannbench/datasets/data/<operator>/custom_ops/ascend/<version>/install.sh
 ```
 
-If that path is absent, the run fails with a clear error. If `--deploy-custom-op` is not set, CannBench skips SIMT deployment and uses the default CANN ops library behavior available in the target runtime.
+If that path is absent, the run fails with a clear error. If `--implementation cann_ops_library` is set, CannBench skips SIMT deployment and uses the default CANN ops library behavior available in the target runtime.
 
 ### Performance Viewer
 

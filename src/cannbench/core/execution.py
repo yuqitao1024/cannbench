@@ -79,6 +79,7 @@ class RemoteBenchExecutor(BenchCaseExecutor):
         warmup: int,
         iterations: int,
         deploy_custom_op: bool,
+        implementation_version: str | None = None,
     ) -> BenchCaseExecutionResult:
         with TemporaryDirectory(prefix=f"{artifact_stem}-", dir=layout_root) as temp_dir_name:
             temp_dir = Path(temp_dir_name)
@@ -93,6 +94,7 @@ class RemoteBenchExecutor(BenchCaseExecutor):
                 warmup=warmup,
                 iterations=iterations,
                 deploy_custom_op=deploy_custom_op,
+                implementation_version=implementation_version,
             )
             return BenchCaseExecutionResult(
                 artifacts=remote_result.artifacts,

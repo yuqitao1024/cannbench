@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from cannbench.cli import build_parser, main
+from cannbench.cli import _build_canonical_run_name
 from cannbench.core.execution import RemoteExecutionArtifacts, RemoteProfileArtifacts
 from cannbench.core.layout import build_run_layout
 from cannbench.core.operator_output import CapturedOperatorOutput, OutputComparisonResult
@@ -154,6 +155,8 @@ def test_build_parser_exposes_bench_subcommand():
             "ascend",
             "--implementation",
             "simt",
+            "--implementation-version",
+            "v2",
             "--endpoint",
             "configs/ascend.json",
             "--op",
@@ -168,8 +171,22 @@ def test_build_parser_exposes_bench_subcommand():
     assert args.command == "bench"
     assert args.backend == "ascend"
     assert args.implementation == "simt"
+    assert args.implementation_version == "v2"
     assert args.endpoint == Path("configs/ascend.json")
     assert args.op == "softmax"
+
+
+def test_build_canonical_run_name_uses_simt_version():
+    run_name = _build_canonical_run_name(
+        backend="ascend",
+        implementation="simt",
+        implementation_version="v2",
+        op="softmax",
+        dataset="realistic",
+        dtype="float16",
+    )
+
+    assert run_name == "opbench-ascend-950pr-simt-v2-softmax-realistic-float16"
 
 
 def test_build_parser_accepts_embedding_internal_run():
@@ -530,6 +547,8 @@ def test_main_runs_bench_and_maps_simt_to_custom_op_deployment(tmp_path, monkeyp
             "ascend",
             "--implementation",
             "simt",
+            "--implementation-version",
+            "v2",
             "--op",
             "softmax",
             "--dtype",
@@ -546,6 +565,7 @@ def test_main_runs_bench_and_maps_simt_to_custom_op_deployment(tmp_path, monkeyp
     assert exit_code == 0
     assert captured["request"].backend == "ascend"
     assert captured["request"].deploy_custom_op is True
+    assert captured["request"].implementation_version == "v2"
 
 
 def test_main_bench_single_dispatches_through_single_bench_helper(tmp_path, monkeypatch):
@@ -647,10 +667,11 @@ def test_main_remote_bench_uses_remote_executor(tmp_path, monkeypatch):
             artifact_stem,
             run_id,
             capture_output,
-            warmup,
-            iterations,
-            deploy_custom_op,
-        ):
+                warmup,
+                iterations,
+                deploy_custom_op,
+                implementation_version=None,
+            ):
             captured["prepared_input"] = prepared_input
             captured["layout_root"] = layout_root
             captured["artifact_stem"] = artifact_stem
@@ -659,6 +680,7 @@ def test_main_remote_bench_uses_remote_executor(tmp_path, monkeypatch):
             captured["warmup"] = warmup
             captured["iterations"] = iterations
             captured["deploy_custom_op"] = deploy_custom_op
+            captured["implementation_version"] = implementation_version
             return type(
                 "ExecResult",
                 (),
@@ -717,6 +739,7 @@ def test_main_remote_bench_uses_remote_executor(tmp_path, monkeypatch):
     assert exit_code == 0
     assert captured["endpoint"] == endpoint
     assert captured["run_id"] == "executor-remote"
+    assert captured["implementation_version"] is None
 
 
 def test_main_runs_single_bench_with_profile_layout_and_meta(tmp_path, monkeypatch):
@@ -2477,10 +2500,10 @@ def test_python_m_cannbench_exits_with_main_return_code(monkeypatch):
     assert excinfo.value.code == 7
 
 
-def test_package_data_includes_ascend_custom_op_v1():
+def test_package_data_includes_ascend_custom_op_versions():
     with open("pyproject.toml", "rb") as config:
         payload = tomllib.load(config)
 
     package_data = payload["tool"]["setuptools"]["package-data"]
 
-    assert "cannbench.datasets.data.*.custom_ops.ascend.v1" in package_data
+    assert "cannbench.datasets.data.*.custom_ops.ascend.*" in package_data

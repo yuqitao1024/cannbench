@@ -52,6 +52,39 @@ def test_build_collect_benchmark_record_for_ascend_simt():
     assert record["diff_ref"] == "softmax/simt/v1"
 
 
+def test_build_collect_benchmark_record_for_ascend_simt_v2():
+    prepared = build_prepared_operator_input(
+        op="softmax",
+        dtype="float16",
+        dataset="realistic",
+        case_id="t5_attention",
+        seed=7,
+    )
+    profile_summary = DeviceProfileSummary(
+        backend="ascend",
+        sample_count=1,
+        latency_ms_avg=1.0,
+        latency_ms_p50=1.0,
+        latency_ms_p95=1.1,
+        latency_ms_p99=1.2,
+        source_files=("op_summary.csv",),
+    )
+
+    record = build_collect_benchmark_record(
+        run_id="opbench-ascend-950pr-simt-v2-softmax-realistic-float16",
+        backend="ascend",
+        implementation="simt",
+        implementation_version="v2",
+        prepared=prepared,
+        perf_payload={"device_name": "Ascend950PR_9589"},
+        profile_summary=profile_summary,
+    )
+
+    assert record["implementation"] == "simt"
+    assert record["implementation_version"] == "v2"
+    assert record["diff_ref"] == "softmax/simt/v2"
+
+
 def test_build_collect_benchmark_record_for_ascend_cann_ops():
     prepared = build_prepared_operator_input(
         op="softmax",

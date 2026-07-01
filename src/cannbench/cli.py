@@ -89,6 +89,7 @@ def _benchmark_args(parser: argparse.ArgumentParser) -> None:
     parser.set_defaults(dataset_provided=False)
     parser.add_argument("--backend", choices=["nvidia", "ascend"], required=True)
     parser.add_argument("--implementation", choices=["cann_ops_library", "simt"])
+    parser.add_argument("--implementation-version")
     parser.add_argument("--op", choices=list_operator_names())
     parser.add_argument("--dtype", default="float16")
     parser.add_argument(
@@ -118,6 +119,12 @@ def _resolve_deploy_custom_op(backend: str, implementation: str | None, deploy_c
     return deploy_custom_op
 
 
+def _resolve_implementation_version(implementation: str | None, version: str | None) -> str | None:
+    if implementation != "simt":
+        return version
+    return version or "v1"
+
+
 def _prepared_manifest_path(base_dir: Path, op: str, dataset: str, case_id: str, dtype: str, seed: int) -> Path:
     return base_dir / op / dataset / f"{case_id}-{dtype}-seed{seed}.json"
 
@@ -142,6 +149,10 @@ def _build_request_from_prepared(
         deploy_custom_op=_resolve_deploy_custom_op(
             args.backend, getattr(args, "implementation", None), args.deploy_custom_op
         ),
+        implementation_version=_resolve_implementation_version(
+            getattr(args, "implementation", None),
+            getattr(args, "implementation_version", None),
+        ),
     )
 
 
@@ -163,6 +174,10 @@ def _build_request_from_args(args: argparse.Namespace) -> OperatorBenchmarkReque
         seed=getattr(args, "seed", 0),
         deploy_custom_op=_resolve_deploy_custom_op(
             args.backend, getattr(args, "implementation", None), args.deploy_custom_op
+        ),
+        implementation_version=_resolve_implementation_version(
+            getattr(args, "implementation", None),
+            getattr(args, "implementation_version", None),
         ),
     )
 
@@ -265,12 +280,16 @@ def _run_name_device_token(backend: str) -> str:
     raise ValueError(f"unsupported backend for run-name generation: {backend}")
 
 
-def _run_name_implementation_token(backend: str, implementation: str | None) -> str:
+def _run_name_implementation_token(
+    backend: str,
+    implementation: str | None,
+    implementation_version: str | None = None,
+) -> str:
     if backend == "nvidia":
         return "cuda-pytorch"
     if backend == "ascend":
         if implementation == "simt":
-            return "simt-v1"
+            return f"simt-{implementation_version or 'v1'}"
         return "cannops"
     raise ValueError(f"unsupported backend for run-name generation: {backend}")
 
@@ -279,6 +298,7 @@ def _build_canonical_run_name(
     *,
     backend: str,
     implementation: str | None,
+    implementation_version: str | None = None,
     op: str,
     dataset: str,
     dtype: str,
@@ -288,7 +308,7 @@ def _build_canonical_run_name(
             "opbench",
             _run_name_backend_token(backend),
             _run_name_device_token(backend),
-            _run_name_implementation_token(backend, implementation),
+            _run_name_implementation_token(backend, implementation, implementation_version),
             op,
             dataset,
             dtype,
@@ -311,6 +331,7 @@ def _resolve_bench_run_name(
     return _build_canonical_run_name(
         backend=args.backend,
         implementation=getattr(args, "implementation", None),
+        implementation_version=getattr(args, "implementation_version", None),
         op=op,
         dataset=dataset,
         dtype=dtype,
@@ -480,6 +501,7 @@ def _build_benchmark_record_entry(
     run_id: str,
     backend: str,
     implementation: str | None,
+    implementation_version: str | None = None,
     prepared,
     execution_result: BenchCaseExecutionResult,
 ) -> dict[str, object]:
@@ -489,6 +511,7 @@ def _build_benchmark_record_entry(
         run_id=run_id,
         backend=backend,
         implementation=implementation,
+        implementation_version=implementation_version,
         prepared=prepared,
         device_name=execution_result.artifacts.profile.device_name,
         profile_summary=execution_result.artifacts.profile.profile_summary,
@@ -634,6 +657,10 @@ def _run_local_bench_with_plans(
                         run_id=f"{run_name}/{artifact_stem}",
                         backend=args.backend,
                         implementation=getattr(args, "implementation", None),
+                        implementation_version=_resolve_implementation_version(
+                            getattr(args, "implementation", None),
+                            getattr(args, "implementation_version", None),
+                        ),
                         prepared=plan.prepared,
                         execution_result=execution_result,
                     )
@@ -735,6 +762,10 @@ def _run_remote_bench_with_plans(
                 deploy_custom_op=_resolve_deploy_custom_op(
                     endpoint.backend, args.implementation, args.deploy_custom_op
                 ),
+                implementation_version=_resolve_implementation_version(
+                    args.implementation,
+                    args.implementation_version,
+                ),
             )
             result_path = _finalize_remote_execution_artifacts(
                 layout=layout,
@@ -759,6 +790,10 @@ def _run_remote_bench_with_plans(
                     run_id=remote_run_id,
                     backend=endpoint.backend,
                     implementation=args.implementation,
+                    implementation_version=_resolve_implementation_version(
+                        args.implementation,
+                        args.implementation_version,
+                    ),
                     prepared=plan.prepared,
                     execution_result=execution_result,
                 )

@@ -201,14 +201,17 @@ class AscendBackend(TorchOperatorBackend):
         if request.deploy_custom_op:
             self._deploy_custom_op(request, request.op)
 
-    def _custom_op_base_dir(self, op_name: str):
+    def _custom_op_ascend_root(self, op_name: str):
         return files("cannbench.datasets.data").joinpath(
-            op_name, "custom_ops", "ascend", "v1"
+            op_name, "custom_ops", "ascend"
         )
 
+    def _custom_op_base_dir(self, request: OperatorBenchmarkRequest, op_name: str):
+        version = request.implementation_version or "v1"
+        return self._custom_op_ascend_root(op_name).joinpath(version)
+
     def _deploy_custom_op(self, request: OperatorBenchmarkRequest, op_name: str) -> None:
-        del request
-        custom_op_dir = self._custom_op_base_dir(op_name)
+        custom_op_dir = self._custom_op_base_dir(request, op_name)
         if not custom_op_dir.is_dir():
             raise RuntimeError(
                 "Ascend custom op deployment requested but default custom op "

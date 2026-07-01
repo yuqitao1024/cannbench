@@ -264,7 +264,7 @@ def test_ascend_backend_deploys_v1_custom_op_when_enabled(monkeypatch, tmp_path)
     from cannbench.backends.pytorch_backend import AscendBackend
 
     backend = AscendBackend()
-    monkeypatch.setattr(backend, "_custom_op_base_dir", lambda op_name: op_dir)
+    monkeypatch.setattr(backend, "_custom_op_ascend_root", lambda op_name: op_dir.parent)
     monkeypatch.setattr(
         backend,
         "_run_custom_op_install",
@@ -294,6 +294,57 @@ def test_ascend_backend_deploys_v1_custom_op_when_enabled(monkeypatch, tmp_path)
     )
 
     backend.run_softmax(request)
+
+    assert captured["script"] == install_script
+    assert captured["loaded"] == "softmax"
+
+
+def test_ascend_backend_deploys_requested_custom_op_version(monkeypatch, tmp_path):
+    captured: dict[str, object] = {}
+    root = (
+        tmp_path
+        / "src"
+        / "cannbench"
+        / "datasets"
+        / "data"
+        / "softmax"
+        / "custom_ops"
+        / "ascend"
+    )
+    op_dir = root / "v2"
+    op_dir.mkdir(parents=True)
+    install_script = op_dir / "install.sh"
+    install_script.write_text("#!/bin/sh\nexit 0\n")
+
+    from cannbench.backends.pytorch_backend import AscendBackend
+
+    backend = AscendBackend()
+    monkeypatch.setattr(backend, "_custom_op_ascend_root", lambda op_name: root)
+    monkeypatch.setattr(
+        backend,
+        "_run_custom_op_install",
+        lambda script: captured.setdefault("script", script),
+    )
+    monkeypatch.setattr(
+        backend,
+        "_load_custom_op_module",
+        lambda op_name: captured.setdefault("loaded", op_name),
+    )
+
+    request = OperatorBenchmarkRequest(
+        backend="ascend",
+        op="softmax",
+        dtype="float16",
+        dataset="smoke",
+        case_id="tiny_logits",
+        warmup=1,
+        iterations=1,
+        seed=7,
+        deploy_custom_op=True,
+        implementation_version="v2",
+    )
+
+    backend._deploy_custom_op(request, "softmax")
 
     assert captured["script"] == install_script
     assert captured["loaded"] == "softmax"

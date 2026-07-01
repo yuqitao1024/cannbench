@@ -46,11 +46,13 @@ def _implementation_and_version(
     *,
     backend: str,
     implementation: str | None,
+    implementation_version: str | None = None,
     profile_summary: DeviceProfileSummary,
 ) -> tuple[str, str]:
+    del profile_summary
     if backend == "ascend":
         if implementation == "simt":
-            return "simt", "v1"
+            return "simt", implementation_version or "v1"
         return "cann_ops_library", "cannops"
     if backend == "nvidia":
         return "cuda-pytorch", "cuda-pytorch"
@@ -62,6 +64,7 @@ def build_collect_benchmark_record(
     run_id: str,
     backend: str,
     implementation: str | None,
+    implementation_version: str | None = None,
     prepared: PreparedOperatorInput,
     perf_payload: dict[str, Any],
     profile_summary: DeviceProfileSummary,
@@ -70,6 +73,7 @@ def build_collect_benchmark_record(
         run_id=run_id,
         backend=backend,
         implementation=implementation,
+        implementation_version=implementation_version,
         prepared=prepared,
         device_name=str(perf_payload.get("device_name", "unknown")),
         profile_summary=profile_summary,
@@ -81,6 +85,7 @@ def build_benchmark_record(
     run_id: str,
     backend: str,
     implementation: str | None,
+    implementation_version: str | None = None,
     prepared: PreparedOperatorInput,
     device_name: str,
     profile_summary: DeviceProfileSummary,
@@ -88,6 +93,7 @@ def build_benchmark_record(
     resolved_implementation, implementation_version = _implementation_and_version(
         backend=backend,
         implementation=implementation,
+        implementation_version=implementation_version,
         profile_summary=profile_summary,
     )
     return {
@@ -132,6 +138,7 @@ def build_local_benchmark_record(
     run_id: str,
     backend: str,
     implementation: str | None,
+    implementation_version: str | None = None,
     prepared: PreparedOperatorInput,
     device_name: str,
     profile_summary: DeviceProfileSummary,
@@ -140,6 +147,7 @@ def build_local_benchmark_record(
         run_id=run_id,
         backend=backend,
         implementation=implementation,
+        implementation_version=implementation_version,
         prepared=prepared,
         device_name=device_name,
         profile_summary=profile_summary,

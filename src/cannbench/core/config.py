@@ -18,6 +18,7 @@ class OperatorBenchmarkRequest:
     iterations: int
     seed: int = 0
     deploy_custom_op: bool = False
+    implementation_version: str | None = None
     output_formats: tuple[str, ...] = field(
         default_factory=lambda: ("json", "csv", "md")
     )
@@ -56,6 +57,11 @@ class OperatorBenchmarkRequest:
             raise ValueError("iterations must be > 0")
         if self.seed < 0:
             raise ValueError("seed must be >= 0")
+        if self.implementation_version is not None:
+            version = self.implementation_version.strip()
+            if not version:
+                raise ValueError("implementation_version must not be empty")
+            object.__setattr__(self, "implementation_version", version)
 
         case = get_operator_case(self.op, self.dataset, self.case_id)
         object.__setattr__(self, "case_payload", case.payload)

@@ -125,6 +125,7 @@ def collect_remote_artifacts(
     warmup: int = 10,
     iterations: int = 1,
     deploy_custom_op: bool = False,
+    implementation_version: str | None = None,
     run_id: str | None = None,
     endpoint: RemoteEndpoint | None = None,
     endpoint_path: Path | None = None,
@@ -161,6 +162,11 @@ def collect_remote_artifacts(
 
     output_artifacts: tuple[tuple[str, bytes], ...] = ()
     profile_artifacts_result: RemoteProfileArtifacts | None = None
+    implementation_version_arg = (
+        f" --implementation-version {shlex.quote(implementation_version)}"
+        if implementation_version
+        else ""
+    )
 
     if capture_output:
         command = (
@@ -170,7 +176,7 @@ def collect_remote_artifacts(
             f"--backend {shlex.quote(endpoint.backend)} "
             f"--prepared-input {shlex.quote(relative_prepared)} "
             f"--output-dir {shlex.quote(relative_output)} "
-            "--run-name captured-output"
+            f"--run-name captured-output{implementation_version_arg}"
         )
         if deploy_custom_op:
             command = f"{command} --deploy-custom-op"
@@ -188,7 +194,7 @@ def collect_remote_artifacts(
             f"--warmup {warmup} "
             f"--iterations {iterations} "
             f"--output-dir {shlex.quote(relative_perf)} "
-            "--run-name benchmark"
+            f"--run-name benchmark{implementation_version_arg}"
         )
         if deploy_custom_op:
             base_operator = f"{base_operator} --deploy-custom-op"
