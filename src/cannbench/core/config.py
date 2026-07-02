@@ -17,6 +17,7 @@ class OperatorBenchmarkRequest:
     warmup: int
     iterations: int
     seed: int = 0
+    use_simt_op: bool = False
     deploy_simt_op: bool = False
     implementation_version: str | None = None
     output_formats: tuple[str, ...] = field(

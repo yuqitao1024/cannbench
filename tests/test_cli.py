@@ -670,6 +670,7 @@ def test_main_remote_bench_uses_remote_executor(tmp_path, monkeypatch):
                 warmup,
                 iterations,
                 deploy_simt_op,
+                use_simt_op=False,
                 implementation_version=None,
             ):
             captured["prepared_input"] = prepared_input
@@ -680,6 +681,7 @@ def test_main_remote_bench_uses_remote_executor(tmp_path, monkeypatch):
             captured["warmup"] = warmup
             captured["iterations"] = iterations
             captured["deploy_simt_op"] = deploy_simt_op
+            captured["use_simt_op"] = use_simt_op
             captured["implementation_version"] = implementation_version
             return type(
                 "ExecResult",
@@ -1584,7 +1586,8 @@ def test_main_runs_batch_remote_bench_and_writes_aggregated_artifacts(tmp_path, 
         "remote-root/softmax-stress-wide_vocab_lm_logits-float16-seed2",
     ]
     assert all(call["endpoint"] == endpoint for call in captured_calls)
-    assert all(call["deploy_simt_op"] is True for call in captured_calls)
+    assert [call["deploy_simt_op"] for call in captured_calls] == [True, False]
+    assert all(call["use_simt_op"] is True for call in captured_calls)
     assert all(Path(call["prepared_input"]).is_relative_to(layout.prepared_dir) for call in captured_calls)
     assert (layout.prepared_dir / "softmax" / "smoke" / "tiny_logits-float16-seed1.json").exists()
     assert (layout.prepared_dir / "softmax" / "stress" / "wide_vocab_lm_logits-float16-seed2.json").exists()

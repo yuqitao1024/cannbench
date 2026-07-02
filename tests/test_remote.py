@@ -136,7 +136,7 @@ def test_collect_remote_artifacts_runs_capture_and_downloads_output(tmp_path):
         [
             "ssh",
             "user@ascend-host",
-            "cd /opt/cannbench && ASCEND_VISIBLE_DEVICES=0 python3 -m cannbench internal-run --backend ascend --prepared-input .cannbench-runs/softmax-run/prepared.json --output-dir .cannbench-runs/softmax-run/output --run-name captured-output --deploy-simt-op",
+            "cd /opt/cannbench && ASCEND_VISIBLE_DEVICES=0 python3 -m cannbench internal-run --backend ascend --prepared-input .cannbench-runs/softmax-run/prepared.json --output-dir .cannbench-runs/softmax-run/output --run-name captured-output --use-simt-op --deploy-simt-op",
         ],
         [
             "scp",
@@ -274,7 +274,61 @@ def test_collect_remote_artifacts_passes_simt_op_version_to_internal_run(tmp_pat
         runner=fake_runner,
     )
 
-    assert "--implementation-version v2 --deploy-simt-op" in commands[2][2]
+    assert "--implementation-version v2" in commands[2][2]
+    assert "--use-simt-op" in commands[2][2]
+    assert "--deploy-simt-op" in commands[2][2]
+
+
+def test_collect_remote_artifacts_can_use_predeployed_simt_op_without_deploying(tmp_path):
+    commands: list[list[str]] = []
+
+    def fake_runner(command):
+        commands.append(command)
+        if command[:2] == ["scp", "-r"] and command[-1].endswith("/profile"):
+            profile_dir = tmp_path / "results" / "profile"
+            profile_dir.mkdir(parents=True)
+            (profile_dir / "op_summary.csv").write_text(
+                "Op Name,Task Duration(us)\nsoftmax,1000\n"
+            )
+        if command[:2] == ["scp", "-r"] and command[-1].endswith("/perf"):
+            perf_dir = tmp_path / "results" / "perf"
+            perf_dir.mkdir(parents=True)
+            (perf_dir / "benchmark.json").write_text(
+                json.dumps(
+                    {
+                        "backend": "ascend",
+                        "device_name": "Ascend 910B",
+                    }
+                )
+                + "\n"
+            )
+
+    endpoint = RemoteEndpoint(
+        name="ascend-a2",
+        backend="ascend",
+        host="user@ascend-host",
+        workdir="/opt/cannbench",
+        python="python3",
+        env={},
+    )
+    prepared_input = tmp_path / "prepared.json"
+    _write_softmax_prepared(prepared_input)
+
+    collect_remote_artifacts(
+        endpoint=endpoint,
+        prepared_input=prepared_input,
+        output_dir=tmp_path / "results",
+        run_id="softmax-run",
+        capture_output=False,
+        profile_device_time=True,
+        deploy_simt_op=False,
+        use_simt_op=True,
+        implementation_version="v2",
+        runner=fake_runner,
+    )
+
+    assert "--implementation-version v2 --use-simt-op" in commands[2][2]
+    assert "--deploy-simt-op" not in commands[2][2]
 
 
 def test_collect_remote_artifacts_runs_nvidia_ncu_profile(tmp_path):

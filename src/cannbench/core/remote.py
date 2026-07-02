@@ -125,6 +125,7 @@ def collect_remote_artifacts(
     warmup: int = 10,
     iterations: int = 1,
     deploy_simt_op: bool = False,
+    use_simt_op: bool = False,
     implementation_version: str | None = None,
     run_id: str | None = None,
     endpoint: RemoteEndpoint | None = None,
@@ -167,6 +168,7 @@ def collect_remote_artifacts(
         if implementation_version
         else ""
     )
+    use_simt_op_arg = " --use-simt-op" if use_simt_op or deploy_simt_op else ""
 
     if capture_output:
         command = (
@@ -176,7 +178,7 @@ def collect_remote_artifacts(
             f"--backend {shlex.quote(endpoint.backend)} "
             f"--prepared-input {shlex.quote(relative_prepared)} "
             f"--output-dir {shlex.quote(relative_output)} "
-            f"--run-name captured-output{implementation_version_arg}"
+            f"--run-name captured-output{implementation_version_arg}{use_simt_op_arg}"
         )
         if deploy_simt_op:
             command = f"{command} --deploy-simt-op"
@@ -194,7 +196,7 @@ def collect_remote_artifacts(
             f"--warmup {warmup} "
             f"--iterations {iterations} "
             f"--output-dir {shlex.quote(relative_perf)} "
-            f"--run-name benchmark{implementation_version_arg}"
+            f"--run-name benchmark{implementation_version_arg}{use_simt_op_arg}"
         )
         if deploy_simt_op:
             base_operator = f"{base_operator} --deploy-simt-op"
@@ -227,7 +229,7 @@ def collect_remote_artifacts(
         )
         runner(_scp_download_command(endpoint, remote_perf, output_dir / "perf"))
         prepared = read_prepared_operator_input(prepared_input)
-        implementation = "simt" if deploy_simt_op else None
+        implementation = "simt" if use_simt_op or deploy_simt_op else None
         summary = read_device_profile(
             output_dir / "profile",
             backend=endpoint.backend,

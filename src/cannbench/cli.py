@@ -102,6 +102,7 @@ def _benchmark_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--seed", type=_non_negative_int, default=0)
     parser.add_argument("--prepared-input", type=Path)
     parser.add_argument("--prepared-dir", type=Path)
+    parser.add_argument("--use-simt-op", action="store_true", default=False)
     parser.add_argument("--deploy-simt-op", action="store_true", default=False)
     parser.add_argument("--warmup", type=_non_negative_int, default=10)
     parser.add_argument("--iterations", type=_positive_int, default=1)
@@ -117,6 +118,18 @@ def _resolve_deploy_simt_op(backend: str, implementation: str | None, deploy_sim
     if implementation == "cann_ops_library":
         return False
     return deploy_simt_op
+
+
+def _resolve_use_simt_op(backend: str, implementation: str | None, deploy_simt_op: bool) -> bool:
+    return backend == "ascend" and (implementation == "simt" or deploy_simt_op)
+
+
+def _resolve_use_simt_op_from_args(args: argparse.Namespace) -> bool:
+    return _resolve_use_simt_op(
+        args.backend,
+        getattr(args, "implementation", None),
+        args.deploy_simt_op or getattr(args, "use_simt_op", False),
+    )
 
 
 def _resolve_implementation_version(implementation: str | None, version: str | None) -> str | None:
@@ -146,6 +159,7 @@ def _build_request_from_prepared(
         warmup=args.warmup,
         iterations=args.iterations,
         seed=prepared.seed,
+        use_simt_op=_resolve_use_simt_op_from_args(args),
         deploy_simt_op=_resolve_deploy_simt_op(
             args.backend, getattr(args, "implementation", None), args.deploy_simt_op
         ),
@@ -172,6 +186,7 @@ def _build_request_from_args(args: argparse.Namespace) -> OperatorBenchmarkReque
         warmup=args.warmup,
         iterations=args.iterations,
         seed=getattr(args, "seed", 0),
+        use_simt_op=_resolve_use_simt_op_from_args(args),
         deploy_simt_op=_resolve_deploy_simt_op(
             args.backend, getattr(args, "implementation", None), args.deploy_simt_op
         ),
@@ -737,11 +752,26 @@ def _run_remote_bench_with_plans(
     summary_rows: list[BatchResultRecord] = []
     benchmark_records: list[dict[str, object]] = []
     failure_rows: list[BatchFailureRecord] = []
+    should_use_simt = _resolve_use_simt_op(
+        endpoint.backend,
+        getattr(args, "implementation", None),
+        args.deploy_simt_op,
+    )
+    should_deploy_simt = _resolve_deploy_simt_op(
+        endpoint.backend,
+        getattr(args, "implementation", None),
+        args.deploy_simt_op,
+    )
+    deployment_done = False
 
     for plan in plans:
         prepared_path, prepared_reference = _prepared_reference_for_plan(
             args, layout.prepared_dir, layout.root, plan
         )
+        deploy_for_case = False
+        if should_deploy_simt and not deployment_done:
+            deploy_for_case = True
+            deployment_done = True
         artifact_stem = build_benchmark_artifact_stem(
             op=plan.op,
             dataset=plan.dataset,
@@ -759,9 +789,8 @@ def _run_remote_bench_with_plans(
                 capture_output=args.capture_output,
                 warmup=args.warmup,
                 iterations=args.iterations,
-                deploy_simt_op=_resolve_deploy_simt_op(
-                    endpoint.backend, args.implementation, args.deploy_simt_op
-                ),
+                deploy_simt_op=deploy_for_case,
+                use_simt_op=should_use_simt,
                 implementation_version=_resolve_implementation_version(
                     args.implementation,
                     args.implementation_version,
