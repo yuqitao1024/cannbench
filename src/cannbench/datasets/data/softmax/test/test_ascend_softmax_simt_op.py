@@ -107,6 +107,28 @@ def test_ascend_softmax_v2_persistent_path_uses_multi_row_block_shape():
     assert "blockIdx.x * blockDim.y + threadIdx.y" in source
 
 
+def test_ascend_softmax_v2_persistent_path_uses_cuda_style_register_warp_kernel():
+    source = (
+        SIMT_OP_V2_ROOT
+        / "aten_softmax_v2"
+        / "csrc"
+        / "simt"
+        / "spatial_softmax.asc"
+    ).read_text()
+    persistent_start = source.index("row_softmax_persistent_forward_kernel")
+    fast_start = source.index("row_softmax_fast_forward_kernel")
+    persistent_source = source[persistent_start:fast_start]
+
+    assert "persistent_warp_reduce" in source
+    assert "asc_shfl_xor" in source
+    assert "constexpr int64_t kWarpIterations" in persistent_source
+    assert "constexpr int64_t kWarpBatch" in persistent_source
+    assert "accscalar_t elements[kWarpBatch][kWarpIterations]" in persistent_source
+    assert "row_base = (blockDim.y * blockIdx.x + threadIdx.y) * kWarpBatch" in persistent_source
+    assert "persistent_warp_reduce<accscalar_t, kWarpBatch, kWarpSize, Max>" in persistent_source
+    assert "spatial_block_reduce_x" not in persistent_source
+
+
 def test_ascend_softmax_v2_fast_path_has_dedicated_multi_row_kernel():
     source = (
         SIMT_OP_V2_ROOT

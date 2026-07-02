@@ -278,13 +278,13 @@ inner_size == 1:
         row_softmax_generic_forward
 ```
 
-The first V2 step does not yet claim CUDA kernel-internal equivalence. The three
-row paths currently reuse the same SIMT row reduction kernel with different
-launch policies and profiler-visible API names:
+V2 separates row-wise paths with profiler-visible API names. Persistent softmax
+now follows the CUDA persistent kernel structure; fast and generic paths still
+use correctness-first 32-lane group reductions:
 
-- `row_softmax_persistent_forward` keeps the V1 32-lane x-lane policy, but now
-  uses a CUDA-like two-dimensional block shape so one block can process
-  multiple rows through `threadIdx.y`.
+- `row_softmax_persistent_forward` uses CUDA-style `log2_elements` dispatch,
+  `WARP_SIZE`, `WARP_ITERATIONS`, `WARP_BATCH`, register-resident elements, and
+  `asc_shfl_xor` warp reduction. It no longer uses UBUF block reduction.
 - `row_softmax_fast_forward` uses a CUDA-like `512` total-thread shape for large
   rows, split as `block_x = 32` and `block_y = 16` so each 32-lane group handles
   one row.
@@ -293,8 +293,15 @@ launch policies and profiler-visible API names:
   manifest does not exercise this path.
 
 This lets profiling and accuracy tests identify which CUDA-style row path each
-case exercises before V2 adds deeper kernel-internal optimizations such as
-shuffle reduction, ILP/vectorized loads, and register-resident row buffering.
+case exercises before V2 adds deeper fast/generic optimizations such as
+block-wide reductions, ILP/vectorized loads, and shared/register row buffering.
+
+Remote Ascend verification after the persistent CUDA-style register/shuffle
+alignment step:
+
+```text
+persistent_summary: total=26 passed=26 failed=0
+```
 
 The spatial path keeps the CUDA `cunn_SpatialSoftMaxForward` structure:
 
