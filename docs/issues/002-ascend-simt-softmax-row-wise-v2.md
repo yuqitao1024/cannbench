@@ -353,6 +353,17 @@ python ascend_softmax_accuracy.py --dataset ALL --dtype float16 \
 summary: total=40 passed=40 failed=0
 ```
 
+Remote Ascend verification for the spatial-only covered cases after the
+generic fail-fast cleanup:
+
+```text
+validated cases:
+  tiny_channel_softmax
+  channelwise_activation_map
+
+spatial_summary: total=2 passed=2 failed=0
+```
+
 Current float16 manifest path coverage:
 
 - `persistent`: covered by benchmark cases.

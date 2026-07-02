@@ -241,6 +241,32 @@ def test_ascend_softmax_v2_spatial_path_keeps_cuda_style_launch_policy():
     assert "blockIdx.y * blockDim.y + threadIdx.y" in source
 
 
+def test_ascend_softmax_v2_spatial_kernel_matches_cuda_layout_shape():
+    source = (
+        SIMT_OP_V2_ROOT
+        / "aten_softmax_v2"
+        / "csrc"
+        / "simt"
+        / "spatial_softmax.asc"
+    ).read_text()
+    spatial_start = source.index("cunn_spatial_softmax_forward_kernel")
+    launch_start = source.index("launch_spatial_forward_impl")
+    spatial_source = source[spatial_start:launch_start]
+
+    assert "const int64_t outer_stride = inner_size * dim_size" in spatial_source
+    assert "const int64_t dim_stride = inner_size" in spatial_source
+    assert "outer_offset = outer_index * outer_stride" in spatial_source
+    assert "inner_index = blockIdx.y * blockDim.y + threadIdx.y" in spatial_source
+    assert "data_offset = outer_offset + inner_index" in spatial_source
+    assert "if (blockDim.x > 1)" in spatial_source
+    assert "} else {" in spatial_source
+    assert "shared_offset =\n            static_cast<int64_t>(threadIdx.y) * blockDim.x" in spatial_source
+    assert "input[data_offset + d * dim_stride]" in spatial_source
+    assert "output[data_offset + d * dim_stride]" in spatial_source
+    assert "spatial_block_reduce_x<accscalar_t, Max>" in spatial_source
+    assert "spatial_block_reduce_x<accscalar_t, Add>" in spatial_source
+
+
 def test_ascend_softmax_accuracy_script_targets_v2_by_default():
     source = (
         Path("src/cannbench/datasets/data/softmax/test")
