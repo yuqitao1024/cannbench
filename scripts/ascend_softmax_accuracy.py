@@ -75,18 +75,18 @@ def synchronize() -> None:
     torch.npu.synchronize()
 
 
-def load_simt_op() -> Callable[[torch.Tensor, int], torch.Tensor]:
+def load_simt_op(package_name: str) -> Callable[[torch.Tensor, int], torch.Tensor]:
     try:
-        from aten_softmax import ops as simt_ops
+        simt_ops = __import__(f"{package_name}.ops", fromlist=["ops"])
     except ImportError as exc:
         raise SystemExit(
-            "aten_softmax is not installed. Install the SIMT package first, for example:\n"
-            "  tar -xzf ascend-softmax-simt-v1-src.tar.gz\n"
-            "  cd ascend-softmax-simt-v1 && ./install.sh"
+            f"{package_name} is not installed. Install the target SIMT package first."
         ) from exc
 
     if not simt_ops.is_extension_loaded() or not simt_ops.has_spatial_softmax_forward_op():
-        raise SystemExit("aten_softmax extension is not loaded or spatial_softmax_forward is not registered")
+        raise SystemExit(
+            f"{package_name} extension is not loaded or spatial_softmax_forward is not registered"
+        )
 
     def run(input_tensor: torch.Tensor, dim: int) -> torch.Tensor:
         return simt_ops.spatial_softmax_forward(input_tensor, dim, False)
@@ -145,7 +145,7 @@ def compare_outputs(reference: torch.Tensor, candidate: torch.Tensor, atol: floa
     ref = reference.detach().to("cpu", dtype=torch.float32)
     got = candidate.detach().to("cpu", dtype=torch.float32)
     output_stats("reference_cann_ops_library", ref, dim)
-    output_stats("candidate_simt_v1", got, dim)
+    output_stats("candidate_simt", got, dim)
 
     finite = torch.isfinite(ref) & torch.isfinite(got)
     if finite.any():
@@ -244,12 +244,13 @@ def run_accuracy_case(
     atol: float,
     rtol: float,
     simt_fn: Callable[[torch.Tensor, int], torch.Tensor],
+    simt_label: str,
 ) -> dict[str, float | int | bool | str]:
     shape = tuple(case["shape"])
     dim = int(case["dim"])
     input_tensor = build_input(shape, dtype, device, seed)
     reference = run_op("cann_ops_library", cann_ops_softmax, input_tensor, dim, 0, 1).output
-    candidate = run_op("simt_v1", simt_fn, input_tensor, dim, 0, 1).output
+    candidate = run_op(simt_label, simt_fn, input_tensor, dim, 0, 1).output
     summary = accuracy_summary(reference, candidate, atol, rtol)
     return {
         **summary,
@@ -282,6 +283,8 @@ def format_accuracy_row(row: dict[str, object]) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Manual Ascend softmax comparison for CANN ops library vs SIMT op.")
     parser.add_argument("--mode", choices=("cannops", "simt", "both"), default="both")
+    parser.add_argument("--simt-package", default="aten_softmax_v2")
+    parser.add_argument("--simt-label", default="simt_v2")
     parser.add_argument("--dataset", choices=["ALL", *DATASET_NAMES], default="ALL")
     parser.add_argument("--case", default="ALL", help="Case id to run, or ALL.")
     parser.add_argument("--shape", type=parse_shape, help="Override shape, e.g. 4,8,1024,1024 or 4x8x1024x1024")
@@ -307,7 +310,7 @@ def main() -> int:
             raise SystemExit("batch accuracy requires --mode both")
         if args.shape is not None or args.dim is not None:
             raise SystemExit("--shape/--dim overrides are only supported for a single case")
-        simt_fn = load_simt_op()
+        simt_fn = load_simt_op(args.simt_package)
         rows = []
         print("accuracy_summary:")
         print("dataset,case,shape,dim,dtype,source_model,status,max_abs_error,max_rel_error,nan,inf,finite,total", flush=True)
@@ -322,6 +325,7 @@ def main() -> int:
                 args.atol,
                 args.rtol,
                 simt_fn,
+                args.simt_label,
             )
             rows.append(row)
             print(format_accuracy_row(row), flush=True)
@@ -349,7 +353,7 @@ def main() -> int:
     if args.mode in ("cannops", "both"):
         results.append(run_op("cann_ops_library", cann_ops_softmax, input_tensor, dim, args.warmup, args.iters))
     if args.mode in ("simt", "both"):
-        results.append(run_op("simt_v1", load_simt_op(), input_tensor, dim, args.warmup, args.iters))
+        results.append(run_op(args.simt_label, load_simt_op(args.simt_package), input_tensor, dim, args.warmup, args.iters))
 
     if args.mode == "both" and len(results) == 2:
         compare_outputs(results[0].output, results[1].output, args.atol, args.rtol, dim)

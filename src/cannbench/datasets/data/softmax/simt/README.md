@@ -210,7 +210,7 @@ The first step aligns dispatch and launch policy, not full CUDA kernel internals
 
 | V2 path | Launch policy | Purpose |
 | --- | --- | --- |
-| `row_softmax_persistent_forward` | `block_x <= 32` | Preserve the V1 correctness-oriented lane policy for small/medium rows. |
+| `row_softmax_persistent_forward` | `block_x <= 32`, `block_y = 128 / block_x` | Preserve the V1 x-lane policy while letting one block process multiple rows through `threadIdx.y`. |
 | `row_softmax_fast_forward` | `block_x = 512` | Start matching CUDA's large-row fast path shape. |
 | `row_softmax_generic_forward` | `block_x = round_up_to_32(min(dim_size, 1024))` | Start matching CUDA's generic row-wise block-size shape. |
 

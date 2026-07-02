@@ -89,3 +89,27 @@ def test_ascend_softmax_v2_rowwise_launch_policy_is_not_fixed_to_32_threads():
     assert "row_softmax_generic_block_x" in source
     assert "constexpr int64_t kCudaFastPathThreads = 512" in source
     assert "constexpr int64_t kCudaGenericMaxThreads = 1024" in source
+
+
+def test_ascend_softmax_v2_persistent_path_uses_multi_row_block_shape():
+    source = (
+        SIMT_OP_V2_ROOT
+        / "aten_softmax_v2"
+        / "csrc"
+        / "simt"
+        / "spatial_softmax.asc"
+    ).read_text()
+
+    assert "row_softmax_persistent_forward_kernel" in source
+    assert "row_softmax_persistent_block_y" in source
+    assert "threadIdx.y" in source
+    assert "dim3(block_x, block_y)" in source
+    assert "blockIdx.x * blockDim.y + threadIdx.y" in source
+
+
+def test_ascend_softmax_accuracy_script_targets_v2_by_default():
+    source = Path("scripts/ascend_softmax_accuracy.py").read_text()
+
+    assert 'parser.add_argument("--simt-package", default="aten_softmax_v2")' in source
+    assert 'parser.add_argument("--simt-label", default="simt_v2")' in source
+    assert "from aten_softmax import ops" not in source

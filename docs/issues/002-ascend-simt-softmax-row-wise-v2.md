@@ -282,8 +282,9 @@ The first V2 step does not yet claim CUDA kernel-internal equivalence. The three
 row paths currently reuse the same SIMT row reduction kernel with different
 launch policies and profiler-visible API names:
 
-- `row_softmax_persistent_forward` keeps the V1 32-lane correctness-oriented
-  policy.
+- `row_softmax_persistent_forward` keeps the V1 32-lane x-lane policy, but now
+  uses a CUDA-like two-dimensional block shape so one block can process
+  multiple rows through `threadIdx.y`.
 - `row_softmax_fast_forward` uses a CUDA-like `512` thread row policy for large
   rows.
 - `row_softmax_generic_forward` rounds `min(dim_size, 1024)` up to a 32-lane
