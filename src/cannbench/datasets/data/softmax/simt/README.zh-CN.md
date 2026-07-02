@@ -212,12 +212,11 @@ V2 已对齐所有 row-wise 路径的 dispatch 和 launch policy。其中 persis
 | V2 路径 | Launch policy | 目的 |
 | --- | --- | --- |
 | `row_softmax_persistent_forward` | `block_x <= 32`, `block_y = 128 / block_x`, `WARP_BATCH = 2 if next_power_of_two <= 128 else 1` | 对齐 CUDA persistent softmax：`log2_elements` dispatch、寄存器驻留 elements、`asc_shfl_xor` warp reduction。 |
-| `row_softmax_fast_forward` | `block_x = 32`, `block_y = 16` | 使用 CUDA-like 512 总线程 fast path 形态，同时把每行归约限制在一个 32-lane group 内。 |
+| `row_softmax_fast_forward` | `block_x = 512`, `block_y = 1` | 对齐 CUDA fast softmax 形态：每行一个 block、warp-first block-wide reduction、inverse-sum reduction，以及 CUDA 等价的 reduction UBUF 大小。 |
 | `row_softmax_generic_forward` | `block_x = 32`, `block_y = 32` | 使用 CUDA-like 1024 总线程 generic 形态，同时把每行归约限制在一个 32-lane group 内。 |
 
-后续 V2 迭代再逐步替换 fast/generic 的 correctness-first 内部实现，包括
-block-wide reduction、ILP/vectorized load，以及 Ascend SIMT 支持场景下的
-shared/register row buffering。
+后续 V2 迭代再逐步替换 generic 的 correctness-first 内部实现，并在
+Ascend SIMT 支持场景下补充 vectorized ILP load。
 
 spatial 路径保持 CUDA `cunn_SpatialSoftMaxForward` 结构：`block.x` 沿
 softmax 维度做归约，`block.y` 覆盖独立 inner 位置，`grid.x/grid.y`

@@ -285,22 +285,31 @@ use correctness-first 32-lane group reductions:
 - `row_softmax_persistent_forward` uses CUDA-style `log2_elements` dispatch,
   `WARP_SIZE`, `WARP_ITERATIONS`, `WARP_BATCH`, register-resident elements, and
   `asc_shfl_xor` warp reduction. It no longer uses UBUF block reduction.
-- `row_softmax_fast_forward` uses a CUDA-like `512` total-thread shape for large
-  rows, split as `block_x = 32` and `block_y = 16` so each 32-lane group handles
-  one row.
+- `row_softmax_fast_forward` now uses CUDA-style `512` threads per row,
+  warp-first block-wide reduction, inverse-sum reduction, and CUDA-equivalent
+  reduction UBUF sizing (`block.x / warp_size * sizeof(accscalar_t)`). The
+  current implementation uses scalar ILP (`kFastILP = 1`) before adding
+  vectorized loads.
 - `row_softmax_generic_forward` uses a CUDA-like `1024` total-thread shape,
   split as `block_x = 32` and `block_y = 32`. The current float16 benchmark
   manifest does not exercise this path.
 
 This lets profiling and accuracy tests identify which CUDA-style row path each
-case exercises before V2 adds deeper fast/generic optimizations such as
-block-wide reductions, ILP/vectorized loads, and shared/register row buffering.
+case exercises before V2 adds deeper generic optimizations such as block-wide
+reductions, ILP/vectorized loads, and shared/register row buffering.
 
 Remote Ascend verification after the persistent CUDA-style register/shuffle
 alignment step:
 
 ```text
 persistent_summary: total=26 passed=26 failed=0
+```
+
+Remote Ascend verification after the fast CUDA-style block reduction alignment
+step:
+
+```text
+fast_summary: total=12 passed=12 failed=0
 ```
 
 The spatial path keeps the CUDA `cunn_SpatialSoftMaxForward` structure:

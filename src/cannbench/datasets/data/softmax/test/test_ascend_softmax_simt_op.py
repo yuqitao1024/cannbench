@@ -139,10 +139,34 @@ def test_ascend_softmax_v2_fast_path_has_dedicated_multi_row_kernel():
     ).read_text()
 
     assert "row_softmax_fast_forward_kernel" in source
-    assert "row_softmax_fast_block_y" in source
     assert "path == RowSoftmaxPath::FastLike" in source
-    assert "dim3(block_x, block_y)" in source
+    assert "path == RowSoftmaxPath::FastLike\n      ? 1" in source
     assert "aten_softmax_v2::row_softmax_fast_forward" in source
+
+
+def test_ascend_softmax_v2_fast_path_uses_cuda_style_block_reduce_kernel():
+    source = (
+        SIMT_OP_V2_ROOT
+        / "aten_softmax_v2"
+        / "csrc"
+        / "simt"
+        / "spatial_softmax.asc"
+    ).read_text()
+    fast_start = source.index("row_softmax_fast_forward_kernel")
+    generic_start = source.index("row_softmax_generic_forward_kernel")
+    fast_source = source[fast_start:generic_start]
+
+    assert "fast_ilp_reduce" in source
+    assert "fast_block_reduce_warp" in source
+    assert "fast_block_reduce_warp_inverse" in source
+    assert "constexpr int64_t kFastILP" in fast_source
+    assert "row_input = input + row * dim_size" in fast_source
+    assert "row_output = output + row * dim_size" in fast_source
+    assert "for (int64_t offset = threadIdx.x; offset < dim_size; offset += blockDim.x)" in fast_source
+    assert "row = blockIdx.x * blockDim.y + threadIdx.y" not in fast_source
+    assert "row_softmax_fast_block_x() {\n  constexpr int64_t kCudaFastPathThreads = 512;" in source
+    assert "row_softmax_fast_ubuf_bytes" in source
+    assert "row_softmax_fast_block_x() / kCudaWarpLaneLimit" in source
 
 
 def test_ascend_softmax_v2_generic_path_has_dedicated_multi_row_kernel():
