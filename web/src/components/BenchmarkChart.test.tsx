@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, waitFor } from "@testing-library/react";
+import "@testing-library/jest-dom/vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { BenchmarkChart } from "./BenchmarkChart";
 import type { ChartSegment, ChartSeries } from "../types";
 
@@ -44,6 +45,10 @@ vi.mock("echarts/renderers", () => ({
 }));
 
 describe("BenchmarkChart", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
   beforeEach(() => {
     setOption.mockClear();
     on.mockClear();
@@ -117,6 +122,85 @@ describe("BenchmarkChart", () => {
     expect(option.tooltip.alwaysShowContent).toBe(false);
     expect(option.tooltip.extraCssText).toContain("max-height");
     expect(option.tooltip.extraCssText).toContain("overflow-y:auto");
+  });
+
+  it("summarizes selected series against the CUDA baseline", async () => {
+    const series: ChartSeries[] = [
+      {
+        key: "nvidia-h800-cuda-pytorch",
+        name: "NVIDIA H800 PyTorch",
+        records: [],
+        points: [
+          { caseId: "a", latencyMs: 0.01, record: null },
+          { caseId: "b", latencyMs: 0.02, record: null }
+        ]
+      },
+      {
+        key: "ascend-950pr-simt-v2",
+        name: "Ascend 950PR SIMT v2",
+        records: [],
+        points: [
+          { caseId: "a", latencyMs: 0.03, record: null },
+          { caseId: "b", latencyMs: 0.06, record: null }
+        ]
+      },
+      {
+        key: "ascend-950pr-cannops",
+        name: "Ascend 950PR CANN Ops",
+        records: [],
+        points: [
+          { caseId: "a", latencyMs: 0.005, record: null },
+          { caseId: "b", latencyMs: 0.01, record: null }
+        ]
+      }
+    ];
+    const segments: ChartSegment[] = [{ key: "realistic", label: "realistic", start: 0, end: 1 }];
+
+    render(<BenchmarkChart series={series} segments={segments} />);
+
+    expect(screen.getByText(/vs cuda baseline/i)).toBeInTheDocument();
+    expect(screen.getByText(/Ascend 950PR SIMT v2/i)).toBeInTheDocument();
+    expect(screen.getByText(/3.00x slower/i)).toHaveClass("is-slower");
+    expect(screen.getByText(/Ascend 950PR CANN Ops/i)).toBeInTheDocument();
+    expect(screen.getByText(/2.00x faster/i)).toHaveClass("is-faster");
+  });
+
+  it("adds per-case CUDA comparison to the tooltip", async () => {
+    const cudaRecord = {
+      case_id: "bert_pytorch_attention",
+      shape: [1, 16, 128, 128],
+      dtype: "float16"
+    };
+    const series: ChartSeries[] = [
+      {
+        key: "nvidia-h800-cuda-pytorch",
+        name: "NVIDIA H800 PyTorch",
+        records: [],
+        points: [{ caseId: "bert_pytorch_attention", latencyMs: 0.01, record: cudaRecord as never }]
+      },
+      {
+        key: "ascend-950pr-simt-v2",
+        name: "Ascend 950PR SIMT v2",
+        records: [],
+        points: [{ caseId: "bert_pytorch_attention", latencyMs: 0.03, record: cudaRecord as never }]
+      }
+    ];
+    const segments: ChartSegment[] = [{ key: "realistic", label: "realistic", start: 0, end: 0 }];
+
+    render(<BenchmarkChart series={series} segments={segments} />);
+
+    await waitFor(() => {
+      expect(setOption).toHaveBeenCalled();
+    });
+
+    const option = setOption.mock.calls.at(-1)?.[0];
+    const html = option.tooltip.formatter([
+      { seriesName: "NVIDIA H800 PyTorch", value: 10, dataIndex: 0 },
+      { seriesName: "Ascend 950PR SIMT v2", value: 30, dataIndex: 0 }
+    ]);
+
+    expect(html).toContain("vs CUDA: baseline");
+    expect(html).toContain("vs CUDA: <span class=\"tooltip-ratio is-slower\">3.00x slower</span>");
   });
 
   it("pins tooltip position after clicking a chart point", async () => {

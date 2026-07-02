@@ -545,6 +545,54 @@ h1,
   padding: 12px 14px 6px;
 }
 
+.chart-baseline-card {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--panel) 74%, transparent);
+}
+
+.chart-baseline-title {
+  color: var(--faint);
+  font: 0.68rem var(--font-mono);
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.chart-baseline-items {
+  display: flex;
+  flex: 1 1 420px;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  justify-content: flex-end;
+}
+
+.chart-baseline-item {
+  display: inline-flex;
+  gap: 8px;
+  align-items: baseline;
+  color: var(--muted);
+  font: 0.72rem var(--font-mono);
+}
+
+.chart-baseline-item strong,
+.tooltip-ratio {
+  font-weight: 800;
+}
+
+.is-slower {
+  color: var(--red);
+}
+
+.is-faster {
+  color: var(--green);
+}
+
 .chart-segment-bar {
   display: flex;
   flex-wrap: wrap;

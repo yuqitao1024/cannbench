@@ -21,6 +21,71 @@ interface TooltipPositionSize {
   viewSize?: [number, number];
 }
 
+interface BaselineSummaryItem {
+  key: string;
+  name: string;
+  ratio: number;
+}
+
+function isCudaSeries(series: ChartSeries) {
+  return series.key.includes("cuda") || series.records.some((record) => record.backend === "nvidia" && record.implementation === "cuda-pytorch");
+}
+
+function formatRatio(ratio: number) {
+  if (ratio >= 1) {
+    return `${ratio.toFixed(2)}x slower`;
+  }
+  return `${(1 / ratio).toFixed(2)}x faster`;
+}
+
+function ratioClassName(ratio: number) {
+  return ratio >= 1 ? "is-slower" : "is-faster";
+}
+
+function median(values: number[]) {
+  if (values.length === 0) {
+    return null;
+  }
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 1) {
+    return sorted[middle];
+  }
+  return (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+function cudaPointByCase(series: ChartSeries[]) {
+  const cuda = series.find(isCudaSeries);
+  if (!cuda) {
+    return null;
+  }
+  return new Map(cuda.points.map((point) => [point.caseId, point]));
+}
+
+function baselineSummary(series: ChartSeries[]): BaselineSummaryItem[] {
+  const cudaPoints = cudaPointByCase(series);
+  if (!cudaPoints) {
+    return [];
+  }
+
+  return series
+    .filter((item) => !isCudaSeries(item))
+    .map((item) => {
+      const ratios = item.points
+        .map((point) => {
+          const cudaPoint = cudaPoints.get(point.caseId);
+          if (point.latencyMs === null || !cudaPoint || cudaPoint.latencyMs === null || cudaPoint.latencyMs === 0) {
+            return null;
+          }
+          return point.latencyMs / cudaPoint.latencyMs;
+        })
+        .filter((value): value is number => value !== null);
+      const ratio = median(ratios);
+      return ratio === null ? null : { key: item.key, name: item.name, ratio };
+    })
+    .filter((item): item is BaselineSummaryItem => item !== null);
+}
+
 function tooltipPosition(anchor: [number, number], size?: TooltipPositionSize): [number, number] {
   const [contentWidth = 0, contentHeight = 0] = size?.contentSize ?? [];
   const [viewWidth = 0, viewHeight = 0] = size?.viewSize ?? [];
@@ -38,6 +103,8 @@ function tooltipPosition(anchor: [number, number], size?: TooltipPositionSize): 
 }
 
 function tooltipHtml(params: Array<{ seriesName: string; value: number | null; dataIndex: number }>, series: ChartSeries[]) {
+  const cudaSeries = series.find(isCudaSeries);
+  const cudaPoint = cudaSeries?.points[params[0]?.dataIndex ?? -1] ?? null;
   const lines = params
     .map((param) => {
       const matchedSeries = series.find((item) => item.name === param.seriesName);
@@ -50,6 +117,7 @@ function tooltipHtml(params: Array<{ seriesName: string; value: number | null; d
         `<strong>${param.seriesName}</strong>`,
         `case: ${record.case_id}`,
         `latency: ${(point.latencyMs * MS_TO_US).toFixed(2)} us`,
+        `vs CUDA: ${formatTooltipRatio(point.latencyMs, cudaPoint?.latencyMs ?? null, matchedSeries ? isCudaSeries(matchedSeries) : false)}`,
         `shape: ${record.shape.join(" x ")}`,
         `dtype: ${record.dtype}`
       ].join("<br/>");
@@ -58,8 +126,20 @@ function tooltipHtml(params: Array<{ seriesName: string; value: number | null; d
   return lines.join("<hr/>");
 }
 
+function formatTooltipRatio(latencyMs: number, cudaLatencyMs: number | null, isCuda: boolean) {
+  if (isCuda) {
+    return "baseline";
+  }
+  if (cudaLatencyMs === null || cudaLatencyMs === 0) {
+    return "n/a";
+  }
+  const ratio = latencyMs / cudaLatencyMs;
+  return `<span class="tooltip-ratio ${ratioClassName(ratio)}">${formatRatio(ratio)}</span>`;
+}
+
 export function BenchmarkChart({ series, segments }: BenchmarkChartProps) {
   const chartRef = useRef<HTMLDivElement | null>(null);
+  const summary = baselineSummary(series);
 
   useEffect(() => {
     if (!chartRef.current) {
@@ -182,6 +262,19 @@ export function BenchmarkChart({ series, segments }: BenchmarkChartProps) {
 
   return (
     <section className="chart-panel" aria-label="Latency comparison chart">
+      {summary.length > 0 ? (
+        <div className="chart-baseline-card" aria-label="CUDA baseline comparison">
+          <span className="chart-baseline-title">vs CUDA baseline</span>
+          <div className="chart-baseline-items">
+            {summary.map((item) => (
+              <span key={item.key} className="chart-baseline-item">
+                <span>{item.name}</span>
+                <strong className={ratioClassName(item.ratio)}>{formatRatio(item.ratio)}</strong>
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : null}
       {segments.length > 1 ? (
         <div className="chart-segment-bar" aria-hidden="true">
           {segments.map((segment) => (
