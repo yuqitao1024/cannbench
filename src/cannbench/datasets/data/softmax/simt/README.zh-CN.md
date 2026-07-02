@@ -213,7 +213,11 @@ CUDA：
 | --- | --- | --- |
 | `row_softmax_persistent_forward` | `block_x <= 32`, `block_y = 128 / block_x` | 保留 V1 的 x-lane 策略，同时通过 `threadIdx.y` 让一个 block 处理多行。 |
 | `row_softmax_fast_forward` | `block_x = 32`, `block_y = 16` | 使用 CUDA-like 512 总线程 fast path 形态，同时把每行归约限制在一个 32-lane group 内。 |
-| `row_softmax_generic_forward` | `block_x = round_up_to_32(min(dim_size, 1024))` | 开始对齐 CUDA generic row-wise 的 block-size 形态。 |
+| `row_softmax_generic_forward` | `block_x = 32`, `block_y = 32` | 使用 CUDA-like 1024 总线程 generic 形态，同时把每行归约限制在一个 32-lane group 内。 |
 
 后续 V2 迭代再逐步替换各路径的 kernel 内部实现，包括 shuffle reduction、
 ILP/vectorized load，以及 Ascend SIMT 支持场景下的寄存器驻留 row buffering。
+
+spatial 路径保持 CUDA `cunn_SpatialSoftMaxForward` 结构：`block.x` 沿
+softmax 维度做归约，`block.y` 覆盖独立 inner 位置，`grid.x/grid.y`
+分别切分 outer 和 inner 范围。

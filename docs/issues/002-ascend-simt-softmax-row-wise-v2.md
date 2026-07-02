@@ -288,14 +288,23 @@ launch policies and profiler-visible API names:
 - `row_softmax_fast_forward` uses a CUDA-like `512` total-thread shape for large
   rows, split as `block_x = 32` and `block_y = 16` so each 32-lane group handles
   one row.
-- `row_softmax_generic_forward` rounds `min(dim_size, 1024)` up to a 32-lane
-  multiple, matching the CUDA generic block-size shape.
+- `row_softmax_generic_forward` uses a CUDA-like `1024` total-thread shape,
+  split as `block_x = 32` and `block_y = 32`. The current float16 benchmark
+  manifest does not exercise this path.
 
 This lets profiling and accuracy tests identify which CUDA-style row path each
 case exercises before V2 adds deeper kernel-internal optimizations such as
 shuffle reduction, ILP/vectorized loads, and register-resident row buffering.
 
-Remote Ascend verification after this step:
+The spatial path keeps the CUDA `cunn_SpatialSoftMaxForward` structure:
+
+- `block.x` reduces along `dim_size`.
+- `block.y` parallelizes independent `inner_size` positions.
+- `grid.x` covers `outer_size`.
+- `grid.y` covers `inner_size / block.y`.
+- shared/UBUF storage is allocated only when `block.x > 1`.
+
+Remote Ascend verification after the generic/spatial alignment step:
 
 ```text
 python ascend_softmax_accuracy.py --dataset ALL --dtype float16 \
@@ -303,6 +312,14 @@ python ascend_softmax_accuracy.py --dataset ALL --dtype float16 \
 
 summary: total=40 passed=40 failed=0
 ```
+
+Current float16 manifest path coverage:
+
+- `persistent`: covered by benchmark cases.
+- `fast`: covered by benchmark cases.
+- `spatial`: covered by benchmark cases.
+- `generic`: not covered by current benchmark cases; reviewed by white-box
+  launch-policy tests and CUDA source comparison.
 
 ## Current Policy
 

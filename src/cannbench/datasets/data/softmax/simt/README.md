@@ -212,9 +212,13 @@ The first step aligns dispatch and launch policy, not full CUDA kernel internals
 | --- | --- | --- |
 | `row_softmax_persistent_forward` | `block_x <= 32`, `block_y = 128 / block_x` | Preserve the V1 x-lane policy while letting one block process multiple rows through `threadIdx.y`. |
 | `row_softmax_fast_forward` | `block_x = 32`, `block_y = 16` | Use a CUDA-like 512 total-thread fast path shape while keeping each row reduction inside one 32-lane group. |
-| `row_softmax_generic_forward` | `block_x = round_up_to_32(min(dim_size, 1024))` | Start matching CUDA's generic row-wise block-size shape. |
+| `row_softmax_generic_forward` | `block_x = 32`, `block_y = 32` | Use a CUDA-like 1024 total-thread generic shape while keeping each row reduction inside one 32-lane group. |
 
 Later V2 iterations should replace the shared row kernel internals with
 path-specific implementations, including shuffle reduction, ILP/vectorized
 loads, and register-resident buffering where the Ascend SIMT model supports
 them.
+
+The spatial path keeps the CUDA `cunn_SpatialSoftMaxForward` layout: `block.x`
+reduces across the softmax dimension, `block.y` covers independent inner
+positions, and `grid.x/grid.y` tile outer and inner ranges respectively.

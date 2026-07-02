@@ -123,6 +123,47 @@ def test_ascend_softmax_v2_fast_path_has_dedicated_multi_row_kernel():
     assert "aten_softmax_v2::row_softmax_fast_forward" in source
 
 
+def test_ascend_softmax_v2_generic_path_has_dedicated_multi_row_kernel():
+    source = (
+        SIMT_OP_V2_ROOT
+        / "aten_softmax_v2"
+        / "csrc"
+        / "simt"
+        / "spatial_softmax.asc"
+    ).read_text()
+
+    assert "row_softmax_generic_forward_kernel" in source
+    assert "row_softmax_generic_block_y" in source
+    assert "path == RowSoftmaxPath::GenericLike" in source
+    assert "aten_softmax_v2::row_softmax_generic_forward" in source
+
+
+def test_ascend_softmax_v2_spatial_path_keeps_cuda_style_launch_policy():
+    header = (
+        SIMT_OP_V2_ROOT
+        / "aten_softmax_v2"
+        / "csrc"
+        / "simt"
+        / "occupancy_common.h"
+    ).read_text()
+    source = (
+        SIMT_OP_V2_ROOT
+        / "aten_softmax_v2"
+        / "csrc"
+        / "simt"
+        / "spatial_softmax.asc"
+    ).read_text()
+
+    assert "inner_threads = std::min(inner_size, kMaxThreads)" in header
+    assert "inner_threads <= 64 && dim_size >= 64" in header
+    assert "inner_blocks = ceil_div(inner_size, block_y)" in header
+    assert "outer_blocks = ceil_div(max_active_blocks, inner_blocks)" in header
+    assert "block_x == 1 ? 0 : block_threads * accscalar_size" in header
+    assert "cunn_spatial_softmax_forward_kernel" in source
+    assert "spatial_block_reduce_x" in source
+    assert "blockIdx.y * blockDim.y + threadIdx.y" in source
+
+
 def test_ascend_softmax_accuracy_script_targets_v2_by_default():
     source = (
         Path("src/cannbench/datasets/data/softmax/test")
