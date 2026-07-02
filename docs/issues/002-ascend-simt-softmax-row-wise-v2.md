@@ -342,6 +342,10 @@ The spatial path keeps the CUDA `cunn_SpatialSoftMaxForward` structure:
 - `grid.x` covers `outer_size`.
 - `grid.y` covers `inner_size / block.y`.
 - shared/UBUF storage is allocated only when `block.x > 1`.
+- the spatial reduction helper applies the `threadIdx.y * blockDim.x` shared
+  offset internally, matching the CUDA helper shape.
+- the serial `blockDim.x == 1` branch keeps the same `threadIdx.x`-based loop
+  form as CUDA, even though `threadIdx.x == 0` in that branch.
 
 Remote Ascend verification after the generic fail-fast cleanup and spatial
 alignment step:
@@ -362,6 +366,17 @@ validated cases:
   channelwise_activation_map
 
 spatial_summary: total=2 passed=2 failed=0
+```
+
+Remote Ascend verification after aligning the spatial helper and serial branch
+loop shape with CUDA:
+
+```text
+validated cases:
+  tiny_channel_softmax
+  channelwise_activation_map
+
+spatial_cuda_shape_summary: total=2 passed=2 failed=0
 ```
 
 Current float16 manifest path coverage:

@@ -260,11 +260,48 @@ def test_ascend_softmax_v2_spatial_kernel_matches_cuda_layout_shape():
     assert "data_offset = outer_offset + inner_index" in spatial_source
     assert "if (blockDim.x > 1)" in spatial_source
     assert "} else {" in spatial_source
-    assert "shared_offset =\n            static_cast<int64_t>(threadIdx.y) * blockDim.x" in spatial_source
+    assert "shared_offset" not in spatial_source
     assert "input[data_offset + d * dim_stride]" in spatial_source
     assert "output[data_offset + d * dim_stride]" in spatial_source
     assert "spatial_block_reduce_x<accscalar_t, Max>" in spatial_source
     assert "spatial_block_reduce_x<accscalar_t, Add>" in spatial_source
+
+
+def test_ascend_softmax_v2_spatial_serial_branch_keeps_cuda_loop_shape():
+    source = (
+        SIMT_OP_V2_ROOT
+        / "aten_softmax_v2"
+        / "csrc"
+        / "simt"
+        / "spatial_softmax.asc"
+    ).read_text()
+    spatial_start = source.index("cunn_spatial_softmax_forward_kernel")
+    launch_start = source.index("launch_spatial_forward_impl")
+    spatial_source = source[spatial_start:launch_start]
+    serial_source = spatial_source[spatial_source.index("} else {") :]
+
+    assert "for (int64_t d = threadIdx.x; d < dim_size; d += blockDim.x)" in serial_source
+    assert "for (int64_t d = 0; d < dim_size; ++d)" not in serial_source
+
+
+def test_ascend_softmax_v2_spatial_reduce_helper_applies_y_offset_like_cuda():
+    source = (
+        SIMT_OP_V2_ROOT
+        / "aten_softmax_v2"
+        / "csrc"
+        / "simt"
+        / "spatial_softmax.asc"
+    ).read_text()
+    helper_start = source.index("spatial_block_reduce_x")
+    row_reduce_start = source.index("row_block_reduce")
+    helper_source = source[helper_start:row_reduce_start]
+    spatial_start = source.index("cunn_spatial_softmax_forward_kernel")
+    launch_start = source.index("launch_spatial_forward_impl")
+    spatial_source = source[spatial_start:launch_start]
+
+    assert "shared += threadIdx.y * blockDim.x" in helper_source
+    assert "shared_offset" not in helper_source
+    assert "shared_offset" not in spatial_source
 
 
 def test_ascend_softmax_accuracy_script_targets_v2_by_default():
