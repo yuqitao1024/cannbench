@@ -197,7 +197,7 @@ policy for V1, but it is not yet a principled occupancy model.
 The repository includes a reusable accuracy validation script:
 
 ```text
-scripts/ascend_softmax_accuracy.py
+src/cannbench/datasets/data/softmax/test/ascend_softmax_accuracy.py
 ```
 
 It compares CANN ops library softmax and the installed SIMT softmax operator on
@@ -208,7 +208,7 @@ files.
 Recommended V2 correctness gate:
 
 ```bash
-python scripts/ascend_softmax_accuracy.py \
+python src/cannbench/datasets/data/softmax/test/ascend_softmax_accuracy.py \
   --mode both \
   --dataset ALL \
   --case ALL \
@@ -252,7 +252,7 @@ should explicitly design the row-wise softmax launch policy:
    based on measured safe limits. V1 currently uses `32768` as the row-wise
    `grid.x` cap.
 3. Preserve correctness first by requiring all 30 realistic fp16 cases to pass.
-4. Use `scripts/ascend_softmax_accuracy.py` as the V2 correctness regression
+4. Use `src/cannbench/datasets/data/softmax/test/ascend_softmax_accuracy.py` as the V2 correctness regression
    gate across smoke, realistic, and stress cases.
 5. Add profiler validation to ensure SIMT runs profile the SIMT kernel name.
 6. Then optimize performance against:
@@ -285,14 +285,24 @@ launch policies and profiler-visible API names:
 - `row_softmax_persistent_forward` keeps the V1 32-lane x-lane policy, but now
   uses a CUDA-like two-dimensional block shape so one block can process
   multiple rows through `threadIdx.y`.
-- `row_softmax_fast_forward` uses a CUDA-like `512` thread row policy for large
-  rows.
+- `row_softmax_fast_forward` uses a CUDA-like `512` total-thread shape for large
+  rows, split as `block_x = 32` and `block_y = 16` so each 32-lane group handles
+  one row.
 - `row_softmax_generic_forward` rounds `min(dim_size, 1024)` up to a 32-lane
   multiple, matching the CUDA generic block-size shape.
 
 This lets profiling and accuracy tests identify which CUDA-style row path each
 case exercises before V2 adds deeper kernel-internal optimizations such as
 shuffle reduction, ILP/vectorized loads, and register-resident row buffering.
+
+Remote Ascend verification after this step:
+
+```text
+python ascend_softmax_accuracy.py --dataset ALL --dtype float16 \
+  --warmup 0 --iters 1 --simt-package aten_softmax_v2 --simt-label simt_v2
+
+summary: total=40 passed=40 failed=0
+```
 
 ## Current Policy
 
@@ -304,5 +314,5 @@ threadIdx.x lane cap: 32
 grid.x cap: 32768
 ```
 
-Use this issue and `scripts/ascend_softmax_accuracy.py` as the input checklist
+Use this issue and `src/cannbench/datasets/data/softmax/test/ascend_softmax_accuracy.py` as the input checklist
 for the next SIMT softmax V2 implementation.

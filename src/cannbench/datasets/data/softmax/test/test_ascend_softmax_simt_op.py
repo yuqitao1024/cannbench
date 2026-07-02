@@ -107,8 +107,27 @@ def test_ascend_softmax_v2_persistent_path_uses_multi_row_block_shape():
     assert "blockIdx.x * blockDim.y + threadIdx.y" in source
 
 
+def test_ascend_softmax_v2_fast_path_has_dedicated_multi_row_kernel():
+    source = (
+        SIMT_OP_V2_ROOT
+        / "aten_softmax_v2"
+        / "csrc"
+        / "simt"
+        / "spatial_softmax.asc"
+    ).read_text()
+
+    assert "row_softmax_fast_forward_kernel" in source
+    assert "row_softmax_fast_block_y" in source
+    assert "path == RowSoftmaxPath::FastLike" in source
+    assert "dim3(block_x, block_y)" in source
+    assert "aten_softmax_v2::row_softmax_fast_forward" in source
+
+
 def test_ascend_softmax_accuracy_script_targets_v2_by_default():
-    source = Path("scripts/ascend_softmax_accuracy.py").read_text()
+    source = (
+        Path("src/cannbench/datasets/data/softmax/test")
+        / "ascend_softmax_accuracy.py"
+    ).read_text()
 
     assert 'parser.add_argument("--simt-package", default="aten_softmax_v2")' in source
     assert 'parser.add_argument("--simt-label", default="simt_v2")' in source
