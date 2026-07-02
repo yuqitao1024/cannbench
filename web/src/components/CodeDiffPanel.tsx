@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { Diff, Hunk, parseDiff } from "react-diff-view";
 import "react-diff-view/style/index.css";
@@ -13,6 +13,22 @@ type SelectionSlot = "base" | "compare";
 
 interface SimtVersionOption {
   version: string;
+}
+
+interface DiffFileView {
+  id: string;
+  path: string;
+  shortPath: string;
+  fileName: string;
+  additions: number;
+  deletions: number;
+  file: ReturnType<typeof parseDiff>[number];
+}
+
+interface DiffTreeNode {
+  name: string;
+  children: Map<string, DiffTreeNode>;
+  file?: DiffFileView;
 }
 
 function countPatchLines(patch: string) {
@@ -34,6 +50,79 @@ function countPatchLines(patch: string) {
     }
   }
   return { additions, deletions };
+}
+
+function trimDiffPath(path: string, operator: string) {
+  const marker = `/simt/${operator}/`;
+  const markerIndex = path.indexOf(marker);
+  if (markerIndex >= 0) {
+    return path.slice(markerIndex + marker.length);
+  }
+  return path.split("/").slice(-4).join("/");
+}
+
+function countFileChanges(file: ReturnType<typeof parseDiff>[number]) {
+  let additions = 0;
+  let deletions = 0;
+  for (const hunk of file.hunks) {
+    for (const change of hunk.changes) {
+      if (change.type === "insert") {
+        additions += 1;
+      }
+      if (change.type === "delete") {
+        deletions += 1;
+      }
+    }
+  }
+  return { additions, deletions };
+}
+
+function buildFileTree(files: DiffFileView[]) {
+  const root: DiffTreeNode = { name: "", children: new Map() };
+  for (const file of files) {
+    const segments = file.shortPath.split("/");
+    let current = root;
+    for (const segment of segments) {
+      const existing = current.children.get(segment);
+      if (existing) {
+        current = existing;
+        continue;
+      }
+      const next: DiffTreeNode = { name: segment, children: new Map() };
+      current.children.set(segment, next);
+      current = next;
+    }
+    current.file = file;
+  }
+  return root;
+}
+
+function renderFileTree(node: DiffTreeNode, level = 0) {
+  return Array.from(node.children.values()).map((child) => {
+    if (child.file) {
+      return (
+        <button
+          key={child.file.id}
+          type="button"
+          role="treeitem"
+          className="diff-tree-file"
+          style={{ "--tree-depth": level } as CSSProperties}
+          onClick={() => document.getElementById(child.file?.id ?? "")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+        >
+          {child.name}
+        </button>
+      );
+    }
+
+    return (
+      <div key={`${level}-${child.name}`} className="diff-tree-branch">
+        <span className="diff-tree-folder" style={{ "--tree-depth": level } as CSSProperties}>
+          {child.name}
+        </span>
+        {renderFileTree(child, level + 1)}
+      </div>
+    );
+  });
 }
 
 export function CodeDiffPanel({ operator }: CodeDiffPanelProps) {
@@ -139,6 +228,21 @@ export function CodeDiffPanel({ operator }: CodeDiffPanelProps) {
 
   const files = diff ? parseDiff(diff.patch, { nearbySequences: "zip" }) : [];
   const patchCounts = diff ? countPatchLines(diff.patch) : { additions: 0, deletions: 0 };
+  const fileViews: DiffFileView[] = files.map((file, index) => {
+    const path = file.newPath ?? file.oldPath;
+    const shortPath = trimDiffPath(path, operator);
+    const changes = countFileChanges(file);
+    return {
+      id: `diff-file-${index}`,
+      path,
+      shortPath,
+      fileName: shortPath.split("/").at(-1) ?? shortPath,
+      additions: changes.additions,
+      deletions: changes.deletions,
+      file
+    };
+  });
+  const fileTree = buildFileTree(fileViews);
 
   const assignVersion = (version: string) => {
     const alternativeVersion = versionOptions.find((option) => option.version !== version)?.version ?? null;
@@ -214,16 +318,25 @@ export function CodeDiffPanel({ operator }: CodeDiffPanelProps) {
               </header>
               <div className="diff-workspace-body">
                 <aside className="diff-file-rail" aria-label="Changed files">
-                  {files.map((file) => (
-                    <span key={file.newPath ?? file.oldPath}>{(file.newPath ?? file.oldPath).split("/").slice(-4).join("/")}</span>
-                  ))}
+                  <div role="tree" aria-label="Changed files" className="diff-file-tree">
+                    {renderFileTree(fileTree)}
+                  </div>
                 </aside>
                 <div className="diff-workspace-content">
                   <p className="diff-mode-label">{mode === "split" ? "split diff" : "unified diff"}</p>
-                  {files.map((file) => (
-                    <article key={file.newPath ?? file.oldPath} className="diff-file">
-                      <header>{file.newPath ?? file.oldPath}</header>
-                      <Diff viewType={mode} diffType={file.type} hunks={file.hunks} gutterType="default">
+                  {fileViews.map((view) => (
+                    <article key={view.path} id={view.id} className="diff-file">
+                      <header>
+                        <div>
+                          <h4>
+                            {view.fileName}{" "}
+                            <span className="diff-file-plus">{view.additions}++</span>{" "}
+                            <span className="diff-file-minus">{view.deletions}--</span>
+                          </h4>
+                          <p>{view.shortPath}</p>
+                        </div>
+                      </header>
+                      <Diff viewType={mode} diffType={view.file.type} hunks={view.file.hunks} gutterType="default">
                         {(hunks) => hunks.map((hunk) => <Hunk key={hunk.content} hunk={hunk} />)}
                       </Diff>
                     </article>
@@ -301,11 +414,6 @@ export function CodeDiffPanel({ operator }: CodeDiffPanelProps) {
             <button type="button" className="diff-open-button" onClick={() => setOpen(true)} disabled={!diff}>
               Details
             </button>
-          </div>
-          <div className="diff-files" aria-label="Changed files">
-            {files.map((file) => (
-              <span key={file.newPath ?? file.oldPath}>{(file.newPath ?? file.oldPath).split("/").slice(-4).join("/")}</span>
-            ))}
           </div>
         </>
       ) : (

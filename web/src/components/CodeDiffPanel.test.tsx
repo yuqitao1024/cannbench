@@ -29,13 +29,19 @@ beforeEach(() => {
           operator: "softmax",
           base_version: "v1",
           compare_version: "v2",
-          patch: `diff --git a/src/cannbench/datasets/data/softmax/simt/aten_softmax/csrc/simt/spatial_softmax.asc b/src/cannbench/datasets/data/softmax/simt/aten_softmax/csrc/simt/spatial_softmax.asc
---- a/src/cannbench/datasets/data/softmax/simt/aten_softmax/csrc/simt/spatial_softmax.asc
-+++ b/src/cannbench/datasets/data/softmax/simt/aten_softmax/csrc/simt/spatial_softmax.asc
+          patch: `diff --git a/src/cannbench/datasets/data/softmax/simt/softmax/csrc/simt/spatial_softmax.asc b/src/cannbench/datasets/data/softmax/simt/softmax/csrc/simt/spatial_softmax.asc
+--- a/src/cannbench/datasets/data/softmax/simt/softmax/csrc/simt/spatial_softmax.asc
++++ b/src/cannbench/datasets/data/softmax/simt/softmax/csrc/simt/spatial_softmax.asc
 @@ -1,2 +1,2 @@
 -alpha
 +beta
  gamma
+diff --git a/src/cannbench/datasets/data/softmax/simt/softmax/csrc/simt/occupancy_common.h b/src/cannbench/datasets/data/softmax/simt/softmax/csrc/simt/occupancy_common.h
+--- a/src/cannbench/datasets/data/softmax/simt/softmax/csrc/simt/occupancy_common.h
++++ b/src/cannbench/datasets/data/softmax/simt/softmax/csrc/simt/occupancy_common.h
+@@ -1 +1,2 @@
+ old
++new
 `
         })
       };
@@ -57,11 +63,18 @@ describe("CodeDiffPanel", () => {
       expect(screen.getByRole("button", { name: /compare/i })).toHaveTextContent(/v2/i);
     });
     expect(await screen.findByRole("button", { name: /details/i })).toBeEnabled();
-    expect(await screen.findByText(/1 files changed/i)).toBeInTheDocument();
+    expect(await screen.findByText(/2 files changed/i)).toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: /simt operator diff workspace/i })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /details/i }));
     expect(screen.getByRole("dialog", { name: /simt operator diff workspace/i })).toBeInTheDocument();
+    expect(screen.getByRole("tree", { name: /changed files/i })).toBeInTheDocument();
+    expect(screen.getByText("csrc")).toBeInTheDocument();
+    expect(screen.getByText("simt")).toBeInTheDocument();
+    expect(screen.getByRole("treeitem", { name: "spatial_softmax.asc" })).toBeInTheDocument();
+    expect(screen.getByRole("treeitem", { name: "occupancy_common.h" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /spatial_softmax\.asc\s+1\+\+\s+1--/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /occupancy_common\.h\s+1\+\+\s+0--/i })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /unified/i }));
 
     expect(screen.getByText(/unified diff/i)).toBeInTheDocument();
