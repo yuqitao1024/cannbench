@@ -287,9 +287,11 @@ use correctness-first 32-lane group reductions:
   `asc_shfl_xor` warp reduction. It no longer uses UBUF block reduction.
 - `row_softmax_fast_forward` now uses CUDA-style `512` threads per row,
   warp-first block-wide reduction, inverse-sum reduction, and CUDA-equivalent
-  reduction UBUF sizing (`block.x / warp_size * sizeof(accscalar_t)`). The
-  current implementation uses scalar ILP (`kFastILP = 1`) before adding
-  vectorized loads.
+  reduction UBUF sizing (`block.x / warp_size * sizeof(accscalar_t)`). For
+  fp16 rows whose dimension is divisible by four, it uses CANN SIMT `half2`
+  vector access and consumes two `half2` values per loop iteration, giving an
+  x4-style memory access granularity while keeping max/sum accumulation in
+  float. Other dtype and non-aligned fp16 rows keep the scalar fallback.
 - `row_softmax_generic_forward` uses a CUDA-like `1024` total-thread shape,
   split as `block_x = 32` and `block_y = 32`. The current float16 benchmark
   manifest does not exercise this path.
@@ -310,6 +312,26 @@ step:
 
 ```text
 fast_summary: total=12 passed=12 failed=0
+```
+
+Remote Ascend verification after adding the fast fp16 `half2` x4 vector access:
+
+```text
+validated cases:
+  t5_logits
+  convbert_logits
+  longformer_logits
+  plbart_logits
+  camembert_logits
+  m2m100_logits
+  mt5_logits
+  xglm_logits
+  opt_logits
+  long_context_attention
+  wide_vocab_lm_logits
+  beam_search_token_scores
+
+fast_fp16_vector_summary: total=12 passed=12 failed=0
 ```
 
 The spatial path keeps the CUDA `cunn_SpatialSoftMaxForward` structure:

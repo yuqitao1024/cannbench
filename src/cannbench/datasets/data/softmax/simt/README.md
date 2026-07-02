@@ -212,11 +212,15 @@ also aligns the CUDA persistent kernel internals:
 | V2 path | Launch policy | Purpose |
 | --- | --- | --- |
 | `row_softmax_persistent_forward` | `block_x <= 32`, `block_y = 128 / block_x`, `WARP_BATCH = 2 if next_power_of_two <= 128 else 1` | Match CUDA persistent softmax with `log2_elements` dispatch, register-resident elements, and `asc_shfl_xor` warp reduction. |
-| `row_softmax_fast_forward` | `block_x = 512`, `block_y = 1` | Match CUDA fast softmax shape with one block per row, warp-first block-wide reduction, inverse-sum reduction, and CUDA-equivalent reduction UBUF sizing. |
+| `row_softmax_fast_forward` | `block_x = 512`, `block_y = 1` | Match CUDA fast softmax shape with one block per row, warp-first block-wide reduction, inverse-sum reduction, CUDA-equivalent reduction UBUF sizing, and fp16 `half2` vector access. |
 | `row_softmax_generic_forward` | `block_x = 32`, `block_y = 32` | Use a CUDA-like 1024 total-thread generic shape while keeping each row reduction inside one 32-lane group. |
 
-Later V2 iterations should replace the generic correctness-first internals and
-add vectorized ILP loads where the Ascend SIMT model supports them.
+The fast fp16 path uses CANN SIMT `half2` for x2 vector access. For x4-style
+processing, each thread consumes two `half2` values per loop iteration while
+keeping reductions in float. Non-fp16 rows and fp16 rows whose dimension is not
+divisible by four keep the scalar fallback.
+
+Later V2 iterations should replace the generic correctness-first internals.
 
 The spatial path keeps the CUDA `cunn_SpatialSoftMaxForward` layout: `block.x`
 reduces across the softmax dimension, `block.y` covers independent inner

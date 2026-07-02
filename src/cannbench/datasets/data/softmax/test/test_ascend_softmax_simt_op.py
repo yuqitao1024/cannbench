@@ -162,11 +162,34 @@ def test_ascend_softmax_v2_fast_path_uses_cuda_style_block_reduce_kernel():
     assert "constexpr int64_t kFastILP" in fast_source
     assert "row_input = input + row * dim_size" in fast_source
     assert "row_output = output + row * dim_size" in fast_source
-    assert "for (int64_t offset = threadIdx.x; offset < dim_size; offset += blockDim.x)" in fast_source
+    assert "for (int64_t offset = threadIdx.x; offset < dim_size;" in fast_source
+    assert "offset += blockDim.x" in fast_source
     assert "row = blockIdx.x * blockDim.y + threadIdx.y" not in fast_source
     assert "row_softmax_fast_block_x() {\n  constexpr int64_t kCudaFastPathThreads = 512;" in source
     assert "row_softmax_fast_ubuf_bytes" in source
     assert "row_softmax_fast_block_x() / kCudaWarpLaneLimit" in source
+
+
+def test_ascend_softmax_v2_fast_path_has_fp16_half2_x4_vector_path():
+    source = (
+        SIMT_OP_V2_ROOT
+        / "aten_softmax_v2"
+        / "csrc"
+        / "simt"
+        / "spatial_softmax.asc"
+    ).read_text()
+    fast_start = source.index("row_softmax_fast_forward_kernel")
+    generic_start = source.index("row_softmax_generic_forward_kernel")
+    fast_source = source[fast_start:generic_start]
+
+    assert "fast_fp16x4_reduce" in source
+    assert "fast_fp16x4_write" in source
+    assert "half2" in source
+    assert "__low2float" in source
+    assert "__high2float" in source
+    assert "__floats2half2_rn" in source
+    assert "dim_size % 4 == 0" in fast_source
+    assert "std::is_same_v<scalar_t, __fp16>" in fast_source
 
 
 def test_ascend_softmax_v2_generic_path_has_dedicated_multi_row_kernel():
