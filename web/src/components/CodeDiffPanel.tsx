@@ -359,28 +359,24 @@ export function CodeDiffPanel({ operator }: CodeDiffPanelProps) {
         <p className="panel-kicker">SIMT operator diff</p>
       </div>
       <div className="diff-selector">
-        <div className="diff-slots" role="group" aria-label="Selected SIMT versions">
+        <div className="diff-compare-command" role="group" aria-label="Selected SIMT versions">
+          <span className="diff-command-label">compare</span>
           <button
             type="button"
-            className={`diff-slot${activeSlot === "base" ? " is-active" : ""}`}
+            aria-label={`base version ${baseVersion ?? "not selected"}`}
+            className={`diff-token diff-token--base${activeSlot === "base" ? " is-active" : ""}`}
             onClick={() => setActiveSlot("base")}
           >
-            <span className="diff-slot-label">base</span>
-            <span className={`diff-slot-pill${baseVersion ? " is-filled is-base" : ""}`}>
-              {baseVersion ?? "select version"}
-            </span>
-            {activeSlot === "base" ? <span className="diff-slot-hint">Select a version below</span> : null}
+            {baseVersion ?? "select"}
           </button>
+          <span className="diff-command-arrow">-&gt;</span>
           <button
             type="button"
-            className={`diff-slot${activeSlot === "compare" ? " is-active" : ""}`}
+            aria-label={`compare version ${compareVersion ?? "not selected"}`}
+            className={`diff-token diff-token--compare${activeSlot === "compare" ? " is-active" : ""}`}
             onClick={() => setActiveSlot("compare")}
           >
-            <span className="diff-slot-label">compare</span>
-            <span className={`diff-slot-pill${compareVersion ? " is-filled is-compare" : ""}`}>
-              {compareVersion ?? "select version"}
-            </span>
-            {activeSlot === "compare" ? <span className="diff-slot-hint">Select a version below</span> : null}
+            {compareVersion ?? "select"}
           </button>
         </div>
         <div className="diff-version-row" aria-label="SIMT operator versions">

@@ -681,94 +681,73 @@ tbody tr {
   margin-top: 10px;
 }
 
-.diff-slots {
+.diff-compare-command {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  align-items: flex-start;
+  align-items: center;
+  width: fit-content;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--panel) 76%, transparent);
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--muted) 12%, transparent);
 }
 
-.diff-slot {
-  display: grid;
-  gap: 6px;
-  min-width: 142px;
-  max-width: 228px;
-  padding: 10px 11px 9px;
+.diff-command-label,
+.diff-command-arrow {
+  color: var(--faint);
+  font: 0.75rem var(--font-mono);
+}
+
+.diff-command-label {
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.diff-token {
+  min-width: 54px;
+  padding: 7px 12px;
   border: 0;
-  border-radius: 18px;
+  border-radius: 9px;
   color: var(--text);
-  text-align: left;
-  background: color-mix(in srgb, var(--panel) 70%, transparent);
+  background: rgba(0, 0, 0, 0.12);
+  cursor: pointer;
+  font: 0.86rem var(--font-mono);
   transition: background 140ms ease, box-shadow 140ms ease, transform 140ms ease;
 }
 
-.diff-slot:hover {
-  background: color-mix(in srgb, var(--panel) 82%, var(--accent) 8%);
-}
-
-.diff-slot.is-active {
-  background: rgba(250, 189, 47, 0.08);
-  box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--accent) 60%, transparent);
+.diff-token:hover,
+.diff-token.is-active {
   transform: translateY(-1px);
 }
 
-.diff-slot-label {
-  color: var(--faint);
-  font: 0.62rem var(--font-mono);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  opacity: 0.72;
+.diff-token--base {
+  background: rgba(131, 165, 152, 0.15);
 }
 
-.diff-slot-pill {
-  display: inline-flex;
-  align-items: center;
-  width: max-content;
-  max-width: 100%;
-  padding: 9px 14px;
-  border: 0;
-  border-radius: 999px;
-  color: var(--muted);
-  background: rgba(0, 0, 0, 0.08);
-  font: 0.82rem var(--font-mono);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.diff-token--compare {
+  background: rgba(250, 189, 47, 0.14);
 }
 
-.diff-slot-pill.is-filled {
-  color: var(--text);
-}
-
-.diff-slot-pill.is-base {
-  background: rgba(131, 165, 152, 0.16);
-}
-
-.diff-slot-pill.is-compare {
-  background: rgba(250, 189, 47, 0.16);
-}
-
-.diff-slot-hint {
-  color: var(--faint);
-  font: 0.66rem var(--font-mono);
-  opacity: 0.82;
+.diff-token.is-active {
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 
 .diff-version-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 8px;
 }
 
 .diff-version-pill {
-  padding: 15px 21px;
+  padding: 8px 13px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 9px;
   color: var(--muted);
   background: rgba(0, 0, 0, 0.11);
   cursor: pointer;
-  font: 0.9rem var(--font-mono);
-  transition: border-color 140ms ease, color 140ms ease, background 140ms ease, transform 140ms ease;
+  font: 0.82rem var(--font-mono);
+  transition: color 140ms ease, background 140ms ease, box-shadow 140ms ease, transform 140ms ease;
 }
 
 .diff-version-pill:hover {
@@ -1052,10 +1031,12 @@ body[data-theme="light"] .diff-workspace .diff-toggle button[aria-pressed="true"
 
 .diff-file-plus {
   color: var(--green);
+  font-weight: 900;
 }
 
 .diff-file-minus {
   color: var(--red);
+  font-weight: 900;
 }
 
 .diff-workspace .diff-code-insert {

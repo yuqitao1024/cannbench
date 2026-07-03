@@ -59,9 +59,10 @@ describe("CodeDiffPanel", () => {
     expect(await screen.findByRole("button", { name: /^v1$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^v2$/i })).toBeInTheDocument();
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /base/i })).toHaveTextContent(/v1/i);
-      expect(screen.getByRole("button", { name: /compare/i })).toHaveTextContent(/v2/i);
+      expect(screen.getByRole("button", { name: /base version v1/i })).toHaveTextContent(/v1/i);
+      expect(screen.getByRole("button", { name: /compare version v2/i })).toHaveTextContent(/v2/i);
     });
+    expect(screen.getByText("compare")).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: /details/i })).toBeEnabled();
     expect(await screen.findByText(/2 files changed/i)).toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: /simt operator diff workspace/i })).not.toBeInTheDocument();
@@ -75,6 +76,8 @@ describe("CodeDiffPanel", () => {
     expect(screen.getByRole("treeitem", { name: "occupancy_common.h" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /spatial_softmax\.asc\s+1\+\+\s+1--/i })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /occupancy_common\.h\s+1\+\+\s+0--/i })).toBeInTheDocument();
+    expect(screen.getAllByText(/1\+\+/)[0]).toHaveClass("diff-file-plus");
+    expect(screen.getAllByText(/1--/)[0]).toHaveClass("diff-file-minus");
     await user.click(screen.getByRole("button", { name: /unified/i }));
 
     expect(screen.getByText(/unified diff/i)).toBeInTheDocument();
