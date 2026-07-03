@@ -1,0 +1,103 @@
+{
+  "name": "realistic",
+  "cases": [
+    {
+      "case_id": "vision_maskrcnn_rpn_topk_182400",
+      "family": "rpn_selection",
+      "input_shape": [1, 182400],
+      "k": 2000,
+      "dim": 1,
+      "largest": true,
+      "sorted": true,
+      "source_kind": "real_model",
+      "source_project": "TritonBench",
+      "source_model": "vision_maskrcnn",
+      "source_file": "torchbench_train/vision_maskrcnn_train.json",
+      "source_op": "aten.topk.default"
+    },
+    {
+      "case_id": "vision_maskrcnn_rpn_topk_45600",
+      "family": "rpn_selection",
+      "input_shape": [1, 45600],
+      "k": 2000,
+      "dim": 1,
+      "largest": true,
+      "sorted": true,
+      "source_kind": "real_model",
+      "source_project": "TritonBench",
+      "source_model": "vision_maskrcnn",
+      "source_file": "torchbench_train/vision_maskrcnn_train.json",
+      "source_op": "aten.topk.default"
+    },
+    {
+      "case_id": "vision_maskrcnn_rpn_topk_11400",
+      "family": "rpn_selection",
+      "input_shape": [1, 11400],
+      "k": 2000,
+      "dim": 1,
+      "largest": true,
+      "sorted": true,
+      "source_kind": "real_model",
+      "source_project": "TritonBench",
+      "source_model": "vision_maskrcnn",
+      "source_file": "torchbench_train/vision_maskrcnn_train.json",
+      "source_op": "aten.topk.default"
+    },
+    {
+      "case_id": "detectron2_maskrcnn_fpn_topk_193536",
+      "family": "rpn_selection",
+      "input_shape": [1, 193536],
+      "k": 2000,
+      "dim": 1,
+      "largest": true,
+      "sorted": true,
+      "source_kind": "real_model",
+      "source_project": "TritonBench",
+      "source_model": "detectron2_maskrcnn_r_50_fpn",
+      "source_file": "torchbench_train/detectron2_maskrcnn_r_50_fpn_train.json",
+      "source_op": "aten.topk.default"
+    },
+    {
+      "case_id": "detectron2_maskrcnn_fpn_topk_48384",
+      "family": "rpn_selection",
+      "input_shape": [1, 48384],
+      "k": 2000,
+      "dim": 1,
+      "largest": true,
+      "sorted": true,
+      "source_kind": "real_model",
+      "source_project": "TritonBench",
+      "source_model": "detectron2_maskrcnn_r_50_fpn",
+      "source_file": "torchbench_train/detectron2_maskrcnn_r_50_fpn_train.json",
+      "source_op": "aten.topk.default"
+    },
+    {
+      "case_id": "dsa_opt_prefill_scores_top512",
+      "family": "dsa_index_scores",
+      "input_shape": [2, 2048],
+      "k": 512,
+      "dim": 1,
+      "largest": true,
+      "sorted": true,
+      "source_kind": "derived_real_model_shape",
+      "source_project": "TritonBench",
+      "source_model": "OPTForCausalLM",
+      "source_file": "hf_train/OPTForCausalLM_train.json",
+      "source_op": "aten._scaled_dot_product_efficient_attention.default"
+    },
+    {
+      "case_id": "dsa_nanogpt_scores_top32",
+      "family": "dsa_index_scores",
+      "input_shape": [1, 64],
+      "k": 32,
+      "dim": 1,
+      "largest": true,
+      "sorted": true,
+      "source_kind": "derived_real_model_shape",
+      "source_project": "TritonBench",
+      "source_model": "nanogpt",
+      "source_file": "torchbench_train/nanogpt_train.json",
+      "source_op": "aten._scaled_dot_product_efficient_attention.default"
+    }
+  ]
+}

@@ -52,6 +52,24 @@ from cannbench.datasets.scatter import (
     get_scatter_case,
     get_scatter_dataset,
 )
+from cannbench.datasets.lightning_indexer import (
+    LightningIndexerCase,
+    LightningIndexerDataset,
+    get_lightning_indexer_case,
+    get_lightning_indexer_dataset,
+)
+from cannbench.datasets.sparse_attention import (
+    SparseAttentionCase,
+    SparseAttentionDataset,
+    get_sparse_attention_case,
+    get_sparse_attention_dataset,
+)
+from cannbench.datasets.topk import (
+    TopKCase,
+    TopKDataset,
+    get_topk_case,
+    get_topk_dataset,
+)
 from cannbench.datasets.embedding import (
     EmbeddingCase,
     EmbeddingDataset,
@@ -72,9 +90,12 @@ from cannbench.datasets.materialize import (
     materialize_masked_select_inputs,
     materialize_cross_entropy_inputs,
     materialize_scatter_add_inputs,
+    materialize_lightning_indexer_inputs,
     materialize_embedding_inputs,
+    materialize_sparse_attention_inputs,
     materialize_softmax_inputs,
     materialize_take_along_dim_inputs,
+    materialize_topk_inputs,
     materialized_values_to_buffer,
 )
 from cannbench.datasets.synthetic import (
@@ -101,6 +122,12 @@ __all__ = [
     "ScatterAddDataset",
     "ScatterCase",
     "ScatterDataset",
+    "TopKCase",
+    "TopKDataset",
+    "LightningIndexerCase",
+    "LightningIndexerDataset",
+    "SparseAttentionCase",
+    "SparseAttentionDataset",
     "SoftmaxCase",
     "SoftmaxDataset",
     "EmbeddingCase",
@@ -123,6 +150,12 @@ __all__ = [
     "get_scatter_add_dataset",
     "get_scatter_case",
     "get_scatter_dataset",
+    "get_topk_case",
+    "get_topk_dataset",
+    "get_lightning_indexer_case",
+    "get_lightning_indexer_dataset",
+    "get_sparse_attention_case",
+    "get_sparse_attention_dataset",
     "get_embedding_case",
     "get_embedding_dataset",
     "get_operator_case",
@@ -134,9 +167,12 @@ __all__ = [
     "materialize_masked_select_inputs",
     "materialize_cross_entropy_inputs",
     "materialize_scatter_add_inputs",
+    "materialize_lightning_indexer_inputs",
     "materialize_embedding_inputs",
+    "materialize_sparse_attention_inputs",
     "materialize_softmax_inputs",
     "materialize_take_along_dim_inputs",
+    "materialize_topk_inputs",
     "materialized_values_to_buffer",
     "build_softmax_smoke_case",
     "build_softmax_stress_case",

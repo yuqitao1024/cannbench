@@ -1,0 +1,50 @@
+{
+  "name": "smoke",
+  "cases": [
+    {
+      "case_id": "tiny_decode_top4",
+      "family": "decode_indexing",
+      "batch": 2,
+      "query_tokens": 1,
+      "context_tokens": 32,
+      "index_heads": 2,
+      "index_dim": 16,
+      "top_k": 4,
+      "source_kind": "synthetic_smoke",
+      "source_project": "cannbench",
+      "source_model": "lightning_indexer_decode_smoke",
+      "source_file": "built-in",
+      "source_op": "lightning_indexer"
+    },
+    {
+      "case_id": "tiny_prefill_top8",
+      "family": "prefill_indexing",
+      "batch": 1,
+      "query_tokens": 16,
+      "context_tokens": 64,
+      "index_heads": 2,
+      "index_dim": 16,
+      "top_k": 8,
+      "source_kind": "synthetic_smoke",
+      "source_project": "cannbench",
+      "source_model": "lightning_indexer_prefill_smoke",
+      "source_file": "built-in",
+      "source_op": "lightning_indexer"
+    },
+    {
+      "case_id": "tiny_multi_head_top16",
+      "family": "multi_head_indexing",
+      "batch": 1,
+      "query_tokens": 8,
+      "context_tokens": 128,
+      "index_heads": 4,
+      "index_dim": 32,
+      "top_k": 16,
+      "source_kind": "synthetic_smoke",
+      "source_project": "cannbench",
+      "source_model": "lightning_indexer_multi_head_smoke",
+      "source_file": "built-in",
+      "source_op": "lightning_indexer"
+    }
+  ]
+}

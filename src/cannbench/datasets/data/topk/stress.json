@@ -1,0 +1,47 @@
+{
+  "name": "stress",
+  "cases": [
+    {
+      "case_id": "dsa_128k_decode_top2048",
+      "family": "dsa_long_context",
+      "input_shape": [1, 131072],
+      "k": 2048,
+      "dim": 1,
+      "largest": true,
+      "sorted": true,
+      "source_kind": "paper_shape",
+      "source_project": "DeepSeek",
+      "source_model": "DeepSeek-V3.2",
+      "source_file": "arxiv:2512.02556v1",
+      "source_op": "Top-k(I_t,:)"
+    },
+    {
+      "case_id": "dsa_64k_decode_top2048",
+      "family": "dsa_long_context",
+      "input_shape": [1, 65536],
+      "k": 2048,
+      "dim": 1,
+      "largest": true,
+      "sorted": true,
+      "source_kind": "synthetic_boundary",
+      "source_project": "cannbench",
+      "source_model": "dsa_long_context_boundary",
+      "source_file": "generated",
+      "source_op": "topk"
+    },
+    {
+      "case_id": "dsa_batch_prefill_top1024",
+      "family": "dsa_prefill_selection",
+      "input_shape": [16, 8192],
+      "k": 1024,
+      "dim": 1,
+      "largest": true,
+      "sorted": true,
+      "source_kind": "synthetic_boundary",
+      "source_project": "cannbench",
+      "source_model": "dsa_prefill_boundary",
+      "source_file": "generated",
+      "source_op": "topk"
+    }
+  ]
+}

@@ -1,0 +1,59 @@
+{
+  "name": "stress",
+  "cases": [
+    {
+      "case_id": "deepseek_128k_decode_top2048",
+      "family": "decode_sparse_attention",
+      "batch": 1,
+      "query_heads": 128,
+      "kv_heads": 1,
+      "query_tokens": 1,
+      "context_tokens": 131072,
+      "selected_tokens": 2048,
+      "head_dim": 128,
+      "causal": true,
+      "phase": "decode",
+      "source_kind": "paper_shape",
+      "source_project": "DeepSeek",
+      "source_model": "DeepSeek-V3.2",
+      "source_file": "arxiv:2512.02556v1",
+      "source_op": "sparse_attention"
+    },
+    {
+      "case_id": "deepseek_64k_decode_top2048",
+      "family": "decode_sparse_attention",
+      "batch": 8,
+      "query_heads": 128,
+      "kv_heads": 1,
+      "query_tokens": 1,
+      "context_tokens": 65536,
+      "selected_tokens": 2048,
+      "head_dim": 128,
+      "causal": true,
+      "phase": "decode",
+      "source_kind": "synthetic_boundary",
+      "source_project": "cannbench",
+      "source_model": "dsa_decode_boundary",
+      "source_file": "generated",
+      "source_op": "sparse_attention"
+    },
+    {
+      "case_id": "deepseek_prefill_chunk_top2048",
+      "family": "prefill_sparse_attention",
+      "batch": 1,
+      "query_heads": 128,
+      "kv_heads": 1,
+      "query_tokens": 128,
+      "context_tokens": 131072,
+      "selected_tokens": 2048,
+      "head_dim": 128,
+      "causal": true,
+      "phase": "prefill",
+      "source_kind": "paper_shape",
+      "source_project": "DeepSeek",
+      "source_model": "DeepSeek-V3.2",
+      "source_file": "arxiv:2512.02556v1",
+      "source_op": "sparse_attention"
+    }
+  ]
+}

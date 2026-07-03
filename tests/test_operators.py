@@ -102,6 +102,33 @@ def test_index_put_operator_spec_is_registered():
     assert spec.runner_name == "index_put"
 
 
+def test_topk_operator_spec_is_registered():
+    spec = get_operator_spec("topk")
+
+    assert spec.name == "topk"
+    assert spec.supported_dtypes == ("float32", "float16", "bfloat16")
+    assert spec.dataset_namespace == "topk"
+    assert spec.runner_name == "topk"
+
+
+def test_lightning_indexer_operator_spec_is_registered():
+    spec = get_operator_spec("lightning_indexer")
+
+    assert spec.name == "lightning_indexer"
+    assert spec.supported_dtypes == ("float32", "float16", "bfloat16")
+    assert spec.dataset_namespace == "lightning_indexer"
+    assert spec.runner_name == "lightning_indexer"
+
+
+def test_sparse_attention_operator_spec_is_registered():
+    spec = get_operator_spec("sparse_attention")
+
+    assert spec.name == "sparse_attention"
+    assert spec.supported_dtypes == ("float32", "float16", "bfloat16")
+    assert spec.dataset_namespace == "sparse_attention"
+    assert spec.runner_name == "sparse_attention"
+
+
 def test_list_operator_names_contains_softmax():
     assert "softmax" in list_operator_names()
     assert "embedding" in list_operator_names()
@@ -114,6 +141,9 @@ def test_list_operator_names_contains_softmax():
     assert "index_add" in list_operator_names()
     assert "scatter" in list_operator_names()
     assert "index_put" in list_operator_names()
+    assert "topk" in list_operator_names()
+    assert "lightning_indexer" in list_operator_names()
+    assert "sparse_attention" in list_operator_names()
 
 
 def test_unknown_operator_spec_is_rejected():
@@ -190,6 +220,30 @@ def test_index_put_dataset_is_registered():
 
     assert dataset.name == "index_put"
     assert dataset.dataset_namespace == "index_put"
+
+
+def test_topk_dataset_is_registered():
+    dataset = get_operator_dataset("topk")
+
+    assert dataset.name == "topk"
+    assert dataset.dataset_namespace == "topk"
+    assert len(dataset.get("smoke").cases) == 3
+
+
+def test_lightning_indexer_dataset_is_registered():
+    dataset = get_operator_dataset("lightning_indexer")
+
+    assert dataset.name == "lightning_indexer"
+    assert dataset.dataset_namespace == "lightning_indexer"
+    assert len(dataset.get("smoke").cases) == 3
+
+
+def test_sparse_attention_dataset_is_registered():
+    dataset = get_operator_dataset("sparse_attention")
+
+    assert dataset.name == "sparse_attention"
+    assert dataset.dataset_namespace == "sparse_attention"
+    assert len(dataset.get("smoke").cases) == 3
 
 
 def test_softmax_dataset_is_registered():

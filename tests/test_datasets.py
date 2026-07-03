@@ -19,10 +19,16 @@ from cannbench.datasets import (
     get_scatter_add_dataset,
     get_scatter_case,
     get_scatter_dataset,
+    get_lightning_indexer_case,
+    get_lightning_indexer_dataset,
     get_softmax_case,
     get_softmax_dataset,
+    get_sparse_attention_case,
+    get_sparse_attention_dataset,
     get_take_along_dim_case,
     get_take_along_dim_dataset,
+    get_topk_case,
+    get_topk_dataset,
 )
 from cannbench.datasets.materialize import (
     materialize_embedding_inputs,
@@ -34,8 +40,11 @@ from cannbench.datasets.materialize import (
     materialize_cross_entropy_inputs,
     materialize_scatter_add_inputs,
     materialize_scatter_inputs,
+    materialize_lightning_indexer_inputs,
     materialize_softmax_inputs,
+    materialize_sparse_attention_inputs,
     materialize_take_along_dim_inputs,
+    materialize_topk_inputs,
 )
 from cannbench.datasets.synthetic import (
     build_softmax_smoke_case,
@@ -244,6 +253,130 @@ def test_materialized_embedding_inputs_change_with_different_seed():
     right = materialize_embedding_inputs(case, dtype="float16", seed=456)
 
     assert left["indices"] != right["indices"] or left["weights"] != right["weights"]
+
+
+def test_get_topk_case_preserves_tritonbench_source_metadata():
+    case = get_topk_case("realistic", "vision_maskrcnn_rpn_topk_182400")
+
+    assert case.case_id == "vision_maskrcnn_rpn_topk_182400"
+    assert case.input_shape == (1, 182400)
+    assert case.k == 2000
+    assert case.dim == 1
+    assert case.source_project == "TritonBench"
+    assert case.source_model == "vision_maskrcnn"
+    assert case.source_file == "torchbench_train/vision_maskrcnn_train.json"
+    assert case.source_op == "aten.topk.default"
+
+
+def test_topk_dataset_loads_builtin_splits():
+    smoke = get_topk_dataset("smoke")
+    realistic = get_topk_dataset("realistic")
+    stress = get_topk_dataset("stress")
+
+    assert smoke.name == "smoke"
+    assert len(smoke.cases) == 3
+    assert len(realistic.cases) >= 6
+    assert len(stress.cases) >= 3
+
+
+def test_materialized_topk_inputs_are_deterministic_for_same_seed():
+    case = get_topk_case("smoke", "tiny_scores_top4")
+
+    left = materialize_topk_inputs(case, dtype="float16", seed=123)
+    right = materialize_topk_inputs(case, dtype="float16", seed=123)
+
+    assert left["input_shape"] == right["input_shape"] == (2, 16)
+    assert left["k"] == right["k"] == 4
+    assert left["dim"] == right["dim"] == 1
+    assert left["largest"] is right["largest"] is True
+    assert left["sorted"] is right["sorted"] is True
+    assert left["values"] == right["values"]
+
+
+def test_get_lightning_indexer_case_preserves_realistic_source_metadata():
+    case = get_lightning_indexer_case("realistic", "opt_prefill_2048_top512")
+
+    assert case.case_id == "opt_prefill_2048_top512"
+    assert case.batch == 2
+    assert case.query_tokens == 2048
+    assert case.context_tokens == 2048
+    assert case.index_heads == 4
+    assert case.index_dim == 64
+    assert case.top_k == 512
+    assert case.source_project == "TritonBench"
+    assert case.source_model == "OPTForCausalLM"
+    assert case.source_file == "hf_train/OPTForCausalLM_train.json"
+
+
+def test_lightning_indexer_dataset_loads_builtin_splits():
+    smoke = get_lightning_indexer_dataset("smoke")
+    realistic = get_lightning_indexer_dataset("realistic")
+    stress = get_lightning_indexer_dataset("stress")
+
+    assert smoke.name == "smoke"
+    assert len(smoke.cases) == 3
+    assert {case.source_project for case in realistic.cases} >= {"TritonBench"}
+    assert len(stress.cases) >= 3
+
+
+def test_materialized_lightning_indexer_inputs_are_deterministic_for_same_seed():
+    case = get_lightning_indexer_case("smoke", "tiny_decode_top4")
+
+    left = materialize_lightning_indexer_inputs(case, dtype="float16", seed=123)
+    right = materialize_lightning_indexer_inputs(case, dtype="float16", seed=123)
+
+    assert left["query_shape"] == right["query_shape"] == (2, 1, 2, 16)
+    assert left["key_shape"] == right["key_shape"] == (2, 32, 16)
+    assert left["weight_shape"] == right["weight_shape"] == (2, 1, 2)
+    assert left["top_k"] == right["top_k"] == 4
+    assert left["query"] == right["query"]
+    assert left["keys"] == right["keys"]
+    assert left["weights"] == right["weights"]
+
+
+def test_get_sparse_attention_case_preserves_realistic_source_metadata():
+    case = get_sparse_attention_case("realistic", "nanogpt_prefill_64_top32")
+
+    assert case.case_id == "nanogpt_prefill_64_top32"
+    assert case.batch == 1
+    assert case.query_heads == 12
+    assert case.kv_heads == 12
+    assert case.query_tokens == 64
+    assert case.context_tokens == 64
+    assert case.selected_tokens == 32
+    assert case.head_dim == 64
+    assert case.causal is True
+    assert case.phase == "prefill"
+    assert case.source_project == "TritonBench"
+    assert case.source_model == "nanogpt"
+    assert case.source_file == "torchbench_train/nanogpt_train.json"
+
+
+def test_sparse_attention_dataset_loads_builtin_splits():
+    smoke = get_sparse_attention_dataset("smoke")
+    realistic = get_sparse_attention_dataset("realistic")
+    stress = get_sparse_attention_dataset("stress")
+
+    assert smoke.name == "smoke"
+    assert len(smoke.cases) == 3
+    assert len(realistic.cases) >= 4
+    assert len(stress.cases) >= 3
+
+
+def test_materialized_sparse_attention_inputs_are_deterministic_for_same_seed():
+    case = get_sparse_attention_case("smoke", "tiny_decode_top4")
+
+    left = materialize_sparse_attention_inputs(case, dtype="float16", seed=123)
+    right = materialize_sparse_attention_inputs(case, dtype="float16", seed=123)
+
+    assert left["query_shape"] == right["query_shape"] == (2, 2, 1, 16)
+    assert left["key_shape"] == right["key_shape"] == (2, 2, 32, 16)
+    assert left["value_shape"] == right["value_shape"] == (2, 2, 32, 16)
+    assert left["indices_shape"] == right["indices_shape"] == (2, 1, 4)
+    assert left["query"] == right["query"]
+    assert left["keys"] == right["keys"]
+    assert left["values"] == right["values"]
+    assert left["indices"] == right["indices"]
 
 
 def test_get_gather_case_preserves_source_metadata():

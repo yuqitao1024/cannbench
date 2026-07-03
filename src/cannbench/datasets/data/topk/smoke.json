@@ -1,0 +1,47 @@
+{
+  "name": "smoke",
+  "cases": [
+    {
+      "case_id": "tiny_scores_top4",
+      "family": "score_selection",
+      "input_shape": [2, 16],
+      "k": 4,
+      "dim": 1,
+      "largest": true,
+      "sorted": true,
+      "source_kind": "synthetic_smoke",
+      "source_project": "cannbench",
+      "source_model": "topk_smoke_scores",
+      "source_file": "built-in",
+      "source_op": "topk"
+    },
+    {
+      "case_id": "tiny_batch_top2",
+      "family": "batched_selection",
+      "input_shape": [4, 8],
+      "k": 2,
+      "dim": -1,
+      "largest": true,
+      "sorted": true,
+      "source_kind": "synthetic_smoke",
+      "source_project": "cannbench",
+      "source_model": "topk_smoke_batch",
+      "source_file": "built-in",
+      "source_op": "topk"
+    },
+    {
+      "case_id": "tiny_lowest_top3",
+      "family": "smallest_selection",
+      "input_shape": [3, 12],
+      "k": 3,
+      "dim": 1,
+      "largest": false,
+      "sorted": true,
+      "source_kind": "synthetic_smoke",
+      "source_project": "cannbench",
+      "source_model": "topk_smoke_lowest",
+      "source_file": "built-in",
+      "source_op": "topk"
+    }
+  ]
+}

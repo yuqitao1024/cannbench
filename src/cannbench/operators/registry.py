@@ -69,6 +69,24 @@ _OPERATOR_SPECS = {
         dataset_namespace="scatter",
         runner_name="scatter",
     ),
+    "topk": OperatorSpec(
+        name="topk",
+        supported_dtypes=("float32", "float16", "bfloat16"),
+        dataset_namespace="topk",
+        runner_name="topk",
+    ),
+    "lightning_indexer": OperatorSpec(
+        name="lightning_indexer",
+        supported_dtypes=("float32", "float16", "bfloat16"),
+        dataset_namespace="lightning_indexer",
+        runner_name="lightning_indexer",
+    ),
+    "sparse_attention": OperatorSpec(
+        name="sparse_attention",
+        supported_dtypes=("float32", "float16", "bfloat16"),
+        dataset_namespace="sparse_attention",
+        runner_name="sparse_attention",
+    ),
 }
 
 

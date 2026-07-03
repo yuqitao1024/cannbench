@@ -1,0 +1,50 @@
+{
+  "name": "stress",
+  "cases": [
+    {
+      "case_id": "deepseek_128k_decode_top2048",
+      "family": "decode_indexing",
+      "batch": 1,
+      "query_tokens": 1,
+      "context_tokens": 131072,
+      "index_heads": 4,
+      "index_dim": 64,
+      "top_k": 2048,
+      "source_kind": "paper_shape",
+      "source_project": "DeepSeek",
+      "source_model": "DeepSeek-V3.2",
+      "source_file": "arxiv:2512.02556v1",
+      "source_op": "lightning_indexer"
+    },
+    {
+      "case_id": "deepseek_128k_prefill_microbatch_top2048",
+      "family": "prefill_indexing",
+      "batch": 1,
+      "query_tokens": 128,
+      "context_tokens": 131072,
+      "index_heads": 4,
+      "index_dim": 64,
+      "top_k": 2048,
+      "source_kind": "paper_shape",
+      "source_project": "DeepSeek",
+      "source_model": "DeepSeek-V3.2",
+      "source_file": "arxiv:2512.02556v1",
+      "source_op": "lightning_indexer"
+    },
+    {
+      "case_id": "deepseek_batch_decode_top2048",
+      "family": "decode_indexing",
+      "batch": 16,
+      "query_tokens": 1,
+      "context_tokens": 65536,
+      "index_heads": 4,
+      "index_dim": 64,
+      "top_k": 2048,
+      "source_kind": "synthetic_boundary",
+      "source_project": "cannbench",
+      "source_model": "dsa_batch_decode_boundary",
+      "source_file": "generated",
+      "source_op": "lightning_indexer"
+    }
+  ]
+}

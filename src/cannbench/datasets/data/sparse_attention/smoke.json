@@ -1,0 +1,59 @@
+{
+  "name": "smoke",
+  "cases": [
+    {
+      "case_id": "tiny_decode_top4",
+      "family": "decode_sparse_attention",
+      "batch": 2,
+      "query_heads": 2,
+      "kv_heads": 2,
+      "query_tokens": 1,
+      "context_tokens": 32,
+      "selected_tokens": 4,
+      "head_dim": 16,
+      "causal": true,
+      "phase": "decode",
+      "source_kind": "synthetic_smoke",
+      "source_project": "cannbench",
+      "source_model": "sparse_attention_decode_smoke",
+      "source_file": "built-in",
+      "source_op": "sparse_attention"
+    },
+    {
+      "case_id": "tiny_prefill_top8",
+      "family": "prefill_sparse_attention",
+      "batch": 1,
+      "query_heads": 4,
+      "kv_heads": 4,
+      "query_tokens": 16,
+      "context_tokens": 64,
+      "selected_tokens": 8,
+      "head_dim": 16,
+      "causal": true,
+      "phase": "prefill",
+      "source_kind": "synthetic_smoke",
+      "source_project": "cannbench",
+      "source_model": "sparse_attention_prefill_smoke",
+      "source_file": "built-in",
+      "source_op": "sparse_attention"
+    },
+    {
+      "case_id": "tiny_mqa_decode_top8",
+      "family": "mqa_sparse_attention",
+      "batch": 2,
+      "query_heads": 4,
+      "kv_heads": 1,
+      "query_tokens": 1,
+      "context_tokens": 64,
+      "selected_tokens": 8,
+      "head_dim": 32,
+      "causal": true,
+      "phase": "decode",
+      "source_kind": "synthetic_smoke",
+      "source_project": "cannbench",
+      "source_model": "sparse_attention_mqa_smoke",
+      "source_file": "built-in",
+      "source_op": "sparse_attention"
+    }
+  ]
+}

@@ -1,0 +1,65 @@
+{
+  "name": "realistic",
+  "cases": [
+    {
+      "case_id": "nanogpt_prefill_64_top32",
+      "family": "prefill_indexing",
+      "batch": 1,
+      "query_tokens": 64,
+      "context_tokens": 64,
+      "index_heads": 4,
+      "index_dim": 64,
+      "top_k": 32,
+      "source_kind": "derived_real_model_shape",
+      "source_project": "TritonBench",
+      "source_model": "nanogpt",
+      "source_file": "torchbench_train/nanogpt_train.json",
+      "source_op": "aten._scaled_dot_product_efficient_attention.default"
+    },
+    {
+      "case_id": "opt_prefill_2048_top512",
+      "family": "prefill_indexing",
+      "batch": 2,
+      "query_tokens": 2048,
+      "context_tokens": 2048,
+      "index_heads": 4,
+      "index_dim": 64,
+      "top_k": 512,
+      "source_kind": "derived_real_model_shape",
+      "source_project": "TritonBench",
+      "source_model": "OPTForCausalLM",
+      "source_file": "hf_train/OPTForCausalLM_train.json",
+      "source_op": "aten._scaled_dot_product_efficient_attention.default"
+    },
+    {
+      "case_id": "gpt2_large_prefill_1024_top256",
+      "family": "prefill_indexing",
+      "batch": 1,
+      "query_tokens": 1024,
+      "context_tokens": 1024,
+      "index_heads": 4,
+      "index_dim": 64,
+      "top_k": 256,
+      "source_kind": "derived_real_model_shape",
+      "source_project": "TritonBench",
+      "source_model": "hf_GPT2_large",
+      "source_file": "torchbench_train/hf_GPT2_large_train.json",
+      "source_op": "aten._scaled_dot_product_efficient_attention.default"
+    },
+    {
+      "case_id": "llama4_decode_32760_top2048",
+      "family": "decode_indexing",
+      "batch": 16,
+      "query_tokens": 1,
+      "context_tokens": 32760,
+      "index_heads": 4,
+      "index_dim": 64,
+      "top_k": 2048,
+      "source_kind": "tritonbench_operator_shape",
+      "source_project": "TritonBench",
+      "source_model": "llama4_128e_decode",
+      "source_file": "operators/decoding_attention/operator.py",
+      "source_op": "decoding_attention"
+    }
+  ]
+}
