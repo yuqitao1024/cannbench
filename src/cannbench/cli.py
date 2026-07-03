@@ -51,6 +51,10 @@ from cannbench.core.execution import (
     LocalBenchExecutor,
     RemoteBenchExecutor,
 )
+from cannbench.datasets.dsa_workflow import (
+    build_dsa_inference_workflow,
+    list_dsa_inference_workflows,
+)
 from cannbench.operators import list_operator_names
 
 
@@ -94,6 +98,7 @@ def _benchmark_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--implementation-version")
     parser.add_argument("--op", choices=list_operator_names())
+    parser.add_argument("--workflow", choices=["dsa_decode", "dsa_prefill"])
     parser.add_argument("--dtype", default="float16")
     parser.add_argument(
         "--dataset",
@@ -273,9 +278,20 @@ def _validate_benchmark_selection(
     case_id = getattr(args, "case_id", None)
     dataset = getattr(args, "dataset", None)
     op = getattr(args, "op", None)
+    workflow = getattr(args, "workflow", None)
 
     if prepared_input is not None and prepared_dir is not None:
         raise ValueError("--prepared-input and --prepared-dir are mutually exclusive")
+    if workflow is not None:
+        if not allow_batch:
+            raise ValueError("--workflow is only supported for bench")
+        if op:
+            raise ValueError("--op cannot be used with --workflow")
+        if prepared_input is not None:
+            raise ValueError("--prepared-input cannot be used with --workflow")
+        if prepared_dir is not None:
+            raise ValueError("--prepared-dir cannot be used with --workflow")
+        return
     if (prepared_input is not None or prepared_dir is not None) and getattr(args, "dataset_provided", False):
         raise ValueError("--dataset cannot be used with --prepared-input or --prepared-dir")
     if (prepared_input is not None or prepared_dir is not None) and case_id is not None:
@@ -340,12 +356,36 @@ def _build_canonical_run_name(
     )
 
 
+def _workflow_phase(workflow: str) -> str:
+    if workflow == "dsa_decode":
+        return "decode"
+    if workflow == "dsa_prefill":
+        return "prefill"
+    raise ValueError(f"unsupported DSA workflow: {workflow}")
+
+
 def _resolve_bench_run_name(
     args: argparse.Namespace,
     plans: list[PreparedInputPlan],
 ) -> str:
     if args.run_name:
         return args.run_name
+    workflow = getattr(args, "workflow", None)
+    if workflow is not None:
+        signatures = {(plan.dataset, plan.dtype) for plan in plans}
+        if len(signatures) != 1:
+            raise ValueError(
+                "automatic workflow run-name requires a single dataset/dtype combination"
+            )
+        dataset, dtype = next(iter(signatures))
+        return _build_canonical_run_name(
+            backend=args.backend,
+            implementation=getattr(args, "implementation", None),
+            implementation_version=getattr(args, "implementation_version", None),
+            op=workflow,
+            dataset=dataset,
+            dtype=dtype,
+        )
     signatures = {(plan.op, plan.dataset, plan.dtype) for plan in plans}
     if len(signatures) != 1:
         raise ValueError(
@@ -420,6 +460,56 @@ def _single_case_plan_from_args(args: argparse.Namespace) -> PreparedInputPlan:
         seed=prepared.seed,
         prepared=prepared,
     )
+
+
+def _plan_from_workflow_step(step) -> PreparedInputPlan:
+    return PreparedInputPlan(
+        op=step.op,
+        dataset=step.dataset,
+        case_id=step.case_id,
+        dtype=step.prepared.dtype,
+        seed=step.prepared.seed,
+        prepared=step.prepared,
+    )
+
+
+def _plans_from_dsa_workflow_selection(args: argparse.Namespace) -> list[PreparedInputPlan]:
+    phase = _workflow_phase(args.workflow)
+    if args.case_id is not None:
+        workflows = [
+            build_dsa_inference_workflow(
+                dataset=args.dataset,
+                case_id=args.case_id,
+                dtype=args.dtype,
+                seed=args.seed,
+            )
+        ]
+        actual_phase = workflows[0].phase
+        if actual_phase != phase:
+            raise ValueError(
+                "DSA workflow phase mismatch: "
+                f"requested {args.workflow}, case {args.case_id} is {actual_phase}"
+            )
+    else:
+        workflows = list(
+            list_dsa_inference_workflows(
+                args.dataset,
+                phase=phase,
+                dtype=args.dtype,
+                seed=args.seed,
+            )
+        )
+
+    if not workflows:
+        raise ValueError(
+            f"No runnable DSA {phase} workflows for dataset {args.dataset}"
+        )
+
+    return [
+        _plan_from_workflow_step(step)
+        for workflow in workflows
+        for step in workflow.steps
+    ]
 
 
 def _validate_unique_batch_artifact_stems(plans: list) -> None:
@@ -934,7 +1024,31 @@ def _run_single_bench(args: argparse.Namespace) -> None:
     )
 
 
+def _run_dsa_workflow_bench(args: argparse.Namespace) -> None:
+    plans = _plans_from_dsa_workflow_selection(args)
+    run_name = _resolve_bench_run_name(args, plans)
+    if args.endpoint is None:
+        _run_local_bench_with_plans(
+            args,
+            plans=plans,
+            run_name=run_name,
+        )
+        return
+
+    endpoint = read_remote_endpoint(args.endpoint)
+    _run_remote_bench_with_plans(
+        args,
+        plans=plans,
+        run_name=run_name,
+        endpoint=endpoint,
+        parent_run_id=args.run_id or run_name,
+    )
+
+
 def _run_bench_command(args: argparse.Namespace) -> None:
+    if getattr(args, "workflow", None) is not None:
+        _run_dsa_workflow_bench(args)
+        return
     if _is_batch_mode(args):
         if args.endpoint is None:
             _run_batch_local_bench(args)

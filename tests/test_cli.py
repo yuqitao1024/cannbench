@@ -213,6 +213,28 @@ def test_build_parser_accepts_external_dsa_implementations():
     assert _build_request_from_args(nvidia_args).implementation == "cuda_library"
 
 
+def test_build_parser_accepts_dsa_inference_workflow():
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "bench",
+            "--backend",
+            "ascend",
+            "--implementation",
+            "vllm_ascend",
+            "--workflow",
+            "dsa_decode",
+            "--dataset",
+            "smoke",
+            "--case-id",
+            "tiny_decode_top4",
+        ]
+    )
+
+    assert args.workflow == "dsa_decode"
+    assert args.op is None
+
+
 def test_build_canonical_run_name_uses_simt_version():
     run_name = _build_canonical_run_name(
         backend="ascend",
@@ -2120,6 +2142,87 @@ def test_main_rejects_prepared_input_and_prepared_dir_together(tmp_path, capsys)
     assert "--prepared-input and --prepared-dir are mutually exclusive" in captured.err
 
 
+def test_main_rejects_workflow_with_op(capsys):
+    with pytest.raises(SystemExit) as excinfo:
+        main(
+            [
+                "bench",
+                "--backend",
+                "ascend",
+                "--implementation",
+                "vllm_ascend",
+                "--workflow",
+                "dsa_decode",
+                "--op",
+                "softmax",
+                "--dataset",
+                "smoke",
+                "--case-id",
+                "tiny_decode_top4",
+            ]
+        )
+
+    captured = capsys.readouterr()
+    assert excinfo.value.code == 2
+    assert "--op cannot be used with --workflow" in captured.err
+
+
+def test_main_rejects_workflow_with_prepared_input(tmp_path, capsys):
+    prepared_path = tmp_path / "prepared.json"
+    write_prepared_operator_input(
+        prepared_path,
+        build_prepared_operator_input(
+            op="softmax",
+            dtype="float16",
+            dataset="smoke",
+            case_id="tiny_logits",
+            seed=0,
+        ),
+    )
+
+    with pytest.raises(SystemExit) as excinfo:
+        main(
+            [
+                "bench",
+                "--backend",
+                "ascend",
+                "--implementation",
+                "vllm_ascend",
+                "--workflow",
+                "dsa_decode",
+                "--prepared-input",
+                str(prepared_path),
+            ]
+        )
+
+    captured = capsys.readouterr()
+    assert excinfo.value.code == 2
+    assert "--prepared-input cannot be used with --workflow" in captured.err
+
+
+def test_main_rejects_workflow_case_with_wrong_phase(capsys):
+    with pytest.raises(SystemExit) as excinfo:
+        main(
+            [
+                "bench",
+                "--backend",
+                "ascend",
+                "--implementation",
+                "vllm_ascend",
+                "--workflow",
+                "dsa_prefill",
+                "--dataset",
+                "smoke",
+                "--case-id",
+                "tiny_decode_top4",
+            ]
+        )
+
+    captured = capsys.readouterr()
+    assert excinfo.value.code == 2
+    assert "DSA workflow phase mismatch" in captured.err
+
+
 def test_main_rejects_direct_selection_without_op(capsys):
     with pytest.raises(SystemExit) as excinfo:
         main(
@@ -2368,6 +2471,113 @@ def test_main_runs_batch_bench_from_selection_and_writes_summary(tmp_path, monke
     assert benchmark_records["records"][0]["metrics"]["latency_ms_avg"] == 0.1
     assert failures["failure_count"] == 0
     assert failures["records"] == []
+
+
+def test_main_runs_dsa_decode_workflow_as_two_local_cases(tmp_path, monkeypatch, capsys):
+    captured_requests: list[object] = []
+
+    class FakeBackend:
+        def run_operator(self, request):
+            captured_requests.append(request)
+            return result_for_request(request)
+
+        def profile_operator_device_time(self, request):
+            raise NotImplementedError
+
+    monkeypatch.setattr("cannbench.cli.get_backend", lambda name: FakeBackend())
+
+    exit_code = main(
+        [
+            "bench",
+            "--backend",
+            "ascend",
+            "--implementation",
+            "vllm_ascend",
+            "--workflow",
+            "dsa_decode",
+            "--dataset",
+            "smoke",
+            "--case-id",
+            "tiny_decode_top4",
+            "--seed",
+            "7",
+            "--output-dir",
+            str(tmp_path),
+        ]
+    )
+
+    run_name = "opbench-ascend-950pr-vllm-ascend-dsa_decode-smoke-float16"
+    layout = build_run_layout(tmp_path, run_name)
+    summary = json.loads((layout.meta_dir / "summary.json").read_text())
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert [request.op for request in captured_requests] == [
+        "lightning_indexer",
+        "sparse_attention",
+    ]
+    assert [request.case_id for request in captured_requests] == [
+        "tiny_decode_top4",
+        "tiny_decode_top4",
+    ]
+    assert all(request.implementation == "vllm_ascend" for request in captured_requests)
+    assert all(request.seed == 7 for request in captured_requests)
+    assert summary["metadata"]["run_name"] == run_name
+    assert summary["metadata"]["total_cases"] == 2
+    assert [row["op"] for row in summary["records"]] == [
+        "lightning_indexer",
+        "sparse_attention",
+    ]
+    assert (layout.prepared_dir / "lightning_indexer" / "smoke" / "tiny_decode_top4-float16-seed7.json").exists()
+    assert (layout.prepared_dir / "sparse_attention" / "smoke" / "tiny_decode_top4-float16-seed7.json").exists()
+    assert "[run] bench started run_name=" in captured.out
+    assert "mode=local-batch cases=2" in captured.out
+
+
+def test_main_runs_dsa_prefill_workflow_selection_as_batch(tmp_path, monkeypatch):
+    captured_requests: list[object] = []
+
+    class FakeBackend:
+        def run_operator(self, request):
+            captured_requests.append(request)
+            return result_for_request(request)
+
+        def profile_operator_device_time(self, request):
+            raise NotImplementedError
+
+    monkeypatch.setattr("cannbench.cli.get_backend", lambda name: FakeBackend())
+
+    exit_code = main(
+        [
+            "bench",
+            "--backend",
+            "ascend",
+            "--implementation",
+            "vllm_ascend",
+            "--workflow",
+            "dsa_prefill",
+            "--dataset",
+            "smoke",
+            "--output-dir",
+            str(tmp_path),
+        ]
+    )
+
+    run_name = "opbench-ascend-950pr-vllm-ascend-dsa_prefill-smoke-float16"
+    layout = build_run_layout(tmp_path, run_name)
+    summary = json.loads((layout.meta_dir / "summary.json").read_text())
+
+    assert exit_code == 0
+    assert [request.op for request in captured_requests] == [
+        "lightning_indexer",
+        "sparse_attention",
+    ]
+    assert [request.case_id for request in captured_requests] == [
+        "tiny_prefill_top8",
+        "tiny_prefill_top8",
+    ]
+    assert summary["metadata"]["run_name"] == run_name
+    assert summary["metadata"]["total_cases"] == 2
 
 
 def test_main_runs_batch_bench_once_per_prepared_case(tmp_path, monkeypatch):

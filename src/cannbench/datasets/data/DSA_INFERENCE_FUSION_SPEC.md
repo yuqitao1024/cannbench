@@ -303,9 +303,46 @@ case is considered runnable only when `lightning_indexer/<split>.json` and
 `sparse_attention/<split>.json` contain the same `case_id` and agree on batch,
 query tokens, context tokens, selected token count, and phase.
 
+The workflow is exposed through `bench`:
+
+```bash
+python -m cannbench bench \
+  --backend ascend \
+  --implementation vllm_ascend \
+  --workflow dsa_decode \
+  --dataset smoke \
+  --case-id tiny_decode_top4
+```
+
+```bash
+python -m cannbench bench \
+  --backend ascend \
+  --implementation vllm_ascend \
+  --workflow dsa_prefill \
+  --dataset smoke \
+  --case-id tiny_prefill_top8
+```
+
+Omitting `--case-id` runs every paired workflow case in the selected dataset and
+phase. The command expands each workflow into two prepared inputs and records
+both component results under one run directory. The automatic run name uses the
+workflow token, for example
+`opbench-ascend-950pr-vllm-ascend-dsa_decode-smoke-float16`.
+
 This flow is intentionally not an end-to-end fused `dsa_decode_step`. It is the
 bring-up path for comparing CUDA FlashMLA/DeepGEMM adapters, Ascend NPU
 adapters, and SIMT implementations against the same input contract.
+
+Current implementation status:
+
+- Ascend `--implementation vllm_ascend` can dispatch the workflow through the
+  vLLM Ascend `lightning_indexer` and sparse shared-KV attention adapter when
+  the target environment provides the corresponding `torch_npu` symbols.
+- Ascend `--implementation cann_ops_library` remains the generic CANN ops path;
+  it is not yet the real DSA sparse shared-KV fused path.
+- Nvidia `--implementation cuda_library` is intentionally gated until a
+  FlashMLA/DeepGEMM-compatible adapter is wired in, so CUDA H800 does not yet
+  provide a complete real-library DSA workflow benchmark.
 
 ## Backend Equivalence Rules
 
