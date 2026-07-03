@@ -5,6 +5,9 @@ operator directory owns its `smoke`, `realistic`, and `stress` splits. The
 sections below define the DeepSeek DSA benchmark coverage model so new operator
 cases can be added consistently.
 
+For the inference fusion operator plan, see
+[DSA_INFERENCE_FUSION_SPEC.md](DSA_INFERENCE_FUSION_SPEC.md).
+
 ## DSA Coverage Model
 
 DSA should be benchmarked from three views:
