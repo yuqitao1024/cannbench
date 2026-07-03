@@ -70,6 +70,7 @@ CODE_LIKE_PATTERNS = (
     re.compile(r"(^|\n)\s*(const|let|var)\s+[A-Za-z_][A-Za-z0-9_]*\s*=", re.MULTILINE),
     re.compile(r"(^|\n)\s*template\s*<", re.MULTILINE),
 )
+EXCLUDED_SIMT_VERSION_DIRS = {"__pycache__", "scripts", "test", "tests"}
 
 
 @dataclass(frozen=True)
@@ -138,7 +139,9 @@ def list_simt_operator_versions(
         sorted(
             path.name
             for path in target.iterdir()
-            if path.is_dir() and path.name != "__pycache__" and not path.name.startswith(".")
+            if path.is_dir()
+            and path.name not in EXCLUDED_SIMT_VERSION_DIRS
+            and not path.name.startswith(".")
         )
     )
 

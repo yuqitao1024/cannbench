@@ -99,6 +99,11 @@ def test_list_simt_operator_versions_returns_sorted_directory_names(tmp_path: Pa
     simt_root = datasets_root / "softmax" / "simt"
     (simt_root / "v2").mkdir(parents=True)
     (simt_root / "v1").mkdir(parents=True)
+    (simt_root / "test").mkdir(parents=True)
+    (simt_root / "tests").mkdir(parents=True)
+    (simt_root / "scripts").mkdir(parents=True)
+    (simt_root / "__pycache__").mkdir(parents=True)
+    (simt_root / ".tmp").mkdir(parents=True)
 
     versions = list_simt_operator_versions("softmax", datasets_root=datasets_root)
 
