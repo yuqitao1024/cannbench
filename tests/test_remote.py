@@ -279,6 +279,64 @@ def test_collect_remote_artifacts_passes_simt_op_version_to_internal_run(tmp_pat
     assert "--deploy-simt-op" in commands[2][2]
 
 
+def test_collect_remote_artifacts_passes_external_implementation_to_internal_run(tmp_path):
+    commands: list[list[str]] = []
+
+    def fake_runner(command):
+        commands.append(command)
+        if command[:2] == ["scp", "-r"] and command[-1].endswith("/profile"):
+            profile_dir = tmp_path / "results" / "profile"
+            profile_dir.mkdir(parents=True)
+            (profile_dir / "op_summary.csv").write_text(
+                "Op Name,Task Duration(us)\nlightning_indexer,1000\n"
+            )
+        if command[:2] == ["scp", "-r"] and command[-1].endswith("/perf"):
+            perf_dir = tmp_path / "results" / "perf"
+            perf_dir.mkdir(parents=True)
+            (perf_dir / "benchmark.json").write_text(
+                json.dumps(
+                    {
+                        "backend": "ascend",
+                        "device_name": "Ascend 910B",
+                    }
+                )
+                + "\n"
+            )
+
+    endpoint = RemoteEndpoint(
+        name="ascend-a2",
+        backend="ascend",
+        host="user@ascend-host",
+        workdir="/opt/cannbench",
+        python="python3",
+        env={},
+    )
+    prepared_input = tmp_path / "prepared.json"
+    write_prepared_operator_input(
+        prepared_input,
+        build_prepared_operator_input(
+            op="lightning_indexer",
+            dtype="float16",
+            dataset="smoke",
+            case_id="tiny_decode_top4",
+            seed=0,
+        ),
+    )
+
+    collect_remote_artifacts(
+        endpoint=endpoint,
+        prepared_input=prepared_input,
+        output_dir=tmp_path / "results",
+        run_id="dsa-run",
+        capture_output=False,
+        profile_device_time=True,
+        implementation="vllm_ascend",
+        runner=fake_runner,
+    )
+
+    assert "--implementation vllm_ascend" in commands[2][2]
+
+
 def test_collect_remote_artifacts_can_use_predeployed_simt_op_without_deploying(tmp_path):
     commands: list[list[str]] = []
 

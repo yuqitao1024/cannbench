@@ -88,7 +88,10 @@ def _non_negative_float(value: str) -> float:
 def _benchmark_args(parser: argparse.ArgumentParser) -> None:
     parser.set_defaults(dataset_provided=False)
     parser.add_argument("--backend", choices=["nvidia", "ascend"], required=True)
-    parser.add_argument("--implementation", choices=["cann_ops_library", "simt"])
+    parser.add_argument(
+        "--implementation",
+        choices=["cann_ops_library", "simt", "cuda_library", "vllm_ascend"],
+    )
     parser.add_argument("--implementation-version")
     parser.add_argument("--op", choices=list_operator_names())
     parser.add_argument("--dtype", default="float16")
@@ -158,6 +161,7 @@ def _build_request_from_prepared(
         case_id=prepared.case.case_id,
         warmup=args.warmup,
         iterations=args.iterations,
+        implementation=getattr(args, "implementation", None),
         seed=prepared.seed,
         use_simt_op=_resolve_use_simt_op_from_args(args),
         deploy_simt_op=_resolve_deploy_simt_op(
@@ -185,6 +189,7 @@ def _build_request_from_args(args: argparse.Namespace) -> OperatorBenchmarkReque
         case_id=args.case_id,
         warmup=args.warmup,
         iterations=args.iterations,
+        implementation=getattr(args, "implementation", None),
         seed=getattr(args, "seed", 0),
         use_simt_op=_resolve_use_simt_op_from_args(args),
         deploy_simt_op=_resolve_deploy_simt_op(
@@ -301,10 +306,14 @@ def _run_name_implementation_token(
     implementation_version: str | None = None,
 ) -> str:
     if backend == "nvidia":
+        if implementation == "cuda_library":
+            return "cuda-library"
         return "cuda-pytorch"
     if backend == "ascend":
         if implementation == "simt":
             return f"simt-{implementation_version or 'v1'}"
+        if implementation == "vllm_ascend":
+            return "vllm-ascend"
         return "cannops"
     raise ValueError(f"unsupported backend for run-name generation: {backend}")
 
@@ -791,6 +800,7 @@ def _run_remote_bench_with_plans(
                 iterations=args.iterations,
                 deploy_simt_op=deploy_for_case,
                 use_simt_op=should_use_simt,
+                implementation=args.implementation,
                 implementation_version=_resolve_implementation_version(
                     args.implementation,
                     args.implementation_version,
@@ -952,6 +962,7 @@ def _run_compare_command(args: argparse.Namespace) -> None:
         case_id=args.case_id,
         warmup=0,
         iterations=1,
+        implementation=None,
         seed=args.seed,
         deploy_simt_op=args.left_deploy_simt_op,
     )
@@ -963,6 +974,7 @@ def _run_compare_command(args: argparse.Namespace) -> None:
         case_id=args.case_id,
         warmup=0,
         iterations=1,
+        implementation=None,
         seed=args.seed,
         deploy_simt_op=args.right_deploy_simt_op,
     )

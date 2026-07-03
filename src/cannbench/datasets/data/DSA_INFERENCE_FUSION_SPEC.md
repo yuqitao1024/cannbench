@@ -76,6 +76,18 @@ entry points when available. If only vLLM Ascend private `_C_ascend` symbols are
 available in the installed stack, the adapter must record that provenance in the
 benchmark result.
 
+Current CannBench status:
+
+- `bench --backend ascend --implementation vllm_ascend --op lightning_indexer`
+  calls `torch_npu.npu_lightning_indexer` with vLLM Ascend-compatible TND/BSND
+  inputs.
+- `bench --backend ascend --implementation vllm_ascend --op sparse_attention`
+  intentionally fails until the paged-KV metadata/block-table adapter is added
+  for `npu_sparse_attn_sharedkv`.
+- `bench --backend nvidia --implementation cuda_library` intentionally fails
+  for DSA operators until the FlashMLA/DeepGEMM adapter accepts library-native
+  FP8 MLA manifests.
+
 ### SIMT
 
 SIMT remains the CannBench-owned implementation target. It should implement the

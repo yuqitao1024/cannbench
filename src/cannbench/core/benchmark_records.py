@@ -53,8 +53,12 @@ def _implementation_and_version(
     if backend == "ascend":
         if implementation == "simt":
             return "simt", implementation_version or "v1"
+        if implementation == "vllm_ascend":
+            return "vllm_ascend", implementation_version or "vllm-ascend"
         return "cann_ops_library", "cannops"
     if backend == "nvidia":
+        if implementation == "cuda_library":
+            return "cuda_library", implementation_version or "cuda-library"
         return "cuda-pytorch", "cuda-pytorch"
     return implementation or "unknown", implementation or "unknown"
 

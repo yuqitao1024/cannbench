@@ -19,6 +19,10 @@ from cannbench.core.profile import (
     read_device_profile,
 )
 from cannbench.core.result import OperatorBenchmarkResult, OperatorCase
+from cannbench.datasets.materialize import (
+    materialize_lightning_indexer_inputs,
+    materialized_values_to_buffer,
+)
 
 _ASCEND_SIMT_OP_MODULES = {
     ("softmax", "v1"): "aten_softmax",
@@ -44,6 +48,23 @@ class NvidiaBackend(TorchOperatorBackend):
 
     def _availability_error(self) -> str:
         return "CUDA is required for the nvidia backend"
+
+    def _operator_callable(self, torch, request, case, *, device, dtype):
+        if request.implementation == "cuda_library" and request.op in {
+            "lightning_indexer",
+            "sparse_attention",
+        }:
+            raise RuntimeError(
+                "cuda_library DSA benchmarking requires a FlashMLA/DeepGEMM "
+                "adapter before it can be benchmarked"
+            )
+        return super()._operator_callable(
+            torch,
+            request,
+            case,
+            device=device,
+            dtype=dtype,
+        )
 
     def profile_operator_device_time(
         self, request: OperatorBenchmarkRequest
@@ -198,6 +219,103 @@ class AscendBackend(TorchOperatorBackend):
 
     def _availability_error(self) -> str:
         return "Ascend NPU is required for the ascend backend"
+
+    def _operator_callable(self, torch, request, case, *, device, dtype):
+        if request.implementation == "vllm_ascend":
+            if request.op == "lightning_indexer":
+                return self._vllm_ascend_lightning_indexer_callable(
+                    torch,
+                    request,
+                    case,
+                    device=device,
+                    dtype=dtype,
+                )
+            if request.op == "sparse_attention":
+                raise RuntimeError(
+                    "vllm_ascend sparse_attention requires a paged-KV metadata "
+                    "adapter before it can be benchmarked"
+                )
+        return super()._operator_callable(
+            torch,
+            request,
+            case,
+            device=device,
+            dtype=dtype,
+        )
+
+    def _vllm_ascend_lightning_indexer_callable(
+        self,
+        torch,
+        request: OperatorBenchmarkRequest,
+        case,
+        *,
+        device,
+        dtype,
+    ):
+        try:
+            import torch_npu
+        except ModuleNotFoundError as exc:
+            raise RuntimeError("torch_npu is required for vllm_ascend lightning_indexer") from exc
+        if not hasattr(torch_npu, "npu_lightning_indexer"):
+            raise RuntimeError(
+                "vllm_ascend lightning_indexer requires torch_npu.npu_lightning_indexer"
+            )
+
+        payload = materialize_lightning_indexer_inputs(
+            case, dtype=request.dtype, seed=request.seed
+        )
+        query_shape = payload["query_shape"]
+        key_shape = payload["key_shape"]
+        batch, query_tokens, index_heads, index_dim = query_shape
+        context_tokens = key_shape[1]
+
+        query = self._tensor(
+            torch,
+            materialized_values_to_buffer(payload["query"]),
+            device=device,
+            dtype=dtype,
+        ).reshape(batch * query_tokens, index_heads, index_dim)
+        keys = self._tensor(
+            torch,
+            materialized_values_to_buffer(payload["keys"]),
+            device=device,
+            dtype=dtype,
+        ).reshape(batch, context_tokens, 1, index_dim)
+        weights = self._tensor(
+            torch,
+            materialized_values_to_buffer(payload["weights"]),
+            device=device,
+            dtype=dtype,
+        ).reshape(payload["weight_shape"])
+        actual_seq_lengths_query = self._tensor(
+            torch,
+            tuple((index + 1) * query_tokens for index in range(batch)),
+            device=device,
+            dtype=torch.int32,
+        )
+        actual_seq_lengths_key = self._tensor(
+            torch,
+            tuple((index + 1) * context_tokens for index in range(batch)),
+            device=device,
+            dtype=torch.int32,
+        )
+
+        def operator():
+            result = torch_npu.npu_lightning_indexer(
+                query=query,
+                key=keys,
+                weights=weights,
+                actual_seq_lengths_query=actual_seq_lengths_query,
+                actual_seq_lengths_key=actual_seq_lengths_key,
+                block_table=None,
+                layout_query="TND",
+                layout_key="BSND",
+                sparse_count=payload["top_k"],
+                sparse_mode=3,
+            )
+            return result[0] if isinstance(result, tuple) else result
+
+        return operator
 
     def _before_run_operator(self, request: OperatorBenchmarkRequest) -> None:
         if request.deploy_simt_op:

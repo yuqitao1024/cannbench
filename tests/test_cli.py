@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from cannbench.cli import build_parser, main
-from cannbench.cli import _build_canonical_run_name
+from cannbench.cli import _build_canonical_run_name, _build_request_from_args
 from cannbench.core.execution import RemoteExecutionArtifacts, RemoteProfileArtifacts
 from cannbench.core.layout import build_run_layout
 from cannbench.core.operator_output import CapturedOperatorOutput, OutputComparisonResult
@@ -176,6 +176,43 @@ def test_build_parser_exposes_bench_subcommand():
     assert args.op == "softmax"
 
 
+def test_build_parser_accepts_external_dsa_implementations():
+    parser = build_parser()
+    ascend_args = parser.parse_args(
+        [
+            "bench",
+            "--backend",
+            "ascend",
+            "--implementation",
+            "vllm_ascend",
+            "--op",
+            "lightning_indexer",
+            "--dataset",
+            "smoke",
+            "--case-id",
+            "tiny_decode_top4",
+        ]
+    )
+    nvidia_args = parser.parse_args(
+        [
+            "bench",
+            "--backend",
+            "nvidia",
+            "--implementation",
+            "cuda_library",
+            "--op",
+            "sparse_attention",
+            "--dataset",
+            "smoke",
+            "--case-id",
+            "tiny_decode_top4",
+        ]
+    )
+
+    assert _build_request_from_args(ascend_args).implementation == "vllm_ascend"
+    assert _build_request_from_args(nvidia_args).implementation == "cuda_library"
+
+
 def test_build_canonical_run_name_uses_simt_version():
     run_name = _build_canonical_run_name(
         backend="ascend",
@@ -187,6 +224,29 @@ def test_build_canonical_run_name_uses_simt_version():
     )
 
     assert run_name == "opbench-ascend-950pr-simt-v2-softmax-realistic-float16"
+
+
+def test_build_canonical_run_name_uses_external_implementation_tokens():
+    assert (
+        _build_canonical_run_name(
+            backend="ascend",
+            implementation="vllm_ascend",
+            op="lightning_indexer",
+            dataset="smoke",
+            dtype="float16",
+        )
+        == "opbench-ascend-950pr-vllm-ascend-lightning_indexer-smoke-float16"
+    )
+    assert (
+        _build_canonical_run_name(
+            backend="nvidia",
+            implementation="cuda_library",
+            op="sparse_attention",
+            dataset="smoke",
+            dtype="float16",
+        )
+        == "opbench-nvidia-h800-cuda-library-sparse_attention-smoke-float16"
+    )
 
 
 def test_build_parser_accepts_embedding_internal_run():
@@ -671,6 +731,7 @@ def test_main_remote_bench_uses_remote_executor(tmp_path, monkeypatch):
                 iterations,
                 deploy_simt_op,
                 use_simt_op=False,
+                implementation=None,
                 implementation_version=None,
             ):
             captured["prepared_input"] = prepared_input
@@ -682,6 +743,7 @@ def test_main_remote_bench_uses_remote_executor(tmp_path, monkeypatch):
             captured["iterations"] = iterations
             captured["deploy_simt_op"] = deploy_simt_op
             captured["use_simt_op"] = use_simt_op
+            captured["implementation"] = implementation
             captured["implementation_version"] = implementation_version
             return type(
                 "ExecResult",

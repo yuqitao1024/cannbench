@@ -5,6 +5,12 @@ from cannbench.core.output import SUPPORTED_OUTPUT_FORMATS
 from cannbench.core.result import SUPPORTED_SOFTMAX_DIMS
 
 SUPPORTED_DTYPES = {"float32", "float16", "bfloat16"}
+SUPPORTED_IMPLEMENTATIONS = {
+    "cann_ops_library",
+    "simt",
+    "cuda_library",
+    "vllm_ascend",
+}
 
 
 @dataclass(frozen=True)
@@ -16,6 +22,7 @@ class OperatorBenchmarkRequest:
     case_id: str
     warmup: int
     iterations: int
+    implementation: str | None = None
     seed: int = 0
     use_simt_op: bool = False
     deploy_simt_op: bool = False
@@ -34,6 +41,11 @@ class OperatorBenchmarkRequest:
     source_op: str = field(init=False)
 
     def __post_init__(self) -> None:
+        if self.implementation is not None:
+            implementation = self.implementation.strip()
+            if implementation not in SUPPORTED_IMPLEMENTATIONS:
+                raise ValueError(f"Unsupported implementation: {self.implementation}")
+            object.__setattr__(self, "implementation", implementation)
         if self.dtype not in SUPPORTED_DTYPES:
             raise ValueError(f"Unsupported dtype: {self.dtype}")
         if self.dataset not in {"smoke", "realistic", "stress"}:

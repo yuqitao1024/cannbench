@@ -80,6 +80,7 @@ class RemoteBenchExecutor(BenchCaseExecutor):
         iterations: int,
         deploy_simt_op: bool,
         use_simt_op: bool = False,
+        implementation: str | None = None,
         implementation_version: str | None = None,
     ) -> BenchCaseExecutionResult:
         with TemporaryDirectory(prefix=f"{artifact_stem}-", dir=layout_root) as temp_dir_name:
@@ -96,6 +97,7 @@ class RemoteBenchExecutor(BenchCaseExecutor):
                 iterations=iterations,
                 deploy_simt_op=deploy_simt_op,
                 use_simt_op=use_simt_op,
+                implementation=implementation,
                 implementation_version=implementation_version,
             )
             return BenchCaseExecutionResult(
