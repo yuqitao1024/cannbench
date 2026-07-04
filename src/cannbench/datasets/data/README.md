@@ -12,9 +12,9 @@ current execution path, not the primary benchmark grouping.
 
 The workflow manifests define phase-specific realistic splits:
 
-- `realistic_decode`: 16 decode workflow cases, expanded to 32 component runs
+- `realistic_decode`: 17 decode workflow cases, expanded to 34 component runs
   because each case runs `lightning_indexer` and `sparse_attention`.
-- `realistic_prefill`: 15 prefill workflow cases, expanded to 30 component
+- `realistic_prefill`: 16 prefill workflow cases, expanded to 32 component
   runs for the same two components.
 
 These splits are budgeted independently. A single scenario should fit the
@@ -202,7 +202,7 @@ Blocks to test:
 
 Current realistic workflow coverage:
 
-- `realistic_prefill` contains 15 paired cases from TritonBench/HF-style model
+- `realistic_prefill` contains 16 paired cases from TritonBench/HF-style model
   shapes, covering 50-token CLIP text, 77-token CLIP vision, 512-token BERT/GPT
   families, 1K BART/MBART/BigBird, 2K OPT, and 4K Longformer chunks.
 - Large DeepSeek MLA prefill chunks with 128 query heads and TopK 2048 should

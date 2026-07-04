@@ -416,8 +416,8 @@ separately:
 
 | split | phase | workflow cases | component runs | intent |
 | --- | --- | ---: | ---: | --- |
-| `realistic_decode` | decode | 16 | 32 | serving hot path coverage across context, TopK, and moderate continuous-batch scaling |
-| `realistic_prefill` | prefill | 15 | 30 | TritonBench/HF prefill shapes from short text/vision chunks through 4096-token long-context chunks |
+| `realistic_decode` | decode | 17 | 34 | serving hot path coverage across context, TopK, and moderate continuous-batch scaling |
+| `realistic_prefill` | prefill | 16 | 32 | TritonBench/HF prefill shapes from short text/vision chunks through 4096-token long-context chunks |
 
 This is sized for a per-scenario single-card H800 budget, not for one combined
 decode-plus-prefill run. The split is intentionally broad enough to expose
@@ -457,7 +457,7 @@ The first benchmark wave should prefer `seq_q = 1` for standard decode and add
 
 ### Prefill Priority Cases
 
-Use chunked prefill first. The `realistic_prefill` split currently contains 15
+Use chunked prefill first. The `realistic_prefill` split currently contains 16
 paired workflow cases derived from TritonBench/HF attention traces and serving
 chunk analogs, including CLIP text/vision, NanoGPT, DistilBERT, GPT-2, BERT
 large, RoBERTa, ALBERT, BART, MBART, OPT, BigBird, and Longformer shapes:
