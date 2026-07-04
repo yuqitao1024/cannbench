@@ -113,7 +113,7 @@ def test_ascend_softmax_v2_persistent_path_uses_multi_row_block_shape():
     assert "blockDim.y * blockIdx.x + threadIdx.y" in persistent_source
 
 
-def test_ascend_softmax_v3_persistent_path_uses_1024_threads_per_block():
+def test_ascend_softmax_v3_persistent_path_uses_shape_aware_threads_per_block():
     source = (
         SIMT_OP_V3_ROOT
         / "aten_softmax_v3"
@@ -122,11 +122,14 @@ def test_ascend_softmax_v3_persistent_path_uses_1024_threads_per_block():
         / "spatial_softmax.asc"
     ).read_text()
 
-    assert "constexpr int64_t kCudaPersistentThreadsPerBlock = 1024" in source
-    assert "return std::max<int64_t>(1, kCudaPersistentThreadsPerBlock / block_x);" in source
+    assert "inline int64_t row_softmax_persistent_threads_per_block(int64_t dim_size)" in source
+    assert "if (dim_size == 512) {\n    return 512;" in source
+    assert "if (dim_size == 1024) {\n    return 256;" in source
+    assert "return 1024;" in source
+    assert "row_softmax_persistent_block_y(block_x, dim_size)" in source
 
 
-def test_ascend_softmax_v3_persistent_kernel_uses_1024_launch_bounds():
+def test_ascend_softmax_v3_persistent_kernel_uses_shape_aware_launch_bounds():
     source = (
         SIMT_OP_V3_ROOT
         / "aten_softmax_v3"
@@ -134,13 +137,19 @@ def test_ascend_softmax_v3_persistent_kernel_uses_1024_launch_bounds():
         / "simt"
         / "spatial_softmax.asc"
     ).read_text()
-    persistent_signature = source[
-        source.index("__launch_bounds__(1024)")
+    vf_template = source[
+        source.rindex("int64_t kThreadsPerBlock", 0, source.index("row_softmax_persistent_forward_vf"))
+        : source.index("row_softmax_fast_forward_vf")
+    ]
+    kernel_template = source[
+        source.rindex("int64_t kThreadsPerBlock", 0, source.index("row_softmax_persistent_forward_kernel"))
         : source.index("row_softmax_fast_forward_kernel")
     ]
 
-    assert "__launch_bounds__(1024)" in source
-    assert "row_softmax_persistent_forward_kernel" in persistent_signature
+    assert "__launch_bounds__(kThreadsPerBlock)" in vf_template
+    assert "int64_t kThreadsPerBlock" in vf_template
+    assert "int64_t kThreadsPerBlock" in kernel_template
+    assert "row_softmax_persistent_forward_kernel" in kernel_template
 
 
 def test_ascend_softmax_v2_persistent_path_uses_cuda_style_register_warp_kernel():
@@ -227,7 +236,7 @@ def test_ascend_softmax_v3_uses_mixed_simd_simt_vf_launch_model():
         / "spatial_softmax.asc"
     ).read_text()
 
-    assert "__simt_vf__ __launch_bounds__(1024) inline void row_softmax_persistent_forward_vf" in source
+    assert "__simt_vf__ __launch_bounds__(kThreadsPerBlock) inline void row_softmax_persistent_forward_vf" in source
     assert "__simt_vf__ __launch_bounds__(1024) inline void row_softmax_fast_forward_vf" in source
     assert "__simt_vf__ inline void cunn_spatial_softmax_forward_vf" in source
     assert "__global__ __vector__ void row_softmax_persistent_forward_kernel" in source
@@ -261,7 +270,7 @@ def test_ascend_softmax_v3_rowwise_grid_cap_is_shape_aware():
     assert "constexpr int64_t kRowSoftmaxGridXLimit = 32768" in rowwise_source
     assert "row_softmax_persistent_grid_x(outer_size, block_y, warp_batch, dim_size)" in launch_source
     assert "row_softmax_grid_x(outer_size)" in launch_source
-    assert "dim_size <= 256" in rowwise_source
+    assert "dim_size <= 256 || dim_size == 512 || dim_size == 1024" in rowwise_source
 
 
 def test_ascend_softmax_v2_fast_path_has_fp16_half2_x4_vector_path():
