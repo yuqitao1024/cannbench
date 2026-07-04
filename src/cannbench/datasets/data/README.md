@@ -12,9 +12,9 @@ current execution path, not the primary benchmark grouping.
 
 The workflow manifests define phase-specific realistic splits:
 
-- `realistic_decode`: 17 decode workflow cases, expanded to 34 component runs
+- `realistic_decode`: 8 decode workflow cases, expanded to 16 component runs
   because each case runs `lightning_indexer` and `sparse_attention`.
-- `realistic_prefill`: 16 prefill workflow cases, expanded to 32 component
+- `realistic_prefill`: 8 prefill workflow cases, expanded to 16 component
   runs for the same two components.
 
 These splits are budgeted independently. A single scenario should fit the
@@ -180,13 +180,14 @@ Important decode cases:
 
 Current realistic workflow coverage:
 
-- `realistic_decode` covers 4K, 8K, 16K, 32K, and 64K contexts.
-- Batch coverage is deliberately capped at 16 for 8K/16K and 8 for 32K in the
-  default realistic split, because the current CannBench materializer still
-  builds host-side Python tuples. Batch 64/128 DeepSeek serving shapes belong in
-  `stress` or a future device-native input generation flow.
-- The split includes one TritonBench Llama4 decode case to keep a non-DeepSeek
-  real-model decode shape in the comparison set.
+- `realistic_decode` covers A5-compatible contexts 512, 2K, 4K, 8K, and 16K.
+- Batch coverage is capped at 1, 2, 4, and 8 in the default realistic split
+  because the current Ascend vLLM A5 fused path is the cross-backend comparison
+  contract. Larger DeepSeek serving shapes belong in `stress` or a future
+  device-native input generation flow.
+- TopK coverage is 512 and 1024. All cases use the same library-compatible A5
+  fused contract: `index_heads=64`, `index_dim=128`, `query_heads=64`,
+  `kv_heads=1`, and `head_dim=512`.
 
 ### Prefill Fusion
 
@@ -202,13 +203,12 @@ Blocks to test:
 
 Current realistic workflow coverage:
 
-- `realistic_prefill` contains 16 paired cases from TritonBench/HF-style model
-  shapes, covering 50-token CLIP text, 77-token CLIP vision, 512-token BERT/GPT
-  families, 1K BART/MBART/BigBird, 2K OPT, and 4K Longformer chunks.
-- Large DeepSeek MLA prefill chunks with 128 query heads and TopK 2048 should
-  stay out of the default realistic split until the reference path is
-  kernel-native or streaming. Otherwise the host-side or naive reference work
-  can dominate the measurement.
+- `realistic_prefill` contains 8 A5-compatible paired cases covering chunk
+  sizes 64, 128, 256, and 512, contexts 512 and 1024, batch 1 and 2, and TopK
+  512 and 1024.
+- Larger DeepSeek prefill chunks should stay out of the default realistic split
+  until the reference path is kernel-native or streaming. Otherwise host-side
+  tuple construction or naive reference work can dominate the measurement.
 
 ## Recommended Benchmark Order
 

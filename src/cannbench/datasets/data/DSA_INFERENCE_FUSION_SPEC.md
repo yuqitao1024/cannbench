@@ -347,7 +347,7 @@ python -m cannbench bench \
   --implementation cuda_library \
   --workflow dsa_decode \
   --dataset realistic_decode \
-  --case-id llama4_decode_32760_top2048
+  --case-id deepseek_a5_decode_b1_ctx4096_top512
 ```
 
 Omitting `--case-id` runs every paired workflow case in the selected dataset and
@@ -416,16 +416,17 @@ separately:
 
 | split | phase | workflow cases | component runs | intent |
 | --- | --- | ---: | ---: | --- |
-| `realistic_decode` | decode | 17 | 34 | serving hot path coverage across context, TopK, and moderate continuous-batch scaling |
-| `realistic_prefill` | prefill | 16 | 32 | TritonBench/HF prefill shapes from short text/vision chunks through 4096-token long-context chunks |
+| `realistic_decode` | decode | 8 | 16 | A5 fused-compatible serving buckets across context, TopK, and moderate batch scaling |
+| `realistic_prefill` | prefill | 8 | 16 | A5 fused-compatible chunked prefill buckets across query length, context, TopK, and batch |
 
 This is sized for a per-scenario single-card H800 budget, not for one combined
 decode-plus-prefill run. The split is intentionally broad enough to expose
-batch scaling, context scaling, TopK scaling, and TritonBench model diversity,
-while leaving very high-batch DeepSeek serving cases such as batch 64/128 for
-`stress` or a future lazy/materialized-on-device input path. With the current
-CannBench input materializer, those cases would be dominated by host-side tuple
-generation rather than by the fused CUDA/CANN/SIMT kernels being measured.
+batch scaling, context scaling, and TopK scaling while keeping every default
+case compatible with the Ascend vLLM A5 fused operator contract. Very
+high-batch DeepSeek serving cases such as batch 64/128 belong in `stress` or a
+future lazy/materialized-on-device input path. With the current CannBench input
+materializer, those cases would be dominated by host-side tuple generation
+rather than by the fused CUDA/CANN/SIMT kernels being measured.
 
 The workflow manifests are the frontend grouping contract:
 
@@ -436,20 +437,18 @@ The workflow manifests are the frontend grouping contract:
 
 ### Decode Priority Cases
 
-Start with production-like DeepSeek-V3.2 sparse decode shapes. The
-`realistic_decode` split currently covers batch 1, 2, 4, 8, and 16 at 8K/16K
-context, batch 1, 2, 4, and 8 at 32K context, a 64K long-context single-batch
-case, and one TritonBench Llama4 decode shape:
+Start with A5-compatible sparse decode serving buckets. The `realistic_decode`
+split currently covers context scaling at batch 1, moderate continuous-batch
+scaling at short/mid context, and the TopK 512/1024 transition:
 
-| case family | batch | seq_q | context | heads_q | heads_kv | dim_qk | dim_v | topk |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| short decode | 1, 2, 4, 8, 16 | 1 | 4096 or 8192 | 128 | 1 | 576 | 512 | 512 |
-| mid decode | 2, 4, 8, 16 | 1 | 16384 | 128 | 1 | 576 | 512 | 1024 |
-| long decode | 1, 2, 4, 8 | 1 | 32768 | 128 | 1 | 576 | 512 | 2048 |
-| long-context probe | 1 | 1 | 65536 | 128 | 1 | 576 | 512 | 2048 |
-| TritonBench decode | 16 | 1 | 32760 | 5 | 1 | 128 | 128 | 2048 |
+| case family | batch | seq_q | context | index_heads | index_dim | heads_q | heads_kv | head_dim | topk |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| context sweep | 1 | 1 | 512, 2048, 4096, 8192 | 64 | 128 | 64 | 1 | 512 | 512 |
+| TopK transition | 1 | 1 | 16384 | 64 | 128 | 64 | 1 | 512 | 1024 |
+| batch sweep | 2, 4 | 1 | 4096 | 64 | 128 | 64 | 1 | 512 | 512 |
+| batch stresslet | 8 | 1 | 2048 | 64 | 128 | 64 | 1 | 512 | 512 |
 
-Reserve batch 64, 74, and 128 DeepSeek 32K serving shapes for `stress` until the
+Reserve larger batch 16/64/128 and 32K-plus contexts for `stress` until the
 adapter path can generate or load inputs directly on device.
 
 The first benchmark wave should prefer `seq_q = 1` for standard decode and add
@@ -457,38 +456,36 @@ The first benchmark wave should prefer `seq_q = 1` for standard decode and add
 
 ### Prefill Priority Cases
 
-Use chunked prefill first. The `realistic_prefill` split currently contains 16
-paired workflow cases derived from TritonBench/HF attention traces and serving
-chunk analogs, including CLIP text/vision, NanoGPT, DistilBERT, GPT-2, BERT
-large, RoBERTa, ALBERT, BART, MBART, OPT, BigBird, and Longformer shapes:
+Use chunked prefill first. The `realistic_prefill` split currently contains 8
+paired workflow cases that keep the same A5 fused contract as decode while
+varying chunk length, context, batch, and TopK:
 
-| case family | seq_q | context | heads_q | heads_kv | dim_qk | dim_v | topk |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| short model chunks | 50, 64, 77, 128 | same as `seq_q` | 8-12 | 8-12 | 64 | 64 | 12-64 |
-| standard LM chunks | 512 | 512 | 12-64 | 12-64 | 64 | 64 | 128 |
-| 1K encoder/decoder chunks | 1024 | 1024 | 12-16 | 12-16 | 64 | 64 | 256 |
-| 2K causal chunk | 2048 | 2048 | 12 | 12 | 64 | 64 | 512 |
-| 4K long-context chunk | 4096 | 4096 | 12 | 12 | 64 | 64 | 512 |
+| case family | batch | seq_q | context | index_heads | index_dim | heads_q | heads_kv | head_dim | topk |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| chunk sweep | 1 | 64, 128, 256, 512 | 512 | 64 | 128 | 64 | 1 | 512 | 512 |
+| context sweep | 1 | 512 | 1024 | 64 | 128 | 64 | 1 | 512 | 512 |
+| TopK transition | 1 | 512 | 1024 | 64 | 128 | 64 | 1 | 512 | 1024 |
+| batch sweep | 2 | 128, 256 | 512 | 64 | 128 | 64 | 1 | 512 | 512 |
 
-Avoid using DeepSeek-style `seq_q = 4096`, 128-head, TopK-2048 prefill as a
-default correctness case unless the reference implementation is streaming or
-kernel-native. A naive reference that gathers selected K/V explicitly can
-require hundreds of GiB or more. Smaller TritonBench/HF 4K chunk shapes can stay
-in `realistic_prefill` as performance workflow cases, but should not be treated
-as a cheap PyTorch-reference correctness run.
+Avoid using large `seq_q = 4096` and TopK-2048 prefill as a default correctness
+case unless the reference implementation is streaming or kernel-native. A naive
+reference that gathers selected K/V explicitly can require hundreds of GiB or
+more.
 
 ## Single-Card H800 Feasibility
 
-Sparse decode production cases are single-card feasible. For example, with
-`batch = 128`, `seq_q = 2`, `context = 32768`, and FP8 KV cache at 656 bytes per
-token, the KV cache payload is roughly 2.6 GiB. Q, output, and indices are much
-smaller.
+The default A5-compatible decode cases are single-card feasible on H800. The
+largest default decode bucket is `batch = 1`, `seq_q = 1`, `context = 16384`,
+and `topk = 1024`; the largest default batch bucket is `batch = 8`,
+`seq_q = 1`, `context = 2048`, and `topk = 512`. Larger production decode
+probes such as batch 64/128 and 32K-plus context should be measured as `stress`
+after input generation is moved out of the Python tuple path.
 
-Sparse prefill kernel cases can also be feasible, but naive references are not.
-For `seq_q = 4096`, `topk = 2048`, `heads_q = 128`, `dim_qk = 576`, and
-`dim_v = 512`, explicitly materializing selected K and selected V would require
-more than 2 TiB. CannBench should therefore gate large prefill cases behind a
-kernel-native reference, a streaming reference, or performance-only mode.
+The default A5-compatible prefill cases are also single-card feasible because
+they cap chunk size at 512, context at 1024, and TopK at 1024. Much larger
+prefill chunks can be kernel-feasible, but naive references are not. CannBench
+should therefore gate large prefill cases behind a kernel-native reference, a
+streaming reference, or performance-only mode.
 
 ## Implementation Order
 

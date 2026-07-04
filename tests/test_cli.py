@@ -2661,7 +2661,7 @@ def test_main_defaults_dsa_decode_workflow_to_realistic_decode_dataset(
     summary = json.loads((layout.meta_dir / "summary.json").read_text())
 
     assert exit_code == 0
-    assert len(captured_requests) == 34
+    assert len(captured_requests) == 16
     assert {request.dataset for request in captured_requests} == {"realistic_decode"}
     assert [request.op for request in captured_requests[:4]] == [
         "lightning_indexer",
@@ -2670,7 +2670,7 @@ def test_main_defaults_dsa_decode_workflow_to_realistic_decode_dataset(
         "sparse_attention",
     ]
     assert summary["metadata"]["run_name"] == run_name
-    assert summary["metadata"]["total_cases"] == 34
+    assert summary["metadata"]["total_cases"] == 16
 
 
 def test_main_defaults_dsa_prefill_workflow_to_realistic_prefill_dataset(
@@ -2707,7 +2707,7 @@ def test_main_defaults_dsa_prefill_workflow_to_realistic_prefill_dataset(
     summary = json.loads((layout.meta_dir / "summary.json").read_text())
 
     assert exit_code == 0
-    assert len(captured_requests) == 32
+    assert len(captured_requests) == 16
     assert {request.dataset for request in captured_requests} == {"realistic_prefill"}
     assert [request.op for request in captured_requests[:4]] == [
         "lightning_indexer",
@@ -2716,7 +2716,7 @@ def test_main_defaults_dsa_prefill_workflow_to_realistic_prefill_dataset(
         "sparse_attention",
     ]
     assert summary["metadata"]["run_name"] == run_name
-    assert summary["metadata"]["total_cases"] == 32
+    assert summary["metadata"]["total_cases"] == 16
 
 
 def test_main_runs_batch_bench_once_per_prepared_case(tmp_path, monkeypatch):

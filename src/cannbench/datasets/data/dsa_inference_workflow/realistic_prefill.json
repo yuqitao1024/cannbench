@@ -2,97 +2,49 @@
   "name": "realistic_prefill",
   "cases": [
     {
+      "case_id": "deepseek_a5_prefill_b1_q64_ctx512_top512",
+      "workflow": "dsa_prefill",
+      "phase": "prefill",
+      "family": "prefill_workflow"
+    },
+    {
+      "case_id": "deepseek_a5_prefill_b1_q128_ctx512_top512",
+      "workflow": "dsa_prefill",
+      "phase": "prefill",
+      "family": "prefill_workflow"
+    },
+    {
+      "case_id": "deepseek_a5_prefill_b1_q256_ctx512_top512",
+      "workflow": "dsa_prefill",
+      "phase": "prefill",
+      "family": "prefill_workflow"
+    },
+    {
       "case_id": "deepseek_a5_prefill_b1_q512_ctx512_top512",
       "workflow": "dsa_prefill",
       "phase": "prefill",
       "family": "prefill_workflow"
     },
     {
-      "case_id": "clip_text_prefill_50_top12",
+      "case_id": "deepseek_a5_prefill_b1_q512_ctx1024_top512",
       "workflow": "dsa_prefill",
       "phase": "prefill",
       "family": "prefill_workflow"
     },
     {
-      "case_id": "nanogpt_prefill_64_top32",
+      "case_id": "deepseek_a5_prefill_b1_q512_ctx1024_top1024",
       "workflow": "dsa_prefill",
       "phase": "prefill",
       "family": "prefill_workflow"
     },
     {
-      "case_id": "clip_vision_prefill_77_top32",
+      "case_id": "deepseek_a5_prefill_b2_q128_ctx512_top512",
       "workflow": "dsa_prefill",
       "phase": "prefill",
       "family": "prefill_workflow"
     },
     {
-      "case_id": "distilbert_prefill_128_top64",
-      "workflow": "dsa_prefill",
-      "phase": "prefill",
-      "family": "prefill_workflow"
-    },
-    {
-      "case_id": "gpt2_prefill_512_top128",
-      "workflow": "dsa_prefill",
-      "phase": "prefill",
-      "family": "prefill_workflow"
-    },
-    {
-      "case_id": "bert_large_prefill_512_top128",
-      "workflow": "dsa_prefill",
-      "phase": "prefill",
-      "family": "prefill_workflow"
-    },
-    {
-      "case_id": "roberta_prefill_512_top128",
-      "workflow": "dsa_prefill",
-      "phase": "prefill",
-      "family": "prefill_workflow"
-    },
-    {
-      "case_id": "albert_prefill_512_top128",
-      "workflow": "dsa_prefill",
-      "phase": "prefill",
-      "family": "prefill_workflow"
-    },
-    {
-      "case_id": "gpt2_large_prefill_512_top128",
-      "workflow": "dsa_prefill",
-      "phase": "prefill",
-      "family": "prefill_workflow"
-    },
-    {
-      "case_id": "bart_prefill_1024_top256",
-      "workflow": "dsa_prefill",
-      "phase": "prefill",
-      "family": "prefill_workflow"
-    },
-    {
-      "case_id": "mbart_prefill_1024_top256",
-      "workflow": "dsa_prefill",
-      "phase": "prefill",
-      "family": "prefill_workflow"
-    },
-    {
-      "case_id": "opt_prefill_2048_top512",
-      "workflow": "dsa_prefill",
-      "phase": "prefill",
-      "family": "prefill_workflow"
-    },
-    {
-      "case_id": "hf_distilbert_prefill_512_top128",
-      "workflow": "dsa_prefill",
-      "phase": "prefill",
-      "family": "prefill_workflow"
-    },
-    {
-      "case_id": "bigbird_prefill_1024_top256",
-      "workflow": "dsa_prefill",
-      "phase": "prefill",
-      "family": "prefill_workflow"
-    },
-    {
-      "case_id": "longformer_prefill_4096_top512",
+      "case_id": "deepseek_a5_prefill_b2_q256_ctx512_top512",
       "workflow": "dsa_prefill",
       "phase": "prefill",
       "family": "prefill_workflow"

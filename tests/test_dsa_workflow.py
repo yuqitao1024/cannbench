@@ -84,23 +84,28 @@ def test_realistic_workflow_datasets_are_split_by_inference_phase():
     decode_case_ids = [workflow.case_id for workflow in decode_workflows]
     prefill_case_ids = [workflow.case_id for workflow in prefill_workflows]
 
-    assert len(decode_case_ids) == 17
-    assert len(prefill_case_ids) == 16
-    assert {
+    assert len(decode_case_ids) == 8
+    assert len(prefill_case_ids) == 8
+    assert decode_case_ids == [
         "deepseek_a5_decode_b1_ctx512_top512",
-        "deepseek_decode_b1_ctx4096_top512",
-        "deepseek_decode_b8_ctx32768_top2048",
-        "deepseek_decode_b1_ctx65536_top2048",
-        "llama4_decode_32760_top2048",
-    }.issubset(decode_case_ids)
-    assert {
+        "deepseek_a5_decode_b1_ctx2048_top512",
+        "deepseek_a5_decode_b1_ctx4096_top512",
+        "deepseek_a5_decode_b1_ctx8192_top512",
+        "deepseek_a5_decode_b1_ctx16384_top1024",
+        "deepseek_a5_decode_b2_ctx4096_top512",
+        "deepseek_a5_decode_b4_ctx4096_top512",
+        "deepseek_a5_decode_b8_ctx2048_top512",
+    ]
+    assert prefill_case_ids == [
+        "deepseek_a5_prefill_b1_q64_ctx512_top512",
+        "deepseek_a5_prefill_b1_q128_ctx512_top512",
+        "deepseek_a5_prefill_b1_q256_ctx512_top512",
         "deepseek_a5_prefill_b1_q512_ctx512_top512",
-        "clip_text_prefill_50_top12",
-        "distilbert_prefill_128_top64",
-        "gpt2_prefill_512_top128",
-        "opt_prefill_2048_top512",
-        "longformer_prefill_4096_top512",
-    }.issubset(prefill_case_ids)
+        "deepseek_a5_prefill_b1_q512_ctx1024_top512",
+        "deepseek_a5_prefill_b1_q512_ctx1024_top1024",
+        "deepseek_a5_prefill_b2_q128_ctx512_top512",
+        "deepseek_a5_prefill_b2_q256_ctx512_top512",
+    ]
     assert list_dsa_inference_workflows("realistic_decode", phase="prefill") == ()
     assert list_dsa_inference_workflows("realistic_prefill", phase="decode") == ()
 

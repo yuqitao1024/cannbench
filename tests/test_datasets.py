@@ -384,6 +384,21 @@ def test_lightning_indexer_realistic_splits_include_a5_cases():
     assert prefill_case.top_k == 512
 
 
+def test_lightning_indexer_realistic_splits_are_a5_fused_contract_compatible():
+    for split in ("realistic_decode", "realistic_prefill"):
+        dataset = get_lightning_indexer_dataset(split)
+
+        assert len(dataset.cases) == 8
+        assert all(case.source_kind == "library_compatible_realistic" for case in dataset.cases)
+        assert all(case.source_project == "vllm-ascend" for case in dataset.cases)
+        assert all(case.source_model == "DeepSeek-A5-compatible" for case in dataset.cases)
+        assert all(case.source_op == "npu_vllm_quant_lightning_indexer" for case in dataset.cases)
+        assert all(case.index_heads == 64 for case in dataset.cases)
+        assert all(case.index_dim == 128 for case in dataset.cases)
+        assert all(case.top_k in {512, 1024} for case in dataset.cases)
+        assert all(case.context_tokens % 128 == 0 for case in dataset.cases)
+
+
 def test_get_sparse_attention_case_preserves_realistic_source_metadata():
     case = get_sparse_attention_case("realistic", "nanogpt_prefill_64_top32")
 
@@ -482,6 +497,26 @@ def test_sparse_attention_realistic_splits_include_a5_cases():
     assert prefill_case.kv_heads == 1
     assert prefill_case.selected_tokens == 512
     assert prefill_case.head_dim == 512
+
+
+def test_sparse_attention_realistic_splits_are_a5_fused_contract_compatible():
+    for split, phase in (
+        ("realistic_decode", "decode"),
+        ("realistic_prefill", "prefill"),
+    ):
+        dataset = get_sparse_attention_dataset(split)
+
+        assert len(dataset.cases) == 8
+        assert all(case.source_kind == "library_compatible_realistic" for case in dataset.cases)
+        assert all(case.source_project == "vllm-ascend" for case in dataset.cases)
+        assert all(case.source_model == "DeepSeek-A5-compatible" for case in dataset.cases)
+        assert all(case.source_op == "npu_kv_quant_sparse_attn_sharedkv" for case in dataset.cases)
+        assert all(case.phase == phase for case in dataset.cases)
+        assert all(case.query_heads == 64 for case in dataset.cases)
+        assert all(case.kv_heads == 1 for case in dataset.cases)
+        assert all(case.head_dim == 512 for case in dataset.cases)
+        assert all(case.selected_tokens in {512, 1024} for case in dataset.cases)
+        assert all(case.context_tokens % 128 == 0 for case in dataset.cases)
 
 
 def test_materialized_sparse_attention_inputs_are_deterministic_for_same_seed():
