@@ -11,6 +11,13 @@ SUPPORTED_IMPLEMENTATIONS = {
     "cuda_library",
     "vllm_ascend",
 }
+SUPPORTED_DATASETS = {
+    "smoke",
+    "realistic",
+    "realistic_decode",
+    "realistic_prefill",
+    "stress",
+}
 
 
 @dataclass(frozen=True)
@@ -48,7 +55,7 @@ class OperatorBenchmarkRequest:
             object.__setattr__(self, "implementation", implementation)
         if self.dtype not in SUPPORTED_DTYPES:
             raise ValueError(f"Unsupported dtype: {self.dtype}")
-        if self.dataset not in {"smoke", "realistic", "stress"}:
+        if self.dataset not in SUPPORTED_DATASETS:
             raise ValueError(f"Unknown operator dataset: {self.dataset}")
         if not self.case_id.strip():
             raise ValueError("case_id must not be empty")

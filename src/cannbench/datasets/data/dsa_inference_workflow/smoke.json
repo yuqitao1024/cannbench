@@ -1,0 +1,17 @@
+{
+  "name": "smoke",
+  "cases": [
+    {
+      "case_id": "tiny_decode_top4",
+      "workflow": "dsa_decode",
+      "phase": "decode",
+      "family": "decode_workflow"
+    },
+    {
+      "case_id": "tiny_prefill_top8",
+      "workflow": "dsa_prefill",
+      "phase": "prefill",
+      "family": "prefill_workflow"
+    }
+  ]
+}

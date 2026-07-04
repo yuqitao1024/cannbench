@@ -5,16 +5,38 @@ operator directory owns its `smoke`, `realistic`, and `stress` splits. The
 sections below define the DeepSeek DSA benchmark coverage model so new operator
 cases can be added consistently.
 
+DSA inference workflow benchmarks use workflow-level manifests under
+`dsa_inference_workflow/` as the case-selection source. The matching
+`lightning_indexer/` and `sparse_attention/` cases are component inputs for the
+current execution path, not the primary benchmark grouping.
+
+The workflow manifests define phase-specific realistic splits:
+
+- `realistic_decode`: 16 decode workflow cases, expanded to 32 component runs
+  because each case runs `lightning_indexer` and `sparse_attention`.
+- `realistic_prefill`: 15 prefill workflow cases, expanded to 30 component
+  runs for the same two components.
+
+These splits are budgeted independently. A single scenario should fit the
+single-card H800 run window; decode and prefill are not expected to run together
+inside one two-hour budget.
+
+Frontend grouping should follow the same workflow split names. The default
+view for DSA should be `DSA Decode` / `DSA Prefill` workflow results, with
+component timings available only as drilldown data.
+
 For the inference fusion operator plan, see
 [DSA_INFERENCE_FUSION_SPEC.md](DSA_INFERENCE_FUSION_SPEC.md).
 
 ## DSA Coverage Model
 
-DSA should be benchmarked from three views:
+DSA can be benchmarked from three views, but the current priority is workflow
+performance:
 
-1. Single-operator mode for bottleneck diagnosis and backend bring-up.
-2. Training scenario mode for forward/backward coverage and saved-tensor costs.
-3. Inference fusion mode for the actual serving path, especially decode.
+1. Inference workflow mode for the actual serving path, especially decode.
+2. Single-operator mode for later bottleneck diagnosis and backend bring-up.
+3. Training scenario mode for later forward/backward coverage and saved-tensor
+   costs.
 
 The minimal DSA data path currently covered by CannBench has three primitive
 operators:
@@ -126,6 +148,16 @@ operators. Decode is the highest-priority fusion target because intermediate
 score, index, and gathered-KV writes are expensive relative to one generated
 token.
 
+For the current workflow-first plan, benchmark and report at scenario level:
+
+- `dsa_decode`: `dsa_index_select -> sparse_mla_decode`
+- `dsa_prefill`: `dsa_index_select -> sparse_mla_prefill`
+
+The two component records are still emitted because the existing adapter
+interfaces run those fused components separately. Result consumers should
+aggregate same-`case_id` component records into a workflow result before
+presenting DSA performance.
+
 ### Decode Fusion
 
 Blocks to test:
@@ -146,6 +178,16 @@ Important decode cases:
 - Batch sizes used by serving, including continuous batching.
 - KV cache layouts and quantized KV cache variants.
 
+Current realistic workflow coverage:
+
+- `realistic_decode` covers 4K, 8K, 16K, 32K, and 64K contexts.
+- Batch coverage is deliberately capped at 16 for 8K/16K and 8 for 32K in the
+  default realistic split, because the current CannBench materializer still
+  builds host-side Python tuples. Batch 64/128 DeepSeek serving shapes belong in
+  `stress` or a future device-native input generation flow.
+- The split includes one TritonBench Llama4 decode case to keep a non-DeepSeek
+  real-model decode shape in the comparison set.
+
 ### Prefill Fusion
 
 Prefill should be benchmarked separately from decode because it has a larger
@@ -157,6 +199,16 @@ Blocks to test:
 - Chunked sparse attention.
 - Full prefill fused sparse attention when supported.
 - Dense-equivalent fallback when sparsity is disabled or not profitable.
+
+Current realistic workflow coverage:
+
+- `realistic_prefill` contains 15 paired cases from TritonBench/HF-style model
+  shapes, covering 50-token CLIP text, 77-token CLIP vision, 512-token BERT/GPT
+  families, 1K BART/MBART/BigBird, 2K OPT, and 4K Longformer chunks.
+- Large DeepSeek MLA prefill chunks with 128 query heads and TopK 2048 should
+  stay out of the default realistic split until the reference path is
+  kernel-native or streaming. Otherwise the host-side or naive reference work
+  can dominate the measurement.
 
 ## Recommended Benchmark Order
 

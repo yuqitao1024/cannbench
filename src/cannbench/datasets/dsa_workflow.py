@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from functools import lru_cache
+from importlib.resources import files
 from typing import TYPE_CHECKING
 
 from cannbench.datasets.lightning_indexer import (
@@ -10,13 +13,39 @@ from cannbench.datasets.lightning_indexer import (
 from cannbench.datasets.sparse_attention import (
     SparseAttentionCase,
     get_sparse_attention_case,
-    get_sparse_attention_dataset,
 )
 
 DSA_PHASES = {"decode", "prefill"}
+DSA_WORKFLOWS = {"dsa_decode", "dsa_prefill"}
 
 if TYPE_CHECKING:
     from cannbench.core.prepared_input import PreparedOperatorInput
+
+
+@dataclass(frozen=True)
+class DsaInferenceWorkflowCase:
+    case_id: str
+    workflow: str
+    phase: str
+    family: str
+
+    def __post_init__(self) -> None:
+        if self.workflow not in DSA_WORKFLOWS:
+            raise ValueError(f"unsupported DSA workflow: {self.workflow}")
+        _validate_phase(self.phase)
+        if self.phase != _workflow_phase(self.workflow):
+            raise ValueError("DSA workflow case phase mismatch")
+        if not self.case_id.strip():
+            raise ValueError("case_id must not be empty")
+
+
+@dataclass(frozen=True)
+class DsaInferenceWorkflowDataset:
+    name: str
+    cases: tuple[DsaInferenceWorkflowCase, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "cases", tuple(self.cases))
 
 
 @dataclass(frozen=True)
@@ -32,6 +61,7 @@ class DsaWorkflowStep:
 
 @dataclass(frozen=True)
 class DsaInferenceWorkflow:
+    workflow: str
     phase: str
     dataset: str
     case_id: str
@@ -45,6 +75,7 @@ def build_dsa_inference_workflow(
     dtype: str,
     seed: int,
 ) -> DsaInferenceWorkflow:
+    workflow_case = get_dsa_inference_workflow_case(dataset, case_id)
     sparse_case = get_sparse_attention_case(dataset, case_id)
     try:
         indexer_case = get_lightning_indexer_case(dataset, case_id)
@@ -54,10 +85,16 @@ def build_dsa_inference_workflow(
         ) from exc
 
     _validate_component_pair(sparse_case, indexer_case)
+    if sparse_case.phase != workflow_case.phase:
+        raise ValueError(
+            "DSA workflow manifest phase mismatch: "
+            f"workflow is {workflow_case.phase}, sparse_attention is {sparse_case.phase}"
+        )
     sparse_contract = (
         "sparse_mla_decode" if sparse_case.phase == "decode" else "sparse_mla_prefill"
     )
     return DsaInferenceWorkflow(
+        workflow=workflow_case.workflow,
         phase=sparse_case.phase,
         dataset=dataset,
         case_id=case_id,
@@ -107,22 +144,41 @@ def list_dsa_inference_workflows(
         _validate_phase(phase)
 
     workflows: list[DsaInferenceWorkflow] = []
-    for sparse_case in get_sparse_attention_dataset(dataset).cases:
-        if phase is not None and sparse_case.phase != phase:
+    for workflow_case in get_dsa_inference_workflow_dataset(dataset).cases:
+        if phase is not None and workflow_case.phase != phase:
             continue
-        try:
-            workflows.append(
-                build_dsa_inference_workflow(
-                    dataset=dataset,
-                    case_id=sparse_case.case_id,
-                    dtype=dtype,
-                    seed=seed,
-                )
+        workflows.append(
+            build_dsa_inference_workflow(
+                dataset=dataset,
+                case_id=workflow_case.case_id,
+                dtype=dtype,
+                seed=seed,
             )
-        except ValueError as exc:
-            if not str(exc).startswith("No matching lightning_indexer case"):
-                raise
+        )
     return tuple(workflows)
+
+
+@lru_cache(maxsize=None)
+def get_dsa_inference_workflow_dataset(name: str) -> DsaInferenceWorkflowDataset:
+    resource = files("cannbench.datasets.data.dsa_inference_workflow").joinpath(
+        f"{name}.json"
+    )
+    if not resource.is_file():
+        raise ValueError(f"Unknown DSA inference workflow dataset: {name}")
+
+    payload = json.loads(resource.read_text())
+    cases = tuple(DsaInferenceWorkflowCase(**item) for item in payload["cases"])
+    return DsaInferenceWorkflowDataset(name=payload["name"], cases=cases)
+
+
+def get_dsa_inference_workflow_case(
+    dataset_name: str, case_id: str
+) -> DsaInferenceWorkflowCase:
+    dataset = get_dsa_inference_workflow_dataset(dataset_name)
+    for case in dataset.cases:
+        if case.case_id == case_id:
+            return case
+    raise ValueError(f"Unknown DSA inference workflow case: {case_id}")
 
 
 def _validate_component_pair(
@@ -156,6 +212,14 @@ def _phase_from_indexer_case(case: LightningIndexerCase) -> str:
 def _validate_phase(phase: str) -> None:
     if phase not in DSA_PHASES:
         raise ValueError("phase must be decode or prefill")
+
+
+def _workflow_phase(workflow: str) -> str:
+    if workflow == "dsa_decode":
+        return "decode"
+    if workflow == "dsa_prefill":
+        return "prefill"
+    raise ValueError(f"unsupported DSA workflow: {workflow}")
 
 
 def _build_prepared_operator_input(**kwargs) -> PreparedOperatorInput:

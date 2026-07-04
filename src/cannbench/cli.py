@@ -57,6 +57,14 @@ from cannbench.datasets.dsa_workflow import (
 )
 from cannbench.operators import list_operator_names
 
+DATASET_CHOICES = (
+    "smoke",
+    "realistic",
+    "realistic_decode",
+    "realistic_prefill",
+    "stress",
+)
+
 
 class _StoreWithPresence(argparse.Action):
     def __call__(self, parser, namespace, values, option_string=None):
@@ -102,7 +110,7 @@ def _benchmark_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--dtype", default="float16")
     parser.add_argument(
         "--dataset",
-        choices=["smoke", "realistic", "stress"],
+        choices=DATASET_CHOICES,
         default="realistic",
         action=_StoreWithPresence,
     )
@@ -223,7 +231,7 @@ def build_parser() -> argparse.ArgumentParser:
     prepare = subparsers.add_parser("prepare")
     prepare.add_argument("--op", choices=list_operator_names(), required=True)
     prepare.add_argument("--dtype", default="float16")
-    prepare.add_argument("--dataset", choices=["smoke", "realistic", "stress"], default="realistic")
+    prepare.add_argument("--dataset", choices=DATASET_CHOICES, default="realistic")
     prepare.add_argument("--case-id", required=True)
     prepare.add_argument("--seed", type=_non_negative_int, default=0)
     prepare.add_argument("--output", type=Path, required=True)
@@ -233,7 +241,7 @@ def build_parser() -> argparse.ArgumentParser:
     compare.add_argument("--right-backend", choices=["nvidia", "ascend"], required=True)
     compare.add_argument("--op", choices=list_operator_names(), required=True)
     compare.add_argument("--dtype", default="float16")
-    compare.add_argument("--dataset", choices=["smoke", "realistic", "stress"], default="realistic")
+    compare.add_argument("--dataset", choices=DATASET_CHOICES, default="realistic")
     compare.add_argument("--case-id", required=True)
     compare.add_argument("--seed", type=_non_negative_int, default=0)
     compare.add_argument("--left-deploy-simt-op", action="store_true", default=False)
@@ -364,6 +372,13 @@ def _workflow_phase(workflow: str) -> str:
     raise ValueError(f"unsupported DSA workflow: {workflow}")
 
 
+def _resolve_workflow_dataset(args: argparse.Namespace) -> str:
+    if getattr(args, "dataset_provided", False):
+        return args.dataset
+    phase = _workflow_phase(args.workflow)
+    return "realistic_decode" if phase == "decode" else "realistic_prefill"
+
+
 def _resolve_bench_run_name(
     args: argparse.Namespace,
     plans: list[PreparedInputPlan],
@@ -475,10 +490,11 @@ def _plan_from_workflow_step(step) -> PreparedInputPlan:
 
 def _plans_from_dsa_workflow_selection(args: argparse.Namespace) -> list[PreparedInputPlan]:
     phase = _workflow_phase(args.workflow)
+    dataset = _resolve_workflow_dataset(args)
     if args.case_id is not None:
         workflows = [
             build_dsa_inference_workflow(
-                dataset=args.dataset,
+                dataset=dataset,
                 case_id=args.case_id,
                 dtype=args.dtype,
                 seed=args.seed,
@@ -493,7 +509,7 @@ def _plans_from_dsa_workflow_selection(args: argparse.Namespace) -> list[Prepare
     else:
         workflows = list(
             list_dsa_inference_workflows(
-                args.dataset,
+                dataset,
                 phase=phase,
                 dtype=args.dtype,
                 seed=args.seed,
@@ -502,7 +518,7 @@ def _plans_from_dsa_workflow_selection(args: argparse.Namespace) -> list[Prepare
 
     if not workflows:
         raise ValueError(
-            f"No runnable DSA {phase} workflows for dataset {args.dataset}"
+            f"No runnable DSA {phase} workflows for dataset {dataset}"
         )
 
     return [

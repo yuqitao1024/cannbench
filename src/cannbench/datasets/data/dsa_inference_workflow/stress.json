@@ -1,0 +1,11 @@
+{
+  "name": "stress",
+  "cases": [
+    {
+      "case_id": "deepseek_128k_decode_top2048",
+      "workflow": "dsa_decode",
+      "phase": "decode",
+      "family": "decode_workflow"
+    }
+  ]
+}

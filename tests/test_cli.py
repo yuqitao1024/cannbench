@@ -235,6 +235,39 @@ def test_build_parser_accepts_dsa_inference_workflow():
     assert args.op is None
 
 
+def test_build_parser_accepts_dsa_phase_specific_datasets():
+    parser = build_parser()
+    decode_args = parser.parse_args(
+        [
+            "bench",
+            "--backend",
+            "nvidia",
+            "--implementation",
+            "cuda_library",
+            "--workflow",
+            "dsa_decode",
+            "--dataset",
+            "realistic_decode",
+        ]
+    )
+    prefill_args = parser.parse_args(
+        [
+            "bench",
+            "--backend",
+            "ascend",
+            "--implementation",
+            "vllm_ascend",
+            "--workflow",
+            "dsa_prefill",
+            "--dataset",
+            "realistic_prefill",
+        ]
+    )
+
+    assert decode_args.dataset == "realistic_decode"
+    assert prefill_args.dataset == "realistic_prefill"
+
+
 def test_build_canonical_run_name_uses_simt_version():
     run_name = _build_canonical_run_name(
         backend="ascend",
@@ -2578,6 +2611,98 @@ def test_main_runs_dsa_prefill_workflow_selection_as_batch(tmp_path, monkeypatch
     ]
     assert summary["metadata"]["run_name"] == run_name
     assert summary["metadata"]["total_cases"] == 2
+
+
+def test_main_defaults_dsa_decode_workflow_to_realistic_decode_dataset(
+    tmp_path, monkeypatch
+):
+    captured_requests: list[object] = []
+
+    class FakeBackend:
+        def run_operator(self, request):
+            captured_requests.append(request)
+            return result_for_request(request)
+
+        def profile_operator_device_time(self, request):
+            raise NotImplementedError
+
+    monkeypatch.setattr("cannbench.cli.get_backend", lambda name: FakeBackend())
+
+    exit_code = main(
+        [
+            "bench",
+            "--backend",
+            "nvidia",
+            "--implementation",
+            "cuda_library",
+            "--workflow",
+            "dsa_decode",
+            "--output-dir",
+            str(tmp_path),
+        ]
+    )
+
+    run_name = "opbench-nvidia-h800-cuda-library-dsa_decode-realistic_decode-float16"
+    layout = build_run_layout(tmp_path, run_name)
+    summary = json.loads((layout.meta_dir / "summary.json").read_text())
+
+    assert exit_code == 0
+    assert len(captured_requests) == 32
+    assert {request.dataset for request in captured_requests} == {"realistic_decode"}
+    assert [request.op for request in captured_requests[:4]] == [
+        "lightning_indexer",
+        "sparse_attention",
+        "lightning_indexer",
+        "sparse_attention",
+    ]
+    assert summary["metadata"]["run_name"] == run_name
+    assert summary["metadata"]["total_cases"] == 32
+
+
+def test_main_defaults_dsa_prefill_workflow_to_realistic_prefill_dataset(
+    tmp_path, monkeypatch
+):
+    captured_requests: list[object] = []
+
+    class FakeBackend:
+        def run_operator(self, request):
+            captured_requests.append(request)
+            return result_for_request(request)
+
+        def profile_operator_device_time(self, request):
+            raise NotImplementedError
+
+    monkeypatch.setattr("cannbench.cli.get_backend", lambda name: FakeBackend())
+
+    exit_code = main(
+        [
+            "bench",
+            "--backend",
+            "ascend",
+            "--implementation",
+            "vllm_ascend",
+            "--workflow",
+            "dsa_prefill",
+            "--output-dir",
+            str(tmp_path),
+        ]
+    )
+
+    run_name = "opbench-ascend-950pr-vllm-ascend-dsa_prefill-realistic_prefill-float16"
+    layout = build_run_layout(tmp_path, run_name)
+    summary = json.loads((layout.meta_dir / "summary.json").read_text())
+
+    assert exit_code == 0
+    assert len(captured_requests) == 30
+    assert {request.dataset for request in captured_requests} == {"realistic_prefill"}
+    assert [request.op for request in captured_requests[:4]] == [
+        "lightning_indexer",
+        "sparse_attention",
+        "lightning_indexer",
+        "sparse_attention",
+    ]
+    assert summary["metadata"]["run_name"] == run_name
+    assert summary["metadata"]["total_cases"] == 30
 
 
 def test_main_runs_batch_bench_once_per_prepared_case(tmp_path, monkeypatch):

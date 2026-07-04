@@ -285,9 +285,14 @@ end-to-end fusion boundary.
 
 ## Current Test Workflow
 
-The current CannBench inference workflow is a two-step component workflow. It
-keeps the selection and sparse attention boundaries explicit while allowing
-decode and prefill cases to be tested through one API:
+The current CannBench inference benchmark is workflow-first. Case selection is
+owned by `dsa_inference_workflow/<split>.json`; the matching
+`lightning_indexer/<split>.json` and `sparse_attention/<split>.json` entries
+are component inputs used by the current execution path.
+
+The current workflow is a two-step component execution. It keeps the selection
+and sparse attention boundaries explicit internally while allowing decode and
+prefill cases to be benchmarked through one workflow API:
 
 ```text
 build_dsa_inference_workflow(dataset, case_id, dtype, seed)
@@ -308,9 +313,10 @@ lightning_indexer -> sparse_attention
 ```
 
 Each workflow step owns a prepared CannBench single-operator input. A workflow
-case is considered runnable only when `lightning_indexer/<split>.json` and
-`sparse_attention/<split>.json` contain the same `case_id` and agree on batch,
-query tokens, context tokens, selected token count, and phase.
+case is selected only when it is present in the workflow manifest. It is
+considered runnable only when `lightning_indexer/<split>.json` and
+`sparse_attention/<split>.json` also contain the same `case_id` and agree on
+batch, query tokens, context tokens, selected token count, and phase.
 
 The workflow is exposed through `bench`:
 
@@ -340,19 +346,28 @@ python -m cannbench bench \
   --backend nvidia \
   --implementation cuda_library \
   --workflow dsa_decode \
-  --dataset realistic \
+  --dataset realistic_decode \
   --case-id llama4_decode_32760_top2048
 ```
 
 Omitting `--case-id` runs every paired workflow case in the selected dataset and
-phase. The command expands each workflow into two prepared inputs and records
-both component results under one run directory. The automatic run name uses the
-workflow token, for example
-`opbench-ascend-950pr-vllm-ascend-dsa_decode-smoke-float16`.
+phase. Omitting `--dataset` on a workflow command selects the phase-specific
+realistic split:
 
-This flow is intentionally not an end-to-end fused `dsa_decode_step`. It is the
-bring-up path for comparing CUDA FlashMLA/DeepGEMM adapters, Ascend NPU
-adapters, and SIMT implementations against the same input contract.
+- `--workflow dsa_decode` -> `realistic_decode`
+- `--workflow dsa_prefill` -> `realistic_prefill`
+
+The command expands each workflow into two prepared inputs and records both
+component results under one run directory. The automatic run name uses the
+workflow token, for example
+`opbench-ascend-950pr-vllm-ascend-dsa_decode-realistic_decode-float16`.
+
+This flow is intentionally reported as a workflow benchmark, not as two
+independent single-operator benchmark groups. The two component results should
+be aggregated by `case_id` for primary DSA performance reporting, with the
+component split kept as drilldown data. It is still not an end-to-end fused
+`dsa_decode_step`; that contract should wait until CUDA, Ascend, and SIMT expose
+the same boundary.
 
 Current implementation status:
 
@@ -393,35 +408,74 @@ Recommended initial comparison matrix:
 
 ## Shape Plan
 
+### Realistic Split Sizing
+
+The realistic DSA workflow datasets are split by inference phase because decode
+and prefill use different fused attention contracts and should be budgeted
+separately:
+
+| split | phase | workflow cases | component runs | intent |
+| --- | --- | ---: | ---: | --- |
+| `realistic_decode` | decode | 16 | 32 | serving hot path coverage across context, TopK, and moderate continuous-batch scaling |
+| `realistic_prefill` | prefill | 15 | 30 | TritonBench/HF prefill shapes from short text/vision chunks through 4096-token long-context chunks |
+
+This is sized for a per-scenario single-card H800 budget, not for one combined
+decode-plus-prefill run. The split is intentionally broad enough to expose
+batch scaling, context scaling, TopK scaling, and TritonBench model diversity,
+while leaving very high-batch DeepSeek serving cases such as batch 64/128 for
+`stress` or a future lazy/materialized-on-device input path. With the current
+CannBench input materializer, those cases would be dominated by host-side tuple
+generation rather than by the fused CUDA/CANN/SIMT kernels being measured.
+
+The workflow manifests are the frontend grouping contract:
+
+- `realistic_decode` is displayed as `DSA Decode`.
+- `realistic_prefill` is displayed as `DSA Prefill`.
+- Same-case component records are summed for workflow latency and retained for
+  drilldown.
+
 ### Decode Priority Cases
 
-Start with production-like DeepSeek-V3.2 sparse decode shapes:
+Start with production-like DeepSeek-V3.2 sparse decode shapes. The
+`realistic_decode` split currently covers batch 1, 2, 4, 8, and 16 at 8K/16K
+context, batch 1, 2, 4, and 8 at 32K context, a 64K long-context single-batch
+case, and one TritonBench Llama4 decode shape:
 
 | case family | batch | seq_q | context | heads_q | heads_kv | dim_qk | dim_v | topk |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| small serving | 2 | 1 or 2 | 32768 | 128 | 1 | 576 | 512 | 2048 |
-| common serving | 64 | 1 or 2 | 32768 | 128 | 1 | 576 | 512 | 2048 |
-| production batch | 74 | 1 or 2 | 32768 | 128 | 1 | 576 | 512 | 2048 |
-| high batch | 128 | 1 or 2 | 32768 | 128 | 1 | 576 | 512 | 2048 |
-| long context | 1 or 8 | 1 | 65536 or 131072 | 128 | 1 | 576 | 512 | 2048 |
+| short decode | 1, 2, 4, 8, 16 | 1 | 4096 or 8192 | 128 | 1 | 576 | 512 | 512 |
+| mid decode | 2, 4, 8, 16 | 1 | 16384 | 128 | 1 | 576 | 512 | 1024 |
+| long decode | 1, 2, 4, 8 | 1 | 32768 | 128 | 1 | 576 | 512 | 2048 |
+| long-context probe | 1 | 1 | 65536 | 128 | 1 | 576 | 512 | 2048 |
+| TritonBench decode | 16 | 1 | 32760 | 5 | 1 | 128 | 128 | 2048 |
+
+Reserve batch 64, 74, and 128 DeepSeek 32K serving shapes for `stress` until the
+adapter path can generate or load inputs directly on device.
 
 The first benchmark wave should prefer `seq_q = 1` for standard decode and add
 `seq_q = 2` for speculative or MTP-like decode.
 
 ### Prefill Priority Cases
 
-Use chunked prefill first:
+Use chunked prefill first. The `realistic_prefill` split currently contains 15
+paired workflow cases derived from TritonBench/HF attention traces and serving
+chunk analogs, including CLIP text/vision, NanoGPT, DistilBERT, GPT-2, BERT
+large, RoBERTa, ALBERT, BART, MBART, OPT, BigBird, and Longformer shapes:
 
 | case family | seq_q | context | heads_q | heads_kv | dim_qk | dim_v | topk |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| smoke chunk | 64 | 8192 | 128 | 1 | 576 | 512 | 2048 |
-| practical chunk | 128 | 32768 | 128 | 1 | 576 | 512 | 2048 |
-| large chunk | 256 | 65536 | 128 | 1 | 576 | 512 | 2048 |
-| stress chunk | 512 | 131072 | 128 | 1 | 576 | 512 | 2048 |
+| short model chunks | 50, 64, 77, 128 | same as `seq_q` | 8-12 | 8-12 | 64 | 64 | 12-64 |
+| standard LM chunks | 512 | 512 | 12-64 | 12-64 | 64 | 64 | 128 |
+| 1K encoder/decoder chunks | 1024 | 1024 | 12-16 | 12-16 | 64 | 64 | 256 |
+| 2K causal chunk | 2048 | 2048 | 12 | 12 | 64 | 64 | 512 |
+| 4K long-context chunk | 4096 | 4096 | 12 | 12 | 64 | 64 | 512 |
 
-Avoid using `seq_q = 4096` as a default correctness case unless the reference
-implementation is streaming or kernel-native. A naive reference that gathers
-selected K/V explicitly can require hundreds of GiB or more.
+Avoid using DeepSeek-style `seq_q = 4096`, 128-head, TopK-2048 prefill as a
+default correctness case unless the reference implementation is streaming or
+kernel-native. A naive reference that gathers selected K/V explicitly can
+require hundreds of GiB or more. Smaller TritonBench/HF 4K chunk shapes can stay
+in `realistic_prefill` as performance workflow cases, but should not be treated
+as a cheap PyTorch-reference correctness run.
 
 ## Single-Card H800 Feasibility
 
@@ -439,15 +493,18 @@ kernel-native reference, a streaming reference, or performance-only mode.
 ## Implementation Order
 
 1. Add `sparse_mla_decode` as the first fused inference operator.
-2. Add DeepSeek-V3.2 decode shape manifests with `smoke`, `realistic`, and
-   `stress` splits.
-3. Add a CUDA H800 adapter that calls FlashMLA for `sparse_mla_decode`.
-4. Add an Ascend adapter that calls vLLM Ascend or SGLang NPU sparse attention
+2. Add inference workflow shape manifests with `smoke`, `realistic_decode`,
+   `realistic_prefill`, and `stress` splits.
+3. Report DSA performance at workflow level first, aggregating the existing
+   component records by workflow case.
+4. Add a CUDA H800 adapter that calls FlashMLA for `sparse_mla_decode`.
+5. Add an Ascend adapter that calls vLLM Ascend or SGLang NPU sparse attention
    ops for the same `sparse_mla_decode` contract.
-5. Implement the SIMT op against the same `sparse_mla_decode` contract.
-6. Add `dsa_index_select` once indexer logits and TopK semantics are fixed.
-7. Add `sparse_mla_prefill` with chunked shapes and memory-safe references.
-8. Consider orchestration-level `dsa_decode_step` only after component
+6. Implement the SIMT op against the same `sparse_mla_decode` contract.
+7. Add single-operator reporting only when workflow drilldown shows that
+   component-level diagnosis is needed.
+8. Add `sparse_mla_prefill` with chunked shapes and memory-safe references.
+9. Consider orchestration-level `dsa_decode_step` only after component
    comparisons are stable.
 
 ## Acceptance Criteria

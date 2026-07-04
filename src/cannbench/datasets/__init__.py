@@ -85,8 +85,12 @@ from cannbench.datasets.softmax import (
 from cannbench.datasets.loader import get_operator_case, get_operator_dataset
 from cannbench.datasets.dsa_workflow import (
     DsaInferenceWorkflow,
+    DsaInferenceWorkflowCase,
+    DsaInferenceWorkflowDataset,
     DsaWorkflowStep,
     build_dsa_inference_workflow,
+    get_dsa_inference_workflow_case,
+    get_dsa_inference_workflow_dataset,
     list_dsa_inference_workflows,
 )
 from cannbench.datasets.materialize import (
@@ -135,6 +139,8 @@ __all__ = [
     "SparseAttentionCase",
     "SparseAttentionDataset",
     "DsaInferenceWorkflow",
+    "DsaInferenceWorkflowCase",
+    "DsaInferenceWorkflowDataset",
     "DsaWorkflowStep",
     "SoftmaxCase",
     "SoftmaxDataset",
@@ -165,6 +171,8 @@ __all__ = [
     "get_sparse_attention_case",
     "get_sparse_attention_dataset",
     "build_dsa_inference_workflow",
+    "get_dsa_inference_workflow_case",
+    "get_dsa_inference_workflow_dataset",
     "list_dsa_inference_workflows",
     "get_embedding_case",
     "get_embedding_dataset",
