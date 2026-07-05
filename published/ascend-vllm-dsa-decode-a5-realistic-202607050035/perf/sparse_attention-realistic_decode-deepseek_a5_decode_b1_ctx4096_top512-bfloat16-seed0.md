@@ -1,0 +1,14 @@
+# CannBench Operator Benchmark
+
+| field | value |
+| --- | --- |
+| backend | ascend |
+| device_name | Ascend950PR_9589 |
+| op | sparse_attention |
+| dtype | bfloat16 |
+| case_id | deepseek_a5_decode_b1_ctx4096_top512 |
+| family | decode_sparse_attention |
+| payload | batch=1, causal=True, context_tokens=4096, head_dim=512, kv_heads=1, phase=decode, query_heads=64, query_tokens=1, selected_tokens=512 |
+| source_model | DeepSeek-A5-compatible |
+| warmup | 2 |
+| iterations | 2 |

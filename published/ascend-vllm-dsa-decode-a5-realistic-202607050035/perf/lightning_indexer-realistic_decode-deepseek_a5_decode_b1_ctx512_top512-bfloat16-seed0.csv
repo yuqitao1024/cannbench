@@ -1,0 +1,2 @@
+backend,device_name,op,dtype,case_id,family,payload,source_model,warmup,iterations
+ascend,Ascend950PR_9589,lightning_indexer,bfloat16,deepseek_a5_decode_b1_ctx512_top512,decode_indexing,"batch=1, context_tokens=512, index_dim=128, index_heads=64, query_tokens=1, top_k=512",DeepSeek-A5-compatible,2,2

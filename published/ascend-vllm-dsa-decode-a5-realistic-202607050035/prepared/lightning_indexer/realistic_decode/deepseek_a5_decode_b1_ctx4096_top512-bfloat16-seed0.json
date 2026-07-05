@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "op": "lightning_indexer",
+  "dtype": "bfloat16",
+  "dataset": "realistic_decode",
+  "seed": 0,
+  "case": {
+    "case_id": "deepseek_a5_decode_b1_ctx4096_top512",
+    "family": "decode_indexing",
+    "source_kind": "library_compatible_realistic",
+    "source_project": "vllm-ascend",
+    "source_model": "DeepSeek-A5-compatible",
+    "source_file": "serving_buckets/deepseek_a5_dsa.json",
+    "source_op": "npu_vllm_quant_lightning_indexer",
+    "payload": {
+      "batch": 1,
+      "query_tokens": 1,
+      "context_tokens": 4096,
+      "index_heads": 64,
+      "index_dim": 128,
+      "top_k": 512
+    }
+  }
+}

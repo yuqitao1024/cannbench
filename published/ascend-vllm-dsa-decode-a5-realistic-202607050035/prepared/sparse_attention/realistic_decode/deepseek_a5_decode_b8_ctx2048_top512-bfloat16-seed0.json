@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "op": "sparse_attention",
+  "dtype": "bfloat16",
+  "dataset": "realistic_decode",
+  "seed": 0,
+  "case": {
+    "case_id": "deepseek_a5_decode_b8_ctx2048_top512",
+    "family": "decode_sparse_attention",
+    "source_kind": "library_compatible_realistic",
+    "source_project": "vllm-ascend",
+    "source_model": "DeepSeek-A5-compatible",
+    "source_file": "serving_buckets/deepseek_a5_dsa.json",
+    "source_op": "npu_kv_quant_sparse_attn_sharedkv",
+    "payload": {
+      "batch": 8,
+      "query_heads": 64,
+      "kv_heads": 1,
+      "query_tokens": 1,
+      "context_tokens": 2048,
+      "selected_tokens": 512,
+      "head_dim": 512,
+      "causal": true,
+      "phase": "decode"
+    }
+  }
+}

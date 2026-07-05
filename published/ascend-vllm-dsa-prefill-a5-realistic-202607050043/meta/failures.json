@@ -1,0 +1,12 @@
+{
+  "failure_count": 0,
+  "records": [],
+  "metadata": {
+    "backend": "ascend",
+    "run_name": "ascend-vllm-dsa-prefill-a5-realistic-202607050043",
+    "implementation": "vllm_ascend",
+    "total_cases": 16,
+    "success_count": 16,
+    "failure_count": 0
+  }
+}

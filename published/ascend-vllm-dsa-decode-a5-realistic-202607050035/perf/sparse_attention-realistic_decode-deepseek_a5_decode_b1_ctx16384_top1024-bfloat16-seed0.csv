@@ -1,0 +1,2 @@
+backend,device_name,op,dtype,case_id,family,payload,source_model,warmup,iterations
+ascend,Ascend950PR_9589,sparse_attention,bfloat16,deepseek_a5_decode_b1_ctx16384_top1024,decode_sparse_attention,"batch=1, causal=True, context_tokens=16384, head_dim=512, kv_heads=1, phase=decode, query_heads=64, query_tokens=1, selected_tokens=1024",DeepSeek-A5-compatible,2,2

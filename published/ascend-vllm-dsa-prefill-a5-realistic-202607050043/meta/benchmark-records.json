@@ -1,0 +1,572 @@
+{
+  "records": [
+    {
+      "schema_version": 1,
+      "run_id": "ascend-vllm-dsa-prefill-a5-realistic-202607050043/lightning_indexer-realistic_prefill-deepseek_a5_prefill_b1_q64_ctx512_top512-bfloat16-seed0",
+      "operator": "lightning_indexer",
+      "dataset": "realistic_prefill",
+      "case_id": "deepseek_a5_prefill_b1_q64_ctx512_top512",
+      "family": "prefill_indexing",
+      "shape": [
+        1,
+        64,
+        64,
+        128
+      ],
+      "dtype": "bfloat16",
+      "backend": "ascend",
+      "device_class": "950PR",
+      "implementation": "vllm_ascend",
+      "implementation_version": "vllm-ascend",
+      "source_kind": "library_compatible_realistic",
+      "source_project": "vllm-ascend",
+      "source_model": "DeepSeek-A5-compatible",
+      "source_file": "serving_buckets/deepseek_a5_dsa.json",
+      "source_op": "npu_vllm_quant_lightning_indexer",
+      "metrics": {
+        "latency_ms_avg": 0.00628,
+        "latency_ms_p50": 0.00628,
+        "latency_ms_p95": 0.00628,
+        "sample_count": 1
+      },
+      "accuracy": {
+        "passed": true,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0
+      },
+      "diff_ref": null
+    },
+    {
+      "schema_version": 1,
+      "run_id": "ascend-vllm-dsa-prefill-a5-realistic-202607050043/sparse_attention-realistic_prefill-deepseek_a5_prefill_b1_q64_ctx512_top512-bfloat16-seed0",
+      "operator": "sparse_attention",
+      "dataset": "realistic_prefill",
+      "case_id": "deepseek_a5_prefill_b1_q64_ctx512_top512",
+      "family": "prefill_sparse_attention",
+      "shape": [
+        64,
+        64,
+        512
+      ],
+      "dtype": "bfloat16",
+      "backend": "ascend",
+      "device_class": "950PR",
+      "implementation": "vllm_ascend",
+      "implementation_version": "vllm-ascend",
+      "source_kind": "library_compatible_realistic",
+      "source_project": "vllm-ascend",
+      "source_model": "DeepSeek-A5-compatible",
+      "source_file": "serving_buckets/deepseek_a5_dsa.json",
+      "source_op": "npu_kv_quant_sparse_attn_sharedkv",
+      "metrics": {
+        "latency_ms_avg": 0.024072001,
+        "latency_ms_p50": 0.024072001,
+        "latency_ms_p95": 0.024072001,
+        "sample_count": 1
+      },
+      "accuracy": {
+        "passed": true,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0
+      },
+      "diff_ref": null
+    },
+    {
+      "schema_version": 1,
+      "run_id": "ascend-vllm-dsa-prefill-a5-realistic-202607050043/lightning_indexer-realistic_prefill-deepseek_a5_prefill_b1_q128_ctx512_top512-bfloat16-seed0",
+      "operator": "lightning_indexer",
+      "dataset": "realistic_prefill",
+      "case_id": "deepseek_a5_prefill_b1_q128_ctx512_top512",
+      "family": "prefill_indexing",
+      "shape": [
+        1,
+        128,
+        64,
+        128
+      ],
+      "dtype": "bfloat16",
+      "backend": "ascend",
+      "device_class": "950PR",
+      "implementation": "vllm_ascend",
+      "implementation_version": "vllm-ascend",
+      "source_kind": "library_compatible_realistic",
+      "source_project": "vllm-ascend",
+      "source_model": "DeepSeek-A5-compatible",
+      "source_file": "serving_buckets/deepseek_a5_dsa.json",
+      "source_op": "npu_vllm_quant_lightning_indexer",
+      "metrics": {
+        "latency_ms_avg": 0.006997,
+        "latency_ms_p50": 0.006997,
+        "latency_ms_p95": 0.006997,
+        "sample_count": 1
+      },
+      "accuracy": {
+        "passed": true,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0
+      },
+      "diff_ref": null
+    },
+    {
+      "schema_version": 1,
+      "run_id": "ascend-vllm-dsa-prefill-a5-realistic-202607050043/sparse_attention-realistic_prefill-deepseek_a5_prefill_b1_q128_ctx512_top512-bfloat16-seed0",
+      "operator": "sparse_attention",
+      "dataset": "realistic_prefill",
+      "case_id": "deepseek_a5_prefill_b1_q128_ctx512_top512",
+      "family": "prefill_sparse_attention",
+      "shape": [
+        128,
+        64,
+        512
+      ],
+      "dtype": "bfloat16",
+      "backend": "ascend",
+      "device_class": "950PR",
+      "implementation": "vllm_ascend",
+      "implementation_version": "vllm-ascend",
+      "source_kind": "library_compatible_realistic",
+      "source_project": "vllm-ascend",
+      "source_model": "DeepSeek-A5-compatible",
+      "source_file": "serving_buckets/deepseek_a5_dsa.json",
+      "source_op": "npu_kv_quant_sparse_attn_sharedkv",
+      "metrics": {
+        "latency_ms_avg": 0.034917000000000004,
+        "latency_ms_p50": 0.034917000000000004,
+        "latency_ms_p95": 0.034917000000000004,
+        "sample_count": 1
+      },
+      "accuracy": {
+        "passed": true,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0
+      },
+      "diff_ref": null
+    },
+    {
+      "schema_version": 1,
+      "run_id": "ascend-vllm-dsa-prefill-a5-realistic-202607050043/lightning_indexer-realistic_prefill-deepseek_a5_prefill_b1_q256_ctx512_top512-bfloat16-seed0",
+      "operator": "lightning_indexer",
+      "dataset": "realistic_prefill",
+      "case_id": "deepseek_a5_prefill_b1_q256_ctx512_top512",
+      "family": "prefill_indexing",
+      "shape": [
+        1,
+        256,
+        64,
+        128
+      ],
+      "dtype": "bfloat16",
+      "backend": "ascend",
+      "device_class": "950PR",
+      "implementation": "vllm_ascend",
+      "implementation_version": "vllm-ascend",
+      "source_kind": "library_compatible_realistic",
+      "source_project": "vllm-ascend",
+      "source_model": "DeepSeek-A5-compatible",
+      "source_file": "serving_buckets/deepseek_a5_dsa.json",
+      "source_op": "npu_vllm_quant_lightning_indexer",
+      "metrics": {
+        "latency_ms_avg": 0.008223000000000001,
+        "latency_ms_p50": 0.008223000000000001,
+        "latency_ms_p95": 0.008223000000000001,
+        "sample_count": 1
+      },
+      "accuracy": {
+        "passed": true,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0
+      },
+      "diff_ref": null
+    },
+    {
+      "schema_version": 1,
+      "run_id": "ascend-vllm-dsa-prefill-a5-realistic-202607050043/sparse_attention-realistic_prefill-deepseek_a5_prefill_b1_q256_ctx512_top512-bfloat16-seed0",
+      "operator": "sparse_attention",
+      "dataset": "realistic_prefill",
+      "case_id": "deepseek_a5_prefill_b1_q256_ctx512_top512",
+      "family": "prefill_sparse_attention",
+      "shape": [
+        256,
+        64,
+        512
+      ],
+      "dtype": "bfloat16",
+      "backend": "ascend",
+      "device_class": "950PR",
+      "implementation": "vllm_ascend",
+      "implementation_version": "vllm-ascend",
+      "source_kind": "library_compatible_realistic",
+      "source_project": "vllm-ascend",
+      "source_model": "DeepSeek-A5-compatible",
+      "source_file": "serving_buckets/deepseek_a5_dsa.json",
+      "source_op": "npu_kv_quant_sparse_attn_sharedkv",
+      "metrics": {
+        "latency_ms_avg": 0.059624001,
+        "latency_ms_p50": 0.059624001,
+        "latency_ms_p95": 0.059624001,
+        "sample_count": 1
+      },
+      "accuracy": {
+        "passed": true,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0
+      },
+      "diff_ref": null
+    },
+    {
+      "schema_version": 1,
+      "run_id": "ascend-vllm-dsa-prefill-a5-realistic-202607050043/lightning_indexer-realistic_prefill-deepseek_a5_prefill_b1_q512_ctx512_top512-bfloat16-seed0",
+      "operator": "lightning_indexer",
+      "dataset": "realistic_prefill",
+      "case_id": "deepseek_a5_prefill_b1_q512_ctx512_top512",
+      "family": "prefill_indexing",
+      "shape": [
+        1,
+        512,
+        64,
+        128
+      ],
+      "dtype": "bfloat16",
+      "backend": "ascend",
+      "device_class": "950PR",
+      "implementation": "vllm_ascend",
+      "implementation_version": "vllm-ascend",
+      "source_kind": "library_compatible_realistic",
+      "source_project": "vllm-ascend",
+      "source_model": "DeepSeek-A5-compatible",
+      "source_file": "serving_buckets/deepseek_a5_dsa.json",
+      "source_op": "npu_vllm_quant_lightning_indexer",
+      "metrics": {
+        "latency_ms_avg": 0.011165,
+        "latency_ms_p50": 0.011165,
+        "latency_ms_p95": 0.011165,
+        "sample_count": 1
+      },
+      "accuracy": {
+        "passed": true,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0
+      },
+      "diff_ref": null
+    },
+    {
+      "schema_version": 1,
+      "run_id": "ascend-vllm-dsa-prefill-a5-realistic-202607050043/sparse_attention-realistic_prefill-deepseek_a5_prefill_b1_q512_ctx512_top512-bfloat16-seed0",
+      "operator": "sparse_attention",
+      "dataset": "realistic_prefill",
+      "case_id": "deepseek_a5_prefill_b1_q512_ctx512_top512",
+      "family": "prefill_sparse_attention",
+      "shape": [
+        512,
+        64,
+        512
+      ],
+      "dtype": "bfloat16",
+      "backend": "ascend",
+      "device_class": "950PR",
+      "implementation": "vllm_ascend",
+      "implementation_version": "vllm-ascend",
+      "source_kind": "library_compatible_realistic",
+      "source_project": "vllm-ascend",
+      "source_model": "DeepSeek-A5-compatible",
+      "source_file": "serving_buckets/deepseek_a5_dsa.json",
+      "source_op": "npu_kv_quant_sparse_attn_sharedkv",
+      "metrics": {
+        "latency_ms_avg": 0.104269997,
+        "latency_ms_p50": 0.104269997,
+        "latency_ms_p95": 0.104269997,
+        "sample_count": 1
+      },
+      "accuracy": {
+        "passed": true,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0
+      },
+      "diff_ref": null
+    },
+    {
+      "schema_version": 1,
+      "run_id": "ascend-vllm-dsa-prefill-a5-realistic-202607050043/lightning_indexer-realistic_prefill-deepseek_a5_prefill_b1_q512_ctx1024_top512-bfloat16-seed0",
+      "operator": "lightning_indexer",
+      "dataset": "realistic_prefill",
+      "case_id": "deepseek_a5_prefill_b1_q512_ctx1024_top512",
+      "family": "prefill_indexing",
+      "shape": [
+        1,
+        512,
+        64,
+        128
+      ],
+      "dtype": "bfloat16",
+      "backend": "ascend",
+      "device_class": "950PR",
+      "implementation": "vllm_ascend",
+      "implementation_version": "vllm-ascend",
+      "source_kind": "library_compatible_realistic",
+      "source_project": "vllm-ascend",
+      "source_model": "DeepSeek-A5-compatible",
+      "source_file": "serving_buckets/deepseek_a5_dsa.json",
+      "source_op": "npu_vllm_quant_lightning_indexer",
+      "metrics": {
+        "latency_ms_avg": 0.011721,
+        "latency_ms_p50": 0.011721,
+        "latency_ms_p95": 0.011721,
+        "sample_count": 1
+      },
+      "accuracy": {
+        "passed": true,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0
+      },
+      "diff_ref": null
+    },
+    {
+      "schema_version": 1,
+      "run_id": "ascend-vllm-dsa-prefill-a5-realistic-202607050043/sparse_attention-realistic_prefill-deepseek_a5_prefill_b1_q512_ctx1024_top512-bfloat16-seed0",
+      "operator": "sparse_attention",
+      "dataset": "realistic_prefill",
+      "case_id": "deepseek_a5_prefill_b1_q512_ctx1024_top512",
+      "family": "prefill_sparse_attention",
+      "shape": [
+        512,
+        64,
+        512
+      ],
+      "dtype": "bfloat16",
+      "backend": "ascend",
+      "device_class": "950PR",
+      "implementation": "vllm_ascend",
+      "implementation_version": "vllm-ascend",
+      "source_kind": "library_compatible_realistic",
+      "source_project": "vllm-ascend",
+      "source_model": "DeepSeek-A5-compatible",
+      "source_file": "serving_buckets/deepseek_a5_dsa.json",
+      "source_op": "npu_kv_quant_sparse_attn_sharedkv",
+      "metrics": {
+        "latency_ms_avg": 0.18323399399999998,
+        "latency_ms_p50": 0.18323399399999998,
+        "latency_ms_p95": 0.18323399399999998,
+        "sample_count": 1
+      },
+      "accuracy": {
+        "passed": true,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0
+      },
+      "diff_ref": null
+    },
+    {
+      "schema_version": 1,
+      "run_id": "ascend-vllm-dsa-prefill-a5-realistic-202607050043/lightning_indexer-realistic_prefill-deepseek_a5_prefill_b1_q512_ctx1024_top1024-bfloat16-seed0",
+      "operator": "lightning_indexer",
+      "dataset": "realistic_prefill",
+      "case_id": "deepseek_a5_prefill_b1_q512_ctx1024_top1024",
+      "family": "prefill_indexing",
+      "shape": [
+        1,
+        512,
+        64,
+        128
+      ],
+      "dtype": "bfloat16",
+      "backend": "ascend",
+      "device_class": "950PR",
+      "implementation": "vllm_ascend",
+      "implementation_version": "vllm-ascend",
+      "source_kind": "library_compatible_realistic",
+      "source_project": "vllm-ascend",
+      "source_model": "DeepSeek-A5-compatible",
+      "source_file": "serving_buckets/deepseek_a5_dsa.json",
+      "source_op": "npu_vllm_quant_lightning_indexer",
+      "metrics": {
+        "latency_ms_avg": 0.012355,
+        "latency_ms_p50": 0.012355,
+        "latency_ms_p95": 0.012355,
+        "sample_count": 1
+      },
+      "accuracy": {
+        "passed": true,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0
+      },
+      "diff_ref": null
+    },
+    {
+      "schema_version": 1,
+      "run_id": "ascend-vllm-dsa-prefill-a5-realistic-202607050043/sparse_attention-realistic_prefill-deepseek_a5_prefill_b1_q512_ctx1024_top1024-bfloat16-seed0",
+      "operator": "sparse_attention",
+      "dataset": "realistic_prefill",
+      "case_id": "deepseek_a5_prefill_b1_q512_ctx1024_top1024",
+      "family": "prefill_sparse_attention",
+      "shape": [
+        512,
+        64,
+        512
+      ],
+      "dtype": "bfloat16",
+      "backend": "ascend",
+      "device_class": "950PR",
+      "implementation": "vllm_ascend",
+      "implementation_version": "vllm-ascend",
+      "source_kind": "library_compatible_realistic",
+      "source_project": "vllm-ascend",
+      "source_model": "DeepSeek-A5-compatible",
+      "source_file": "serving_buckets/deepseek_a5_dsa.json",
+      "source_op": "npu_kv_quant_sparse_attn_sharedkv",
+      "metrics": {
+        "latency_ms_avg": 0.179917999,
+        "latency_ms_p50": 0.179917999,
+        "latency_ms_p95": 0.179917999,
+        "sample_count": 1
+      },
+      "accuracy": {
+        "passed": true,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0
+      },
+      "diff_ref": null
+    },
+    {
+      "schema_version": 1,
+      "run_id": "ascend-vllm-dsa-prefill-a5-realistic-202607050043/lightning_indexer-realistic_prefill-deepseek_a5_prefill_b2_q128_ctx512_top512-bfloat16-seed0",
+      "operator": "lightning_indexer",
+      "dataset": "realistic_prefill",
+      "case_id": "deepseek_a5_prefill_b2_q128_ctx512_top512",
+      "family": "prefill_indexing",
+      "shape": [
+        2,
+        128,
+        64,
+        128
+      ],
+      "dtype": "bfloat16",
+      "backend": "ascend",
+      "device_class": "950PR",
+      "implementation": "vllm_ascend",
+      "implementation_version": "vllm-ascend",
+      "source_kind": "library_compatible_realistic",
+      "source_project": "vllm-ascend",
+      "source_model": "DeepSeek-A5-compatible",
+      "source_file": "serving_buckets/deepseek_a5_dsa.json",
+      "source_op": "npu_vllm_quant_lightning_indexer",
+      "metrics": {
+        "latency_ms_avg": 0.009568,
+        "latency_ms_p50": 0.009568,
+        "latency_ms_p95": 0.009568,
+        "sample_count": 1
+      },
+      "accuracy": {
+        "passed": true,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0
+      },
+      "diff_ref": null
+    },
+    {
+      "schema_version": 1,
+      "run_id": "ascend-vllm-dsa-prefill-a5-realistic-202607050043/sparse_attention-realistic_prefill-deepseek_a5_prefill_b2_q128_ctx512_top512-bfloat16-seed0",
+      "operator": "sparse_attention",
+      "dataset": "realistic_prefill",
+      "case_id": "deepseek_a5_prefill_b2_q128_ctx512_top512",
+      "family": "prefill_sparse_attention",
+      "shape": [
+        128,
+        64,
+        512
+      ],
+      "dtype": "bfloat16",
+      "backend": "ascend",
+      "device_class": "950PR",
+      "implementation": "vllm_ascend",
+      "implementation_version": "vllm-ascend",
+      "source_kind": "library_compatible_realistic",
+      "source_project": "vllm-ascend",
+      "source_model": "DeepSeek-A5-compatible",
+      "source_file": "serving_buckets/deepseek_a5_dsa.json",
+      "source_op": "npu_kv_quant_sparse_attn_sharedkv",
+      "metrics": {
+        "latency_ms_avg": 0.05957,
+        "latency_ms_p50": 0.05957,
+        "latency_ms_p95": 0.05957,
+        "sample_count": 1
+      },
+      "accuracy": {
+        "passed": true,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0
+      },
+      "diff_ref": null
+    },
+    {
+      "schema_version": 1,
+      "run_id": "ascend-vllm-dsa-prefill-a5-realistic-202607050043/lightning_indexer-realistic_prefill-deepseek_a5_prefill_b2_q256_ctx512_top512-bfloat16-seed0",
+      "operator": "lightning_indexer",
+      "dataset": "realistic_prefill",
+      "case_id": "deepseek_a5_prefill_b2_q256_ctx512_top512",
+      "family": "prefill_indexing",
+      "shape": [
+        2,
+        256,
+        64,
+        128
+      ],
+      "dtype": "bfloat16",
+      "backend": "ascend",
+      "device_class": "950PR",
+      "implementation": "vllm_ascend",
+      "implementation_version": "vllm-ascend",
+      "source_kind": "library_compatible_realistic",
+      "source_project": "vllm-ascend",
+      "source_model": "DeepSeek-A5-compatible",
+      "source_file": "serving_buckets/deepseek_a5_dsa.json",
+      "source_op": "npu_vllm_quant_lightning_indexer",
+      "metrics": {
+        "latency_ms_avg": 0.010712,
+        "latency_ms_p50": 0.010712,
+        "latency_ms_p95": 0.010712,
+        "sample_count": 1
+      },
+      "accuracy": {
+        "passed": true,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0
+      },
+      "diff_ref": null
+    },
+    {
+      "schema_version": 1,
+      "run_id": "ascend-vllm-dsa-prefill-a5-realistic-202607050043/sparse_attention-realistic_prefill-deepseek_a5_prefill_b2_q256_ctx512_top512-bfloat16-seed0",
+      "operator": "sparse_attention",
+      "dataset": "realistic_prefill",
+      "case_id": "deepseek_a5_prefill_b2_q256_ctx512_top512",
+      "family": "prefill_sparse_attention",
+      "shape": [
+        256,
+        64,
+        512
+      ],
+      "dtype": "bfloat16",
+      "backend": "ascend",
+      "device_class": "950PR",
+      "implementation": "vllm_ascend",
+      "implementation_version": "vllm-ascend",
+      "source_kind": "library_compatible_realistic",
+      "source_project": "vllm-ascend",
+      "source_model": "DeepSeek-A5-compatible",
+      "source_file": "serving_buckets/deepseek_a5_dsa.json",
+      "source_op": "npu_kv_quant_sparse_attn_sharedkv",
+      "metrics": {
+        "latency_ms_avg": 0.10803700299999999,
+        "latency_ms_p50": 0.10803700299999999,
+        "latency_ms_p95": 0.10803700299999999,
+        "sample_count": 1
+      },
+      "accuracy": {
+        "passed": true,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0
+      },
+      "diff_ref": null
+    }
+  ]
+}

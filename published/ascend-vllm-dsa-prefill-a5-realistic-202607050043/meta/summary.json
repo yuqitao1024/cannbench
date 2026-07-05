@@ -1,0 +1,173 @@
+{
+  "result_count": 16,
+  "records": [
+    {
+      "op": "lightning_indexer",
+      "dataset": "realistic_prefill",
+      "case_id": "deepseek_a5_prefill_b1_q64_ctx512_top512",
+      "dtype": "bfloat16",
+      "seed": 0,
+      "status": "ok",
+      "prepared_input": "prepared/lightning_indexer/realistic_prefill/deepseek_a5_prefill_b1_q64_ctx512_top512-bfloat16-seed0.json",
+      "result_path": "perf/lightning_indexer-realistic_prefill-deepseek_a5_prefill_b1_q64_ctx512_top512-bfloat16-seed0.json"
+    },
+    {
+      "op": "sparse_attention",
+      "dataset": "realistic_prefill",
+      "case_id": "deepseek_a5_prefill_b1_q64_ctx512_top512",
+      "dtype": "bfloat16",
+      "seed": 0,
+      "status": "ok",
+      "prepared_input": "prepared/sparse_attention/realistic_prefill/deepseek_a5_prefill_b1_q64_ctx512_top512-bfloat16-seed0.json",
+      "result_path": "perf/sparse_attention-realistic_prefill-deepseek_a5_prefill_b1_q64_ctx512_top512-bfloat16-seed0.json"
+    },
+    {
+      "op": "lightning_indexer",
+      "dataset": "realistic_prefill",
+      "case_id": "deepseek_a5_prefill_b1_q128_ctx512_top512",
+      "dtype": "bfloat16",
+      "seed": 0,
+      "status": "ok",
+      "prepared_input": "prepared/lightning_indexer/realistic_prefill/deepseek_a5_prefill_b1_q128_ctx512_top512-bfloat16-seed0.json",
+      "result_path": "perf/lightning_indexer-realistic_prefill-deepseek_a5_prefill_b1_q128_ctx512_top512-bfloat16-seed0.json"
+    },
+    {
+      "op": "sparse_attention",
+      "dataset": "realistic_prefill",
+      "case_id": "deepseek_a5_prefill_b1_q128_ctx512_top512",
+      "dtype": "bfloat16",
+      "seed": 0,
+      "status": "ok",
+      "prepared_input": "prepared/sparse_attention/realistic_prefill/deepseek_a5_prefill_b1_q128_ctx512_top512-bfloat16-seed0.json",
+      "result_path": "perf/sparse_attention-realistic_prefill-deepseek_a5_prefill_b1_q128_ctx512_top512-bfloat16-seed0.json"
+    },
+    {
+      "op": "lightning_indexer",
+      "dataset": "realistic_prefill",
+      "case_id": "deepseek_a5_prefill_b1_q256_ctx512_top512",
+      "dtype": "bfloat16",
+      "seed": 0,
+      "status": "ok",
+      "prepared_input": "prepared/lightning_indexer/realistic_prefill/deepseek_a5_prefill_b1_q256_ctx512_top512-bfloat16-seed0.json",
+      "result_path": "perf/lightning_indexer-realistic_prefill-deepseek_a5_prefill_b1_q256_ctx512_top512-bfloat16-seed0.json"
+    },
+    {
+      "op": "sparse_attention",
+      "dataset": "realistic_prefill",
+      "case_id": "deepseek_a5_prefill_b1_q256_ctx512_top512",
+      "dtype": "bfloat16",
+      "seed": 0,
+      "status": "ok",
+      "prepared_input": "prepared/sparse_attention/realistic_prefill/deepseek_a5_prefill_b1_q256_ctx512_top512-bfloat16-seed0.json",
+      "result_path": "perf/sparse_attention-realistic_prefill-deepseek_a5_prefill_b1_q256_ctx512_top512-bfloat16-seed0.json"
+    },
+    {
+      "op": "lightning_indexer",
+      "dataset": "realistic_prefill",
+      "case_id": "deepseek_a5_prefill_b1_q512_ctx512_top512",
+      "dtype": "bfloat16",
+      "seed": 0,
+      "status": "ok",
+      "prepared_input": "prepared/lightning_indexer/realistic_prefill/deepseek_a5_prefill_b1_q512_ctx512_top512-bfloat16-seed0.json",
+      "result_path": "perf/lightning_indexer-realistic_prefill-deepseek_a5_prefill_b1_q512_ctx512_top512-bfloat16-seed0.json"
+    },
+    {
+      "op": "sparse_attention",
+      "dataset": "realistic_prefill",
+      "case_id": "deepseek_a5_prefill_b1_q512_ctx512_top512",
+      "dtype": "bfloat16",
+      "seed": 0,
+      "status": "ok",
+      "prepared_input": "prepared/sparse_attention/realistic_prefill/deepseek_a5_prefill_b1_q512_ctx512_top512-bfloat16-seed0.json",
+      "result_path": "perf/sparse_attention-realistic_prefill-deepseek_a5_prefill_b1_q512_ctx512_top512-bfloat16-seed0.json"
+    },
+    {
+      "op": "lightning_indexer",
+      "dataset": "realistic_prefill",
+      "case_id": "deepseek_a5_prefill_b1_q512_ctx1024_top512",
+      "dtype": "bfloat16",
+      "seed": 0,
+      "status": "ok",
+      "prepared_input": "prepared/lightning_indexer/realistic_prefill/deepseek_a5_prefill_b1_q512_ctx1024_top512-bfloat16-seed0.json",
+      "result_path": "perf/lightning_indexer-realistic_prefill-deepseek_a5_prefill_b1_q512_ctx1024_top512-bfloat16-seed0.json"
+    },
+    {
+      "op": "sparse_attention",
+      "dataset": "realistic_prefill",
+      "case_id": "deepseek_a5_prefill_b1_q512_ctx1024_top512",
+      "dtype": "bfloat16",
+      "seed": 0,
+      "status": "ok",
+      "prepared_input": "prepared/sparse_attention/realistic_prefill/deepseek_a5_prefill_b1_q512_ctx1024_top512-bfloat16-seed0.json",
+      "result_path": "perf/sparse_attention-realistic_prefill-deepseek_a5_prefill_b1_q512_ctx1024_top512-bfloat16-seed0.json"
+    },
+    {
+      "op": "lightning_indexer",
+      "dataset": "realistic_prefill",
+      "case_id": "deepseek_a5_prefill_b1_q512_ctx1024_top1024",
+      "dtype": "bfloat16",
+      "seed": 0,
+      "status": "ok",
+      "prepared_input": "prepared/lightning_indexer/realistic_prefill/deepseek_a5_prefill_b1_q512_ctx1024_top1024-bfloat16-seed0.json",
+      "result_path": "perf/lightning_indexer-realistic_prefill-deepseek_a5_prefill_b1_q512_ctx1024_top1024-bfloat16-seed0.json"
+    },
+    {
+      "op": "sparse_attention",
+      "dataset": "realistic_prefill",
+      "case_id": "deepseek_a5_prefill_b1_q512_ctx1024_top1024",
+      "dtype": "bfloat16",
+      "seed": 0,
+      "status": "ok",
+      "prepared_input": "prepared/sparse_attention/realistic_prefill/deepseek_a5_prefill_b1_q512_ctx1024_top1024-bfloat16-seed0.json",
+      "result_path": "perf/sparse_attention-realistic_prefill-deepseek_a5_prefill_b1_q512_ctx1024_top1024-bfloat16-seed0.json"
+    },
+    {
+      "op": "lightning_indexer",
+      "dataset": "realistic_prefill",
+      "case_id": "deepseek_a5_prefill_b2_q128_ctx512_top512",
+      "dtype": "bfloat16",
+      "seed": 0,
+      "status": "ok",
+      "prepared_input": "prepared/lightning_indexer/realistic_prefill/deepseek_a5_prefill_b2_q128_ctx512_top512-bfloat16-seed0.json",
+      "result_path": "perf/lightning_indexer-realistic_prefill-deepseek_a5_prefill_b2_q128_ctx512_top512-bfloat16-seed0.json"
+    },
+    {
+      "op": "sparse_attention",
+      "dataset": "realistic_prefill",
+      "case_id": "deepseek_a5_prefill_b2_q128_ctx512_top512",
+      "dtype": "bfloat16",
+      "seed": 0,
+      "status": "ok",
+      "prepared_input": "prepared/sparse_attention/realistic_prefill/deepseek_a5_prefill_b2_q128_ctx512_top512-bfloat16-seed0.json",
+      "result_path": "perf/sparse_attention-realistic_prefill-deepseek_a5_prefill_b2_q128_ctx512_top512-bfloat16-seed0.json"
+    },
+    {
+      "op": "lightning_indexer",
+      "dataset": "realistic_prefill",
+      "case_id": "deepseek_a5_prefill_b2_q256_ctx512_top512",
+      "dtype": "bfloat16",
+      "seed": 0,
+      "status": "ok",
+      "prepared_input": "prepared/lightning_indexer/realistic_prefill/deepseek_a5_prefill_b2_q256_ctx512_top512-bfloat16-seed0.json",
+      "result_path": "perf/lightning_indexer-realistic_prefill-deepseek_a5_prefill_b2_q256_ctx512_top512-bfloat16-seed0.json"
+    },
+    {
+      "op": "sparse_attention",
+      "dataset": "realistic_prefill",
+      "case_id": "deepseek_a5_prefill_b2_q256_ctx512_top512",
+      "dtype": "bfloat16",
+      "seed": 0,
+      "status": "ok",
+      "prepared_input": "prepared/sparse_attention/realistic_prefill/deepseek_a5_prefill_b2_q256_ctx512_top512-bfloat16-seed0.json",
+      "result_path": "perf/sparse_attention-realistic_prefill-deepseek_a5_prefill_b2_q256_ctx512_top512-bfloat16-seed0.json"
+    }
+  ],
+  "metadata": {
+    "backend": "ascend",
+    "run_name": "ascend-vllm-dsa-prefill-a5-realistic-202607050043",
+    "implementation": "vllm_ascend",
+    "total_cases": 16,
+    "success_count": 16,
+    "failure_count": 0
+  }
+}
