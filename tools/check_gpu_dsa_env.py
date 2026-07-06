@@ -206,12 +206,16 @@ def _print_next_commands(dtype: str, warmup: int, iterations: int) -> None:
     print("\nSuggested smoke commands after all required checks pass:")
     print(
         "CANNBENCH_CUDA_DSA_ADAPTER=${CANNBENCH_CUDA_DSA_ADAPTER:-cannbench_cuda_dsa} "
+        "CANNBENCH_CUDA_DSA_LIGHTNING_INDEXER=${CANNBENCH_CUDA_DSA_LIGHTNING_INDEXER:-cannbench_cuda_dsa_flashmla_deepgemm:lightning_indexer} "
+        "CANNBENCH_CUDA_DSA_SPARSE_ATTENTION=${CANNBENCH_CUDA_DSA_SPARSE_ATTENTION:-cannbench_cuda_dsa_flashmla_deepgemm:sparse_attention} "
         f"PYTHONPATH=src python3 -m cannbench bench --backend nvidia "
         f"--implementation cuda_library --workflow dsa_decode --dataset realistic_decode "
         f"--dtype {dtype} --warmup {warmup} --iterations {iterations} --output-dir runs"
     )
     print(
         "CANNBENCH_CUDA_DSA_ADAPTER=${CANNBENCH_CUDA_DSA_ADAPTER:-cannbench_cuda_dsa} "
+        "CANNBENCH_CUDA_DSA_LIGHTNING_INDEXER=${CANNBENCH_CUDA_DSA_LIGHTNING_INDEXER:-cannbench_cuda_dsa_flashmla_deepgemm:lightning_indexer} "
+        "CANNBENCH_CUDA_DSA_SPARSE_ATTENTION=${CANNBENCH_CUDA_DSA_SPARSE_ATTENTION:-cannbench_cuda_dsa_flashmla_deepgemm:sparse_attention} "
         f"PYTHONPATH=src python3 -m cannbench bench --backend nvidia "
         f"--implementation cuda_library --workflow dsa_prefill --dataset realistic_prefill "
         f"--dtype {dtype} --warmup {warmup} --iterations {iterations} --output-dir runs"
@@ -226,7 +230,8 @@ def main(argv: list[str] | None = None) -> int:
         "--adapter-module",
         help=(
             "CUDA DSA adapter module exposing lightning_indexer and sparse_attention. "
-            "Defaults to CANNBENCH_CUDA_DSA_ADAPTER or cannbench_cuda_dsa for full checks."
+            "Defaults to CANNBENCH_CUDA_DSA_ADAPTER or cannbench_cuda_dsa for full checks. "
+            "Use cannbench_cuda_dsa_flashmla_deepgemm as the standard FlashMLA/DeepGEMM callable wrapper."
         ),
     )
     parser.add_argument("--dtype", default="float16")

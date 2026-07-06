@@ -643,7 +643,7 @@ def test_nvidia_cuda_library_uses_external_sparse_attention_adapter(monkeypatch)
     assert calls[0]["indices"].shape == (2, 1, 4)
 
 
-def test_nvidia_cuda_library_dsa_requires_configured_cuda_callable(monkeypatch):
+def test_nvidia_cuda_library_default_dsa_adapter_requires_flash_mla(monkeypatch):
     class FakeTensor:
         def reshape(self, *shape):
             return self
@@ -677,7 +677,7 @@ def test_nvidia_cuda_library_dsa_requires_configured_cuda_callable(monkeypatch):
         iterations=1,
     )
 
-    with pytest.raises(RuntimeError, match="CANNBENCH_CUDA_DSA_SPARSE_ATTENTION"):
+    with pytest.raises(RuntimeError, match="flash_mla"):
         NvidiaBackend().run_operator(request)
 
 

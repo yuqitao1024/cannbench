@@ -57,12 +57,17 @@ FlashMLA/DeepGEMM APIs with the library-native layout.
 The built-in `cannbench_cuda_dsa` module is only this thin dispatch layer. It
 does not implement CUDA kernels. Configure it with:
 
-- `CANNBENCH_CUDA_DSA_LIGHTNING_INDEXER=<module>:<callable>`
-- `CANNBENCH_CUDA_DSA_SPARSE_ATTENTION=<module>:<callable>`
+- `CANNBENCH_CUDA_DSA_LIGHTNING_INDEXER=cannbench_cuda_dsa_flashmla_deepgemm:lightning_indexer`
+- `CANNBENCH_CUDA_DSA_SPARSE_ATTENTION=cannbench_cuda_dsa_flashmla_deepgemm:sparse_attention`
 
-The configured callables should wrap the installed FlashMLA/DeepGEMM or
-production CUDA DSA APIs. Without those environment variables or importable
-fallback symbols, the adapter fails with an explicit dependency error.
+The standard `cannbench_cuda_dsa_flashmla_deepgemm` wrapper exposes the same
+two CannBench callable names for both workflow phases. It routes decode indexer
+cases to `deep_gemm.fp8_paged_mqa_logits`, prefill indexer cases to
+`deep_gemm.fp8_mqa_logits`, decode sparse attention cases to
+`flash_mla.flash_mla_with_kvcache`, and prefill sparse attention cases to
+`flash_mla.flash_mla_sparse_fwd`. Without those environment variables,
+installed CUDA libraries, or importable fallback symbols, the adapter fails
+with an explicit dependency error.
 
 ### Ascend / CANN
 
@@ -352,6 +357,8 @@ CUDA H800 uses the same workflow token with the CUDA library implementation:
 
 ```bash
 CANNBENCH_CUDA_DSA_ADAPTER=cannbench_cuda_dsa \
+CANNBENCH_CUDA_DSA_LIGHTNING_INDEXER=cannbench_cuda_dsa_flashmla_deepgemm:lightning_indexer \
+CANNBENCH_CUDA_DSA_SPARSE_ATTENTION=cannbench_cuda_dsa_flashmla_deepgemm:sparse_attention \
 python -m cannbench bench \
   --backend nvidia \
   --implementation cuda_library \

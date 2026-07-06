@@ -15,6 +15,7 @@ def lightning_indexer(**kwargs: Any) -> Any:
     return _resolve_configured_callable(
         env_var=_LIGHTNING_INDEXER_ENV,
         fallback_names=(
+            "cannbench_cuda_dsa_flashmla_deepgemm:lightning_indexer",
             "flash_mla:lightning_indexer",
             "flashmla:lightning_indexer",
             "deep_gemm:lightning_indexer",
@@ -29,6 +30,7 @@ def sparse_attention(**kwargs: Any) -> Any:
     return _resolve_configured_callable(
         env_var=_SPARSE_ATTENTION_ENV,
         fallback_names=(
+            "cannbench_cuda_dsa_flashmla_deepgemm:sparse_attention",
             "flash_mla:sparse_attention",
             "flash_mla:sparse_mla_decode",
             "flash_mla:sparse_mla_prefill",

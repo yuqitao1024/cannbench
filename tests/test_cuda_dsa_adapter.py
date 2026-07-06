@@ -16,7 +16,7 @@ def test_default_cuda_dsa_adapter_reports_missing_lightning_indexer_dependency(m
 
     monkeypatch.delenv("CANNBENCH_CUDA_DSA_LIGHTNING_INDEXER", raising=False)
 
-    with pytest.raises(RuntimeError, match="CANNBENCH_CUDA_DSA_LIGHTNING_INDEXER"):
+    with pytest.raises(RuntimeError, match="phase"):
         adapter.lightning_indexer()
 
 
@@ -24,6 +24,32 @@ def test_default_cuda_dsa_adapter_reports_missing_sparse_attention_dependency(mo
     adapter = importlib.import_module("cannbench_cuda_dsa")
 
     monkeypatch.delenv("CANNBENCH_CUDA_DSA_SPARSE_ATTENTION", raising=False)
+
+    with pytest.raises(RuntimeError, match="phase"):
+        adapter.sparse_attention()
+
+
+def test_default_cuda_dsa_adapter_reports_bad_explicit_lightning_indexer_dependency(
+    monkeypatch,
+):
+    adapter = importlib.import_module("cannbench_cuda_dsa")
+
+    monkeypatch.setenv(
+        "CANNBENCH_CUDA_DSA_LIGHTNING_INDEXER", "missing.module:lightning_indexer"
+    )
+
+    with pytest.raises(RuntimeError, match="CANNBENCH_CUDA_DSA_LIGHTNING_INDEXER"):
+        adapter.lightning_indexer()
+
+
+def test_default_cuda_dsa_adapter_reports_bad_explicit_sparse_attention_dependency(
+    monkeypatch,
+):
+    adapter = importlib.import_module("cannbench_cuda_dsa")
+
+    monkeypatch.setenv(
+        "CANNBENCH_CUDA_DSA_SPARSE_ATTENTION", "missing.module:sparse_attention"
+    )
 
     with pytest.raises(RuntimeError, match="CANNBENCH_CUDA_DSA_SPARSE_ATTENTION"):
         adapter.sparse_attention()
