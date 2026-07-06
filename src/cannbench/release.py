@@ -42,6 +42,9 @@ def stage_release_tree(
     _copy_tree(repo_root / "src", stage_dir / "src")
     for name in ("pyproject.toml", "README.md", "LICENSE", "install.sh"):
         shutil.copy2(repo_root / name, stage_dir / name)
+    tools_dir = repo_root / "tools"
+    if tools_dir.is_dir():
+        _copy_tree(tools_dir, stage_dir / "tools")
     deploy_dir = repo_root / "deploy"
     if deploy_dir.is_dir():
         _copy_tree(deploy_dir, stage_dir / "deploy")

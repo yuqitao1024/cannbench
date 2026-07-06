@@ -22,6 +22,7 @@ def test_stage_release_tree_copies_project_files_and_generates_prepared_inputs(t
     assert (stage_dir / "README.md").is_file()
     assert (stage_dir / "LICENSE").is_file()
     assert (stage_dir / "install.sh").is_file()
+    assert (stage_dir / "tools" / "check_gpu_dsa_env.py").is_file()
     assert (stage_dir / "deploy" / "systemd" / "cannbench-serve.service").is_file()
     assert (stage_dir / "published" / "index.json").is_file()
     assert (
