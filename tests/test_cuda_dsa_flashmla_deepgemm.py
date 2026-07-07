@@ -23,6 +23,11 @@ def test_flashmla_deepgemm_adapter_routes_decode_indexer_to_paged_logits(
     )
     monkeypatch.setitem(sys.modules, "deep_gemm", fake_deep_gemm)
     adapter = _reload_adapter()
+    monkeypatch.setattr(
+        adapter,
+        "_deep_gemm_decode_indexer_kwargs",
+        lambda deep_gemm, kwargs: {"q": "q_native", "kv_cache": "kv_native"},
+    )
 
     result = adapter.lightning_indexer(
         payload={"top_k": 512},
@@ -36,7 +41,7 @@ def test_flashmla_deepgemm_adapter_routes_decode_indexer_to_paged_logits(
     assert calls == [
         (
             "fp8_paged_mqa_logits",
-            {"payload": {"top_k": 512}, "query": "q", "keys": "k", "weights": "w"},
+            {"q": "q_native", "kv_cache": "kv_native"},
         )
     ]
 
@@ -52,6 +57,11 @@ def test_flashmla_deepgemm_adapter_routes_prefill_indexer_to_logits(monkeypatch)
     )
     monkeypatch.setitem(sys.modules, "deep_gemm", fake_deep_gemm)
     adapter = _reload_adapter()
+    monkeypatch.setattr(
+        adapter,
+        "_deep_gemm_prefill_indexer_kwargs",
+        lambda kwargs: {"q": "q_native", "kv": "kv_native"},
+    )
 
     result = adapter.lightning_indexer(
         payload={"phase": "prefill"},
@@ -64,7 +74,7 @@ def test_flashmla_deepgemm_adapter_routes_prefill_indexer_to_logits(monkeypatch)
     assert calls == [
         (
             "fp8_mqa_logits",
-            {"payload": {"phase": "prefill"}, "query": "q", "keys": "k", "weights": "w"},
+            {"q": "q_native", "kv": "kv_native"},
         )
     ]
 
@@ -84,6 +94,15 @@ def test_flashmla_deepgemm_adapter_routes_decode_attention_to_flash_mla_decode(
     )
     monkeypatch.setitem(sys.modules, "flash_mla", fake_flash_mla)
     adapter = _reload_adapter()
+    monkeypatch.setattr(
+        adapter,
+        "_flash_mla_decode_attention_kwargs",
+        lambda flash_mla, kwargs: {
+            "q": "q_native",
+            "k_cache": "kv_native",
+            "indices": "indices_native",
+        },
+    )
 
     result = adapter.sparse_attention(
         payload={"phase": "decode"},
@@ -97,13 +116,7 @@ def test_flashmla_deepgemm_adapter_routes_decode_attention_to_flash_mla_decode(
     assert calls == [
         (
             "flash_mla_with_kvcache",
-            {
-                "payload": {"phase": "decode"},
-                "query": "q",
-                "keys": "k",
-                "values": "v",
-                "indices": "i",
-            },
+            {"q": "q_native", "k_cache": "kv_native", "indices": "indices_native"},
         )
     ]
 
@@ -123,6 +136,11 @@ def test_flashmla_deepgemm_adapter_routes_prefill_attention_to_flash_mla_sparse_
     )
     monkeypatch.setitem(sys.modules, "flash_mla", fake_flash_mla)
     adapter = _reload_adapter()
+    monkeypatch.setattr(
+        adapter,
+        "_flash_mla_prefill_attention_kwargs",
+        lambda kwargs: {"q": "q_native", "kv": "kv_native", "indices": "indices_native"},
+    )
 
     result = adapter.sparse_attention(
         payload={"phase": "prefill"},
@@ -136,13 +154,7 @@ def test_flashmla_deepgemm_adapter_routes_prefill_attention_to_flash_mla_sparse_
     assert calls == [
         (
             "flash_mla_sparse_fwd",
-            {
-                "payload": {"phase": "prefill"},
-                "query": "q",
-                "keys": "k",
-                "values": "v",
-                "indices": "i",
-            },
+            {"q": "q_native", "kv": "kv_native", "indices": "indices_native"},
         )
     ]
 
