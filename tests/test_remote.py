@@ -210,7 +210,7 @@ def test_collect_remote_artifacts_runs_ascend_profile_and_downloads_profile(tmp_
         [
             "ssh",
             "user@ascend-host",
-            "cd /opt/cannbench && source /usr/local/Ascend/cann/set_env.sh && ASCEND_VISIBLE_DEVICES=0 msprof op --output=/opt/cannbench/.cannbench-runs/softmax-run/profile python3 -m cannbench internal-run --backend ascend --prepared-input .cannbench-runs/softmax-run/prepared.json --warmup 3 --iterations 5 --output-dir .cannbench-runs/softmax-run/perf --run-name benchmark",
+            "cd /opt/cannbench && source /usr/local/Ascend/cann/set_env.sh && ASCEND_VISIBLE_DEVICES=0 msprof op --output=/opt/cannbench/.cannbench-runs/softmax-run/profile --warm-up 3 --launch-count 5 python3 -m cannbench internal-run --backend ascend --prepared-input .cannbench-runs/softmax-run/prepared.json --warmup 3 --iterations 5 --output-dir .cannbench-runs/softmax-run/perf --run-name benchmark",
         ],
         [
             "scp",
@@ -441,7 +441,7 @@ def test_collect_remote_artifacts_runs_nvidia_ncu_profile(tmp_path):
         "user@nvidia-host",
     ]
     command = commands[2][2]
-    assert "ncu --target-processes all --force-overwrite --csv" in command
+    assert "ncu --target-processes all --force-overwrite --launch-skip 3 --launch-count 5 --csv" in command
     assert "python3 -m cannbench internal-run --backend nvidia" in command
 
 

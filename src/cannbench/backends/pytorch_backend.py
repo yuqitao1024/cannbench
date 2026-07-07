@@ -353,6 +353,117 @@ class AscendBackend(TorchOperatorBackend):
     def __init__(self) -> None:
         super().__init__(name="ascend", device_type="npu")
 
+    def profile_operator_device_time(
+        self, request: OperatorBenchmarkRequest
+    ) -> LocalDeviceProfileResult:
+        self.validate_request(request)
+        self._before_run_operator(request)
+        torch = self._torch_module()
+        if not self._is_available(torch):
+            raise RuntimeError(self._availability_error())
+
+        prepared = build_prepared_operator_input(
+            op=request.op,
+            dtype=request.dtype,
+            dataset=request.dataset,
+            case_id=request.case_id,
+            seed=request.seed,
+        )
+        with tempfile.TemporaryDirectory(prefix="cannbench-msprof-") as temp_dir_name:
+            temp_dir = Path(temp_dir_name)
+            prepared_path = temp_dir / "prepared.json"
+            profile_dir = temp_dir / "profile"
+            perf_dir = temp_dir / "perf"
+            profile_dir.mkdir(parents=True, exist_ok=True)
+            perf_dir.mkdir(parents=True, exist_ok=True)
+            write_prepared_operator_input(prepared_path, prepared)
+            command = [
+                "msprof",
+                "op",
+                f"--output={profile_dir}",
+                "--warm-up",
+                str(request.warmup),
+                "--launch-count",
+                str(request.iterations),
+                sys.executable,
+                "-m",
+                "cannbench",
+                "internal-run",
+                "--backend",
+                "ascend",
+                "--prepared-input",
+                str(prepared_path),
+                "--warmup",
+                str(request.warmup),
+                "--iterations",
+                str(request.iterations),
+                "--output-dir",
+                str(perf_dir),
+                "--run-name",
+                "benchmark",
+            ]
+            if request.implementation is not None:
+                command.extend(("--implementation", request.implementation))
+            if request.implementation_version is not None:
+                command.extend(("--implementation-version", request.implementation_version))
+            result = subprocess.run(
+                command,
+                cwd=temp_dir,
+                env={**os.environ, "PYTHONPATH": _subprocess_pythonpath()},
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            if result.returncode != 0:
+                if result.stdout:
+                    print(result.stdout, end="", flush=True)
+                if result.stderr:
+                    print(result.stderr, end="", file=sys.stderr, flush=True)
+                raise RuntimeError(
+                    "msprof op profiling failed "
+                    f"(exit {result.returncode}): {result.stderr.strip()}"
+                )
+            if result.stdout:
+                print(result.stdout, end="", flush=True)
+            if result.stderr:
+                print(result.stderr, end="", file=sys.stderr, flush=True)
+            summary = read_device_profile(
+                profile_dir,
+                backend="ascend",
+                expected_kernel_name_patterns=expected_kernel_name_patterns(
+                    backend="ascend",
+                    op=request.op,
+                    implementation=request.implementation,
+                ),
+            )
+            profile = ProfileArtifacts(
+                device_name=self._device_name(torch, self._device(torch)),
+                profile_summary=summary,
+                profile_artifacts=read_artifact_tree(profile_dir),
+                perf_artifacts=read_artifact_tree(perf_dir),
+            )
+        return LocalDeviceProfileResult(
+            benchmark_result=OperatorBenchmarkResult(
+                backend=self.name,
+                device_name=profile.device_name,
+                op=request.op,
+                dtype=request.dtype,
+                case=OperatorCase(
+                    case_id=request.case_id,
+                    family=request.family,
+                    source_kind=request.source_kind,
+                    source_project=request.source_project,
+                    source_model=request.source_model,
+                    source_file=request.source_file,
+                    source_op=request.source_op,
+                    payload=request.case_payload,
+                ),
+                warmup=request.warmup,
+                iterations=request.iterations,
+            ),
+            profile=profile,
+        )
+
     def _torch_module(self):
         try:
             import torch_npu  # noqa: F401

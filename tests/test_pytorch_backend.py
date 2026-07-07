@@ -881,6 +881,74 @@ def test_nvidia_backend_profile_raises_when_ncu_fails(monkeypatch):
         backend.profile_operator_device_time(request)
 
 
+def test_ascend_profile_operator_device_time_uses_msprof_launch_controls(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeNpu:
+        @staticmethod
+        def is_available():
+            return True
+
+        @staticmethod
+        def synchronize():
+            return None
+
+        @staticmethod
+        def get_device_name(device):
+            del device
+            return "Ascend 950PR"
+
+    class FakeTorch:
+        npu = FakeNpu()
+        device = staticmethod(lambda kind: kind)
+
+    monkeypatch.setitem(sys.modules, "torch", FakeTorch())
+    monkeypatch.setitem(sys.modules, "torch_npu", SimpleNamespace())
+
+    from cannbench.backends.pytorch_backend import AscendBackend
+
+    def fake_run(command, cwd=None, env=None, text=None, capture_output=None, check=None):
+        del env, text, capture_output, check
+        captured["profile_command"] = command
+        captured["cwd"] = cwd
+        profile_dir = cwd / "profile"
+        perf_dir = cwd / "perf"
+        profile_dir.mkdir(parents=True, exist_ok=True)
+        perf_dir.mkdir(parents=True, exist_ok=True)
+        (profile_dir / "op_summary.csv").write_text(
+            "Op Name,Task Duration(us)\nsoftmax,1000\n",
+            encoding="utf-8",
+        )
+        (perf_dir / "benchmark.json").write_text("{}\n", encoding="utf-8")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    request = OperatorBenchmarkRequest(
+        backend="ascend",
+        op="softmax",
+        dtype="float16",
+        dataset="smoke",
+        case_id="tiny_logits",
+        warmup=3,
+        iterations=5,
+        seed=7,
+    )
+
+    result = AscendBackend().profile_operator_device_time(request)
+
+    command = captured["profile_command"]
+    assert command[:2] == ["msprof", "op"]
+    assert command[command.index("--warm-up") + 1] == "3"
+    assert command[command.index("--launch-count") + 1] == "5"
+    assert command[command.index("--warmup") + 1] == "3"
+    assert command[command.index("--iterations") + 1] == "5"
+    assert "internal-run" in command
+    assert result.profile.device_name == "Ascend 950PR"
+    assert result.profile.profile_summary.backend == "ascend"
+    assert result.profile.profile_summary.latency_ms_avg == 1.0
+
+
 def test_backend_runs_embedding_with_materialized_inputs(monkeypatch):
     captured: dict[str, object] = {}
 

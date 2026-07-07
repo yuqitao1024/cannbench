@@ -201,7 +201,11 @@ def collect_remote_artifacts(
         )
         if endpoint.backend == "ascend":
             profiled_operator = (
-                f"msprof op --output={shlex.quote(remote_profile)} {base_operator}"
+                f"msprof op "
+                f"--output={shlex.quote(remote_profile)} "
+                f"--warm-up {warmup} "
+                f"--launch-count {iterations} "
+                f"{base_operator}"
             )
             command = (
                 f"{_remote_command_prefix(endpoint)}"
@@ -213,6 +217,8 @@ def collect_remote_artifacts(
             ncu_operator = (
                 f"{env_prefix}"
                 "ncu --target-processes all --force-overwrite "
+                f"--launch-skip {warmup} "
+                f"--launch-count {iterations} "
                 "--csv "
                 f"--log-file {shlex.quote(remote_profile + '/ncu.csv')} "
                 f"--export {shlex.quote(remote_profile + '/ncu-report')} "
