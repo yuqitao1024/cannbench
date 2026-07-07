@@ -24,7 +24,7 @@ def materialize_lightning_indexer_inputs(
     query = tuple(round(generator.uniform(-1.0, 1.0), 6) for _ in range(query_size))
     keys = tuple(round(generator.uniform(-1.0, 1.0), 6) for _ in range(key_size))
     weights = tuple(round(generator.uniform(0.0, 1.0), 6) for _ in range(weight_size))
-    return {
+    payload = {
         "query_shape": query_shape,
         "key_shape": key_shape,
         "weight_shape": weight_shape,
@@ -34,3 +34,6 @@ def materialize_lightning_indexer_inputs(
         "keys": keys,
         "weights": weights,
     }
+    if case.phase is not None:
+        payload["phase"] = case.phase
+    return payload

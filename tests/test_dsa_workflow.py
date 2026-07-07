@@ -35,6 +35,7 @@ def test_build_decode_workflow_uses_indexer_then_sparse_decode():
     assert workflow.steps[1].consumes == ("indices",)
     assert workflow.steps[0].prepared.op == "lightning_indexer"
     assert workflow.steps[1].prepared.op == "sparse_attention"
+    assert workflow.steps[0].prepared.case.payload["phase"] == "decode"
     assert workflow.steps[1].prepared.case.payload["phase"] == "decode"
 
 
@@ -53,6 +54,7 @@ def test_build_prefill_workflow_uses_indexer_then_sparse_prefill():
     ]
     assert all(step.prepared.dtype == "bfloat16" for step in workflow.steps)
     assert all(step.prepared.seed == 11 for step in workflow.steps)
+    assert workflow.steps[0].prepared.case.payload["phase"] == "prefill"
     assert workflow.steps[1].prepared.case.payload["phase"] == "prefill"
 
 

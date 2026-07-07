@@ -38,7 +38,7 @@ class LightningIndexerCase:
 
     @property
     def payload(self) -> dict[str, object]:
-        return {
+        payload = {
             "batch": self.batch,
             "query_tokens": self.query_tokens,
             "context_tokens": self.context_tokens,
@@ -46,6 +46,17 @@ class LightningIndexerCase:
             "index_dim": self.index_dim,
             "top_k": self.top_k,
         }
+        if self.phase is not None:
+            payload["phase"] = self.phase
+        return payload
+
+    @property
+    def phase(self) -> str | None:
+        if self.family.startswith("decode_") or "_decode_" in self.family:
+            return "decode"
+        if self.family.startswith("prefill_") or "_prefill_" in self.family:
+            return "prefill"
+        return None
 
 
 @dataclass(frozen=True)
