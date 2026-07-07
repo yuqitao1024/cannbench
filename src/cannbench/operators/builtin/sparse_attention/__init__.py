@@ -8,6 +8,7 @@ from .cases import (
 )
 from cannbench.operators.plugin import OperatorPlugin
 from cannbench.operators.spec import OperatorSpec
+from .external import build_cuda_library_callable, build_vllm_ascend_callable
 
 
 def _build_torch_callable(ctx):
@@ -61,4 +62,6 @@ PLUGIN = OperatorPlugin(
     materialize_inputs=materialize_sparse_attention_inputs,
     build_torch_callable=_build_torch_callable,
     sort_order=13,
+    build_cuda_library_callable=build_cuda_library_callable,
+    build_vllm_ascend_callable=build_vllm_ascend_callable,
 )

@@ -3,14 +3,52 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from cannbench.datasets.synthetic import (
-    build_softmax_smoke_case,
-    build_softmax_stress_case,
-)
+from cannbench.operators.builtin.softmax.cases import SoftmaxCase
 
 
-ROOT = Path(__file__).resolve().parents[1]
-DATASET_DIR = ROOT / "src" / "cannbench" / "datasets" / "data" / "softmax"
+DATASET_DIR = Path(__file__).resolve().parents[1] / "data"
+
+
+def build_smoke_case(
+    *,
+    case_id: str,
+    family: str,
+    shape: tuple[int, ...],
+    dim: int,
+    source_model: str,
+) -> SoftmaxCase:
+    return SoftmaxCase(
+        case_id=case_id,
+        family=family,
+        shape=shape,
+        dim=dim,
+        source_kind="synthetic_smoke",
+        source_project="cannbench",
+        source_model=source_model,
+        source_file="built-in",
+        source_op="softmax",
+    )
+
+
+def build_stress_case(
+    *,
+    case_id: str,
+    family: str,
+    shape: tuple[int, ...],
+    dim: int,
+    source_model: str,
+) -> SoftmaxCase:
+    return SoftmaxCase(
+        case_id=case_id,
+        family=family,
+        shape=shape,
+        dim=dim,
+        source_kind="synthetic_boundary",
+        source_project="cannbench",
+        source_model=source_model,
+        source_file="generated",
+        source_op="softmax",
+    )
 
 
 def _case_to_dict(case) -> dict[str, object]:
@@ -37,7 +75,7 @@ def write_dataset(name: str, cases: list[dict[str, object]]) -> None:
 def main() -> None:
     smoke_cases = [
         _case_to_dict(
-            build_softmax_smoke_case(
+            build_smoke_case(
                 case_id="tiny_logits",
                 family="lm_logits",
                 shape=(32, 128),
@@ -46,7 +84,7 @@ def main() -> None:
             )
         ),
         _case_to_dict(
-            build_softmax_smoke_case(
+            build_smoke_case(
                 case_id="tiny_attention_scores",
                 family="attention",
                 shape=(2, 4, 8, 8),
@@ -55,7 +93,7 @@ def main() -> None:
             )
         ),
         _case_to_dict(
-            build_softmax_smoke_case(
+            build_smoke_case(
                 case_id="tiny_channel_softmax",
                 family="channel_activation",
                 shape=(2, 16, 8, 8),
@@ -67,7 +105,7 @@ def main() -> None:
 
     stress_cases = [
         _case_to_dict(
-            build_softmax_stress_case(
+            build_stress_case(
                 case_id="long_context_attention",
                 family="attention",
                 shape=(1, 32, 4096, 4096),
@@ -76,7 +114,7 @@ def main() -> None:
             )
         ),
         _case_to_dict(
-            build_softmax_stress_case(
+            build_stress_case(
                 case_id="wide_vocab_lm_logits",
                 family="lm_logits",
                 shape=(8192, 128256),
@@ -85,7 +123,7 @@ def main() -> None:
             )
         ),
         _case_to_dict(
-            build_softmax_stress_case(
+            build_stress_case(
                 case_id="moe_router_scores",
                 family="router_scores",
                 shape=(4096, 128),
@@ -94,7 +132,7 @@ def main() -> None:
             )
         ),
         _case_to_dict(
-            build_softmax_stress_case(
+            build_stress_case(
                 case_id="small_reduction_axis",
                 family="reduction_edge",
                 shape=(16384, 2),
@@ -103,7 +141,7 @@ def main() -> None:
             )
         ),
         _case_to_dict(
-            build_softmax_stress_case(
+            build_stress_case(
                 case_id="vision_window_batch",
                 family="vision_attention",
                 shape=(2048, 16, 49, 49),
@@ -112,7 +150,7 @@ def main() -> None:
             )
         ),
         _case_to_dict(
-            build_softmax_stress_case(
+            build_stress_case(
                 case_id="channelwise_activation_map",
                 family="channel_activation",
                 shape=(64, 2048, 7, 7),
@@ -121,7 +159,7 @@ def main() -> None:
             )
         ),
         _case_to_dict(
-            build_softmax_stress_case(
+            build_stress_case(
                 case_id="beam_search_token_scores",
                 family="decode_logits",
                 shape=(512, 4, 64000),

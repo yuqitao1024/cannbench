@@ -8,6 +8,7 @@ from cannbench.operators.materialize import materialized_values_to_buffer
 from .materialize import materialize_lightning_indexer_inputs
 from cannbench.operators.plugin import OperatorPlugin
 from cannbench.operators.spec import OperatorSpec
+from .external import build_cuda_library_callable, build_vllm_ascend_callable
 
 
 def _build_torch_callable(ctx):
@@ -53,4 +54,6 @@ PLUGIN = OperatorPlugin(
     materialize_inputs=materialize_lightning_indexer_inputs,
     build_torch_callable=_build_torch_callable,
     sort_order=12,
+    build_cuda_library_callable=build_cuda_library_callable,
+    build_vllm_ascend_callable=build_vllm_ascend_callable,
 )

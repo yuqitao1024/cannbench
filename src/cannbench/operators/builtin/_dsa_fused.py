@@ -246,6 +246,8 @@ def create_dsa_fused_plugin(
     get_dataset: Callable[[str], DsaFusedOperatorDataset],
     get_case: Callable[[str, str], DsaFusedOperatorCase],
     materialize_inputs: Callable[..., dict[str, object]],
+    build_workflow: Callable[..., DsaFusedWorkflow],
+    list_workflows: Callable[..., tuple[DsaFusedWorkflow, ...]],
     sort_order: int,
 ) -> OperatorPlugin:
     return OperatorPlugin(
@@ -260,6 +262,9 @@ def create_dsa_fused_plugin(
         materialize_inputs=materialize_inputs,
         build_torch_callable=_build_unsupported_direct_callable,
         sort_order=sort_order,
+        build_workflow=build_workflow,
+        list_workflows=list_workflows,
+        component_operator_names=("lightning_indexer", "sparse_attention"),
     )
 
 

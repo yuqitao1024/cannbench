@@ -1,7 +1,6 @@
 from dataclasses import dataclass, field
 
 from cannbench.datasets import get_operator_case
-from cannbench.core.result import SUPPORTED_SOFTMAX_DIMS
 
 SUPPORTED_DTYPES = {"float32", "float16", "bfloat16"}
 SUPPORTED_IMPLEMENTATIONS = {

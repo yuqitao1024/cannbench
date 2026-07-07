@@ -3,7 +3,7 @@ import json
 import pytest
 
 from cannbench.core.profile import (
-    expected_kernel_name_patterns,
+    ProfileKernelSelection,
     read_device_profile,
     write_device_profile_summary,
 )
@@ -82,6 +82,28 @@ def test_read_device_profile_filters_to_expected_kernel_name(tmp_path):
     assert summary.source_files == ("OpBasicInfo.csv",)
 
 
+def test_read_device_profile_can_sum_multiple_matching_kernels(tmp_path):
+    profile_dir = tmp_path / "profile"
+    profile_dir.mkdir()
+    (profile_dir / "OpBasicInfo.csv").write_text(
+        "Op Name,Task Duration(us)\n"
+        "lightning_indexer_kernel,400\n"
+        "sparse_attention_kernel,600\n"
+        "unrelated_kernel,999\n"
+    )
+
+    summary = read_device_profile(
+        profile_dir,
+        backend="ascend",
+        kernel_selection=ProfileKernelSelection(
+            kernel_name_patterns=("lightning_indexer", "sparse_attention"),
+        ),
+    )
+
+    assert summary.sample_count == 1
+    assert summary.latency_ms_avg == 1.0
+
+
 def test_read_device_profile_rejects_unexpected_kernel_name(tmp_path):
     profile_dir = tmp_path / "profile"
     profile_dir.mkdir()
@@ -96,19 +118,6 @@ def test_read_device_profile_rejects_unexpected_kernel_name(tmp_path):
             backend="ascend",
             expected_kernel_name_patterns=("softmax",),
         )
-
-
-def test_expected_kernel_name_patterns_match_softmax_case_insensitively():
-    assert expected_kernel_name_patterns(
-        backend="ascend",
-        op="softmax",
-        implementation="cann_ops_library",
-    ) == ("softmax",)
-    assert expected_kernel_name_patterns(
-        backend="ascend",
-        op="SoftMax",
-        implementation="simt",
-    ) == ("softmax",)
 
 
 def test_write_device_profile_summary_json(tmp_path):

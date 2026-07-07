@@ -11,10 +11,10 @@ from typing import Callable
 from cannbench.core.execution import RemoteExecutionArtifacts, RemoteProfileArtifacts, read_artifact_tree
 from cannbench.core.prepared_input import read_prepared_operator_input
 from cannbench.core.profile import (
-    expected_kernel_name_patterns,
     read_device_profile,
     write_device_profile_summary,
 )
+from cannbench.operators import get_operator_plugin
 
 
 CommandRunner = Callable[[list[str]], None]
@@ -237,10 +237,10 @@ def collect_remote_artifacts(
         summary = read_device_profile(
             output_dir / "profile",
             backend=endpoint.backend,
-            expected_kernel_name_patterns=expected_kernel_name_patterns(
+            kernel_selection=get_operator_plugin(prepared.op).profile_kernel_selection(
                 backend=endpoint.backend,
-                op=prepared.op,
                 implementation=implementation,
+                implementation_version=implementation_version,
             ),
         )
         if summarize_profile:

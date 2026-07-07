@@ -14,6 +14,11 @@ NVIDIA_TIME_DURATION_AVG = "gpu__time_duration.avg"
 
 
 @dataclass(frozen=True)
+class ProfileKernelSelection:
+    kernel_name_patterns: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class DeviceProfileSummary:
     backend: str
     sample_count: int
@@ -100,18 +105,6 @@ def _parse_float(value: object) -> float | None:
     if not math.isfinite(parsed):
         return None
     return parsed
-
-
-def expected_kernel_name_patterns(
-    *,
-    backend: str,
-    op: str,
-    implementation: str | None = None,
-) -> tuple[str, ...]:
-    del backend, implementation
-    if op.lower() != "softmax":
-        return ()
-    return ("softmax",)
 
 
 def _kernel_name_from_row(row: dict[str, str]) -> str | None:
@@ -202,7 +195,13 @@ def read_device_profile(
     *,
     backend: str,
     expected_kernel_name_patterns: tuple[str, ...] = (),
+    kernel_selection: ProfileKernelSelection | None = None,
 ) -> DeviceProfileSummary:
+    sum_matching_rows = kernel_selection is not None
+    if kernel_selection is None:
+        kernel_selection = ProfileKernelSelection(
+            kernel_name_patterns=expected_kernel_name_patterns
+        )
     csv_files = sorted(profile_dir.rglob("*.csv"))
     samples: list[float] = []
     source_files: list[str] = []
@@ -215,15 +214,18 @@ def read_device_profile(
         durations = [
             duration
             for duration, kernel_name in duration_rows
-            if _matches_kernel_name(kernel_name, expected_kernel_name_patterns)
+            if _matches_kernel_name(kernel_name, kernel_selection.kernel_name_patterns)
         ]
         if durations:
-            samples.extend(durations)
+            if sum_matching_rows:
+                samples.append(sum(durations))
+            else:
+                samples.extend(durations)
             source_files.append(str(csv_file.relative_to(profile_dir)))
     if not samples:
-        if expected_kernel_name_patterns and observed_kernel_names:
+        if kernel_selection.kernel_name_patterns and observed_kernel_names:
             observed = ", ".join(sorted(observed_kernel_names))
-            expected = ", ".join(expected_kernel_name_patterns)
+            expected = ", ".join(kernel_selection.kernel_name_patterns)
             raise ValueError(
                 "expected profiler kernel matching "
                 f"{expected!r}, but observed: {observed}"

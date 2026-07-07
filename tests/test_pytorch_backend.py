@@ -269,13 +269,15 @@ def test_ascend_backend_deploys_v1_simt_op_when_enabled(monkeypatch, tmp_path):
         "_run_simt_op_install",
         lambda script: captured.setdefault("script", script),
     )
-    monkeypatch.setattr(
-        backend,
-        "_load_simt_op_module",
-        lambda request, op_name: captured.setdefault(
-            "loaded", (op_name, request.implementation_version or "v1")
-        ),
+    fake_module = SimpleNamespace(
+        ops=SimpleNamespace(spatial_softmax_forward=lambda tensor, dim: tensor)
     )
+
+    def fake_load_simt_op_module(request, op_name):
+        captured.setdefault("loaded", (op_name, request.implementation_version or "v1"))
+        return fake_module
+
+    monkeypatch.setattr(backend, "_load_simt_op_module", fake_load_simt_op_module)
     monkeypatch.setitem(
         sys.modules,
         "aten_softmax",

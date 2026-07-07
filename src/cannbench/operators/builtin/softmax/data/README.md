@@ -12,8 +12,7 @@ CannBench splits `softmax` inputs into three datasets so functionality checks, r
 
 `smoke` and `stress` are maintained as generated manifests. Their source-of-truth construction logic lives in:
 
-- [tools/generate_softmax_synthetic_datasets.py](/root/aiagent/cannbench/tools/generate_softmax_synthetic_datasets.py)
-- [src/cannbench/datasets/synthetic.py](/root/aiagent/cannbench/src/cannbench/datasets/synthetic.py)
+- [src/cannbench/operators/builtin/softmax/tools/generate_synthetic_datasets.py](/root/aiagent/cannbench/src/cannbench/operators/builtin/softmax/tools/generate_synthetic_datasets.py)
 
 ## Realistic Dataset Provenance
 

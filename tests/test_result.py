@@ -7,8 +7,31 @@ from cannbench.core.output import write_benchmark_outputs
 from cannbench.core.result import (
     OperatorBenchmarkResult,
     OperatorCase,
-    build_softmax_case,
 )
+
+
+def _operator_case(
+    *,
+    case_id: str,
+    family: str,
+    dimensions: tuple[int, ...],
+    dim: int,
+    source_kind: str,
+    source_project: str,
+    source_model: str,
+    source_file: str,
+    source_op: str,
+) -> OperatorCase:
+    return OperatorCase(
+        case_id=case_id,
+        family=family,
+        source_kind=source_kind,
+        source_project=source_project,
+        source_model=source_model,
+        source_file=source_file,
+        source_op=source_op,
+        payload={"dimensions": dimensions, "dim": dim},
+    )
 
 
 def _sample_result() -> OperatorBenchmarkResult:
@@ -17,7 +40,7 @@ def _sample_result() -> OperatorBenchmarkResult:
         device_name="Fake GPU",
         op="softmax",
         dtype="float16",
-        case=build_softmax_case(
+        case=_operator_case(
             case_id="tiny_logits",
             family="lm_logits",
             dimensions=(128, 128),
@@ -39,7 +62,7 @@ def test_result_to_json_dict_contains_core_fields():
         device_name="Fake GPU",
         op="softmax",
         dtype="float16",
-        case=build_softmax_case(
+        case=_operator_case(
             case_id="t5_attention",
             family="attention",
             dimensions=(4, 8, 1024, 1024),
@@ -108,38 +131,6 @@ def test_write_benchmark_outputs_creates_json_and_csv(tmp_path):
         "5",
         "10",
     ]
-
-@pytest.mark.parametrize("dimensions", [(), (0, 128), (128, -1)])
-def test_build_softmax_case_rejects_invalid_dimensions(dimensions: tuple[int, ...]):
-    with pytest.raises(ValueError, match="dimensions must be"):
-        build_softmax_case(
-            case_id="case",
-            family="attention",
-            dimensions=dimensions,
-            dim=-1,
-            source_kind="synthetic",
-            source_project="cannbench",
-            source_model="fixture",
-            source_file="tests/fixtures",
-            source_op="softmax",
-        )
-
-
-@pytest.mark.parametrize("dim", [-4, 3])
-def test_build_softmax_case_rejects_invalid_dim(dim: int):
-    with pytest.raises(ValueError, match="dim must address an axis"):
-        build_softmax_case(
-            case_id="case",
-            family="attention",
-            dimensions=(4, 8, 16),
-            dim=dim,
-            source_kind="synthetic",
-            source_project="cannbench",
-            source_model="fixture",
-            source_file="tests/fixtures",
-            source_op="softmax",
-        )
-
 
 def test_operator_case_payload_summary_is_stable():
     case = OperatorCase(

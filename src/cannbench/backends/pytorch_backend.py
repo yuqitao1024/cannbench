@@ -15,23 +15,12 @@ from cannbench.core.prepared_input import build_prepared_operator_input, write_p
 from cannbench.core.profile import (
     ProfileArtifacts,
     LocalDeviceProfileResult,
-    expected_kernel_name_patterns,
     read_device_profile,
 )
 from cannbench.core.result import OperatorBenchmarkResult, OperatorCase
-from cannbench.operators.builtin.lightning_indexer.materialize import (
-    materialize_lightning_indexer_inputs,
-)
-from cannbench.operators.builtin.sparse_attention.materialize import (
-    materialize_sparse_attention_inputs,
-)
+from cannbench.operators import TorchOperatorContext, get_operator_plugin
 from cannbench.operators.materialize import materialized_values_to_buffer
 
-_ASCEND_SIMT_OP_MODULES = {
-    ("softmax", "v1"): "aten_softmax",
-    ("softmax", "v2"): "aten_softmax_v2",
-    ("softmax", "v3"): "aten_softmax_v3",
-}
 _CUDA_DSA_ADAPTER_ENV = "CANNBENCH_CUDA_DSA_ADAPTER"
 _DEFAULT_CUDA_DSA_ADAPTER_MODULE = "cannbench_cuda_dsa"
 
@@ -56,22 +45,21 @@ class NvidiaBackend(TorchOperatorBackend):
 
     def _operator_callable(self, torch, request, case, *, device, dtype):
         if request.implementation == "cuda_library":
-            if request.op == "lightning_indexer":
-                return self._cuda_library_lightning_indexer_callable(
-                    torch,
-                    request,
-                    case,
+            plugin = get_operator_plugin(request.op)
+            if plugin.build_cuda_library_callable is None:
+                raise RuntimeError(
+                    f"{request.op} does not provide a cuda_library implementation"
+                )
+            return plugin.build_cuda_library_callable(
+                TorchOperatorContext(
+                    backend=self,
+                    torch=torch,
+                    request=request,
+                    case=case,
                     device=device,
                     dtype=dtype,
                 )
-            if request.op == "sparse_attention":
-                return self._cuda_library_sparse_attention_callable(
-                    torch,
-                    request,
-                    case,
-                    device=device,
-                    dtype=dtype,
-                )
+            )
         return super()._operator_callable(
             torch,
             request,
@@ -190,9 +178,10 @@ class NvidiaBackend(TorchOperatorBackend):
             summary = read_device_profile(
                 profile_dir,
                 backend="nvidia",
-                expected_kernel_name_patterns=expected_kernel_name_patterns(
+                kernel_selection=get_operator_plugin(request.op).profile_kernel_selection(
                     backend="nvidia",
-                    op=request.op,
+                    implementation=request.implementation,
+                    implementation_version=request.implementation_version,
                 ),
             )
             profile = ProfileArtifacts(
@@ -241,112 +230,6 @@ class NvidiaBackend(TorchOperatorBackend):
                 f"CUDA DSA adapter {module_name} must expose callable {op_name}"
             )
         return op_callable
-
-    def _cuda_library_lightning_indexer_callable(
-        self,
-        torch,
-        request: OperatorBenchmarkRequest,
-        case,
-        *,
-        device,
-        dtype,
-    ):
-        adapter_op = self._resolve_cuda_dsa_adapter("lightning_indexer")
-        payload = materialize_lightning_indexer_inputs(
-            case, dtype=request.dtype, seed=request.seed
-        )
-        query = self._tensor(
-            torch,
-            materialized_values_to_buffer(payload["query"]),
-            device=device,
-            dtype=dtype,
-        ).reshape(payload["query_shape"])
-        keys = self._tensor(
-            torch,
-            materialized_values_to_buffer(payload["keys"]),
-            device=device,
-            dtype=dtype,
-        ).reshape(payload["key_shape"])
-        weights = self._tensor(
-            torch,
-            materialized_values_to_buffer(payload["weights"]),
-            device=device,
-            dtype=dtype,
-        ).reshape(payload["weight_shape"])
-
-        def operator():
-            return adapter_op(
-                torch=torch,
-                request=request,
-                case=case,
-                payload=payload,
-                device=device,
-                dtype=dtype,
-                query=query,
-                keys=keys,
-                weights=weights,
-                top_k=payload["top_k"],
-            )
-
-        return operator
-
-    def _cuda_library_sparse_attention_callable(
-        self,
-        torch,
-        request: OperatorBenchmarkRequest,
-        case,
-        *,
-        device,
-        dtype,
-    ):
-        adapter_op = self._resolve_cuda_dsa_adapter("sparse_attention")
-        payload = materialize_sparse_attention_inputs(
-            case, dtype=request.dtype, seed=request.seed
-        )
-        query = self._tensor(
-            torch,
-            materialized_values_to_buffer(payload["query"]),
-            device=device,
-            dtype=dtype,
-        ).reshape(payload["query_shape"])
-        keys = self._tensor(
-            torch,
-            materialized_values_to_buffer(payload["keys"]),
-            device=device,
-            dtype=dtype,
-        ).reshape(payload["key_shape"])
-        values = self._tensor(
-            torch,
-            materialized_values_to_buffer(payload["values"]),
-            device=device,
-            dtype=dtype,
-        ).reshape(payload["value_shape"])
-        indices = self._tensor(
-            torch,
-            payload["indices"],
-            device=device,
-            dtype=torch.int32,
-        ).reshape(payload["indices_shape"])
-        softmax_scale = payload["query_shape"][-1] ** -0.5
-
-        def operator():
-            return adapter_op(
-                torch=torch,
-                request=request,
-                case=case,
-                payload=payload,
-                device=device,
-                dtype=dtype,
-                query=query,
-                keys=keys,
-                values=values,
-                indices=indices,
-                causal=payload["causal"],
-                phase=payload["phase"],
-                softmax_scale=softmax_scale,
-            )
-
-        return operator
 
 
 class AscendBackend(TorchOperatorBackend):
@@ -430,10 +313,10 @@ class AscendBackend(TorchOperatorBackend):
             summary = read_device_profile(
                 profile_dir,
                 backend="ascend",
-                expected_kernel_name_patterns=expected_kernel_name_patterns(
+                kernel_selection=get_operator_plugin(request.op).profile_kernel_selection(
                     backend="ascend",
-                    op=request.op,
                     implementation=request.implementation,
+                    implementation_version=request.implementation_version,
                 ),
             )
             profile = ProfileArtifacts(
@@ -597,22 +480,37 @@ class AscendBackend(TorchOperatorBackend):
 
     def _operator_callable(self, torch, request, case, *, device, dtype):
         if request.implementation == "vllm_ascend":
-            if request.op == "lightning_indexer":
-                return self._vllm_ascend_lightning_indexer_callable(
-                    torch,
-                    request,
-                    case,
+            plugin = get_operator_plugin(request.op)
+            if plugin.build_vllm_ascend_callable is None:
+                raise RuntimeError(
+                    f"{request.op} does not provide a vllm_ascend implementation"
+                )
+            return plugin.build_vllm_ascend_callable(
+                TorchOperatorContext(
+                    backend=self,
+                    torch=torch,
+                    request=request,
+                    case=case,
                     device=device,
                     dtype=dtype,
                 )
-            if request.op == "sparse_attention":
-                return self._vllm_ascend_sparse_attention_callable(
-                    torch,
-                    request,
-                    case,
+            )
+        if request.implementation == "simt":
+            plugin = get_operator_plugin(request.op)
+            if plugin.build_simt_callable is None:
+                raise RuntimeError(f"{request.op} does not provide a SIMT implementation")
+            module = self._load_simt_op_module(request, request.op)
+            return plugin.build_simt_callable(
+                TorchOperatorContext(
+                    backend=self,
+                    torch=torch,
+                    request=request,
+                    case=case,
                     device=device,
                     dtype=dtype,
+                    implementation_module=module,
                 )
+            )
         return super()._operator_callable(
             torch,
             request,
@@ -620,579 +518,6 @@ class AscendBackend(TorchOperatorBackend):
             device=device,
             dtype=dtype,
         )
-
-    def _vllm_ascend_lightning_indexer_callable(
-        self,
-        torch,
-        request: OperatorBenchmarkRequest,
-        case,
-        *,
-        device,
-        dtype,
-    ):
-        metadata_op, indexer_op = self._custom_op_pair(
-            torch,
-            "npu_vllm_quant_lightning_indexer_metadata",
-            "npu_vllm_quant_lightning_indexer",
-        )
-        if metadata_op is not None and indexer_op is not None:
-            return self._vllm_ascend_quant_lightning_indexer_callable(
-                torch,
-                request,
-                case,
-                device=device,
-                dtype=dtype,
-                metadata_op=metadata_op,
-                indexer_op=indexer_op,
-            )
-
-        try:
-            import torch_npu
-        except ModuleNotFoundError as exc:
-            raise RuntimeError("torch_npu is required for vllm_ascend lightning_indexer") from exc
-        if not hasattr(torch_npu, "npu_lightning_indexer"):
-            raise RuntimeError(
-                "vllm_ascend lightning_indexer requires torch_npu.npu_lightning_indexer"
-            )
-
-        payload = materialize_lightning_indexer_inputs(
-            case, dtype=request.dtype, seed=request.seed
-        )
-        query_shape = payload["query_shape"]
-        key_shape = payload["key_shape"]
-        batch, query_tokens, index_heads, index_dim = query_shape
-        context_tokens = key_shape[1]
-
-        query = self._tensor(
-            torch,
-            materialized_values_to_buffer(payload["query"]),
-            device=device,
-            dtype=dtype,
-        ).reshape(batch * query_tokens, index_heads, index_dim)
-        keys = self._tensor(
-            torch,
-            materialized_values_to_buffer(payload["keys"]),
-            device=device,
-            dtype=dtype,
-        ).reshape(batch, context_tokens, 1, index_dim)
-        weights = self._tensor(
-            torch,
-            materialized_values_to_buffer(payload["weights"]),
-            device=device,
-            dtype=dtype,
-        ).reshape(payload["weight_shape"])
-        actual_seq_lengths_query = self._tensor(
-            torch,
-            tuple((index + 1) * query_tokens for index in range(batch)),
-            device=device,
-            dtype=torch.int32,
-        )
-        actual_seq_lengths_key = self._tensor(
-            torch,
-            tuple((index + 1) * context_tokens for index in range(batch)),
-            device=device,
-            dtype=torch.int32,
-        )
-
-        def operator():
-            result = torch_npu.npu_lightning_indexer(
-                query=query,
-                key=keys,
-                weights=weights,
-                actual_seq_lengths_query=actual_seq_lengths_query,
-                actual_seq_lengths_key=actual_seq_lengths_key,
-                block_table=None,
-                layout_query="TND",
-                layout_key="BSND",
-                sparse_count=payload["top_k"],
-                sparse_mode=3,
-            )
-            return result[0] if isinstance(result, tuple) else result
-
-        return operator
-
-    def _vllm_ascend_quant_lightning_indexer_callable(
-        self,
-        torch,
-        request: OperatorBenchmarkRequest,
-        case,
-        *,
-        device,
-        dtype,
-        metadata_op,
-        indexer_op,
-    ):
-        payload = materialize_lightning_indexer_inputs(
-            case, dtype=request.dtype, seed=request.seed
-        )
-        query_shape = payload["query_shape"]
-        key_shape = payload["key_shape"]
-        batch, query_tokens, index_heads, index_dim = query_shape
-        context_tokens = key_shape[1]
-        block_size = 128 if context_tokens % 128 == 0 else context_tokens
-        blocks_per_batch = context_tokens // block_size
-        quant_dtype = getattr(torch, "float8_e4m3fn", getattr(torch, "int8", dtype))
-        scale_dtype = getattr(torch, "float32", dtype)
-
-        query = self._tensor(
-            torch,
-            materialized_values_to_buffer(payload["query"]),
-            device=device,
-            dtype=quant_dtype,
-        ).reshape(batch * query_tokens, index_heads, index_dim)
-        keys = self._tensor(
-            torch,
-            materialized_values_to_buffer(payload["keys"]),
-            device=device,
-            dtype=quant_dtype,
-        ).reshape(batch * blocks_per_batch, block_size, 1, index_dim)
-        weights = self._tensor(
-            torch,
-            materialized_values_to_buffer(payload["weights"]),
-            device=device,
-            dtype=scale_dtype,
-        ).reshape(batch * query_tokens, index_heads)
-        query_dequant_scale = self._tensor(
-            torch,
-            tuple(1.0 for _ in range(batch * query_tokens * index_heads)),
-            device=device,
-            dtype=scale_dtype,
-        ).reshape(batch * query_tokens, index_heads)
-        key_dequant_scale = self._tensor(
-            torch,
-            tuple(1.0 for _ in range(batch * blocks_per_batch * block_size)),
-            device=device,
-            dtype=scale_dtype,
-        ).reshape(batch * blocks_per_batch, block_size, 1)
-        actual_seq_lengths_query = self._tensor(
-            torch,
-            tuple((index + 1) * query_tokens for index in range(batch)),
-            device=device,
-            dtype=torch.int32,
-        )
-        actual_seq_lengths_key = self._tensor(
-            torch,
-            tuple((index + 1) * context_tokens for index in range(batch)),
-            device=device,
-            dtype=torch.int32,
-        )
-        block_table = self._tensor(
-            torch,
-            tuple(range(batch * blocks_per_batch)),
-            device=device,
-            dtype=torch.int32,
-        ).reshape(batch, blocks_per_batch)
-        common_kwargs = {
-            "actual_seq_lengths_query": actual_seq_lengths_query,
-            "actual_seq_lengths_key": actual_seq_lengths_key,
-            "num_heads_q": index_heads,
-            "num_heads_k": 1,
-            "head_dim": index_dim,
-            "query_quant_mode": 0,
-            "key_quant_mode": 0,
-            "batch_size": batch,
-            "max_seqlen_q": query_tokens,
-            "max_seqlen_k": context_tokens,
-            "layout_query": "TND",
-            "layout_key": "PA_BSND",
-            "sparse_count": payload["top_k"],
-            "sparse_mode": 3,
-            "pre_tokens": (1 << 63) - 1,
-            "next_tokens": (1 << 63) - 1,
-            "cmp_ratio": 4,
-        }
-        metadata = metadata_op(**common_kwargs, device=str(device))
-        metadata_only_kwargs = {
-            "num_heads_q",
-            "num_heads_k",
-            "head_dim",
-            "batch_size",
-            "max_seqlen_q",
-            "max_seqlen_k",
-        }
-        indexer_kwargs = {
-            key: value
-            for key, value in common_kwargs.items()
-            if key not in metadata_only_kwargs
-        }
-
-        def operator():
-            result = indexer_op(
-                query=query,
-                key=keys,
-                weights=weights,
-                query_dequant_scale=query_dequant_scale,
-                key_dequant_scale=key_dequant_scale,
-                block_table=block_table,
-                metadata=metadata,
-                return_value=False,
-                **indexer_kwargs,
-            )
-            return result[0] if isinstance(result, tuple) else result
-
-        return operator
-
-    def _vllm_ascend_sparse_attention_callable(
-        self,
-        torch,
-        request: OperatorBenchmarkRequest,
-        case,
-        *,
-        device,
-        dtype,
-    ):
-        metadata_op, attention_op = self._custom_op_pair(
-            torch,
-            "npu_kv_quant_sparse_attn_sharedkv_metadata",
-            "npu_kv_quant_sparse_attn_sharedkv",
-        )
-        if metadata_op is not None and attention_op is not None:
-            return self._vllm_ascend_quant_sparse_attention_callable(
-                torch,
-                request,
-                case,
-                device=device,
-                dtype=dtype,
-                metadata_op=metadata_op,
-                attention_op=attention_op,
-            )
-
-        metadata_op, attention_op = self._custom_op_pair(
-            torch,
-            "npu_sparse_attn_sharedkv_metadata",
-            "npu_sparse_attn_sharedkv",
-        )
-        if metadata_op is None or attention_op is None:
-            raise RuntimeError(
-                "vllm_ascend sparse_attention requires "
-                "torch.ops._C_ascend.npu_kv_quant_sparse_attn_sharedkv_metadata and "
-                "torch.ops._C_ascend.npu_kv_quant_sparse_attn_sharedkv, or "
-                "torch.ops._C_ascend.npu_sparse_attn_sharedkv_metadata and "
-                "torch.ops._C_ascend.npu_sparse_attn_sharedkv"
-            )
-
-        payload = materialize_sparse_attention_inputs(
-            case, dtype=request.dtype, seed=request.seed
-        )
-        batch, query_heads, query_tokens, head_dim = payload["query_shape"]
-        _, kv_heads, context_tokens, _ = payload["key_shape"]
-        selected_tokens = payload["indices_shape"][2]
-        block_size = 128 if context_tokens % 128 == 0 else context_tokens
-        blocks_per_batch = context_tokens // block_size
-
-        query = self._tensor(
-            torch,
-            self._materialized_bhtd_values_as_bthd(
-                payload["query"],
-                batch=batch,
-                heads=query_heads,
-                tokens=query_tokens,
-                dim=head_dim,
-            ),
-            device=device,
-            dtype=dtype,
-        )
-        query = query.reshape(batch * query_tokens, query_heads, head_dim)
-        cmp_kv = self._tensor(
-            torch,
-            self._materialized_kv_values_as_bthd(
-                payload["keys"],
-                batch=batch,
-                kv_heads=kv_heads,
-                context_tokens=context_tokens,
-                kept_context_tokens=context_tokens,
-                logical_dim=head_dim,
-                physical_dim=head_dim,
-            ),
-            device=device,
-            dtype=dtype,
-        )
-        cmp_kv = cmp_kv.reshape(batch * blocks_per_batch, block_size, kv_heads, head_dim)
-        cmp_sparse_indices = self._tensor(
-            torch,
-            payload["indices"],
-            device=device,
-            dtype=torch.int32,
-        ).reshape(batch * query_tokens, kv_heads, selected_tokens)
-        cmp_block_table = self._tensor(
-            torch,
-            tuple(range(batch * blocks_per_batch)),
-            device=device,
-            dtype=torch.int32,
-        ).reshape(batch, blocks_per_batch)
-        cu_seqlens_q = self._tensor(
-            torch,
-            tuple(index * query_tokens for index in range(batch + 1)),
-            device=device,
-            dtype=torch.int32,
-        )
-        seqused_kv = self._tensor(
-            torch,
-            tuple(context_tokens for _ in range(batch)),
-            device=device,
-            dtype=torch.int32,
-        )
-        softmax_scale = head_dim ** -0.5
-
-        metadata = metadata_op(
-            num_heads_q=query_heads,
-            num_heads_kv=kv_heads,
-            head_dim=head_dim,
-            cu_seqlens_q=cu_seqlens_q,
-            cu_seqlens_ori_kv=None,
-            cu_seqlens_cmp_kv=None,
-            seqused_q=None,
-            seqused_kv=seqused_kv,
-            batch_size=batch,
-            max_seqlen_q=query_tokens,
-            max_seqlen_kv=context_tokens,
-            ori_topk=0,
-            cmp_topk=selected_tokens,
-            cmp_ratio=1,
-            ori_mask_mode=4,
-            cmp_mask_mode=3,
-            ori_win_left=0,
-            ori_win_right=0,
-            layout_q="TND",
-            layout_kv="PA_ND",
-            has_ori_kv=False,
-            has_cmp_kv=True,
-            device=str(device),
-        )
-
-        def operator():
-            return attention_op(
-                query,
-                ori_kv=None,
-                cmp_kv=cmp_kv,
-                ori_sparse_indices=None,
-                cmp_sparse_indices=cmp_sparse_indices,
-                ori_block_table=None,
-                cmp_block_table=cmp_block_table,
-                cu_seqlens_q=cu_seqlens_q,
-                cu_seqlens_ori_kv=None,
-                cu_seqlens_cmp_kv=None,
-                seqused_q=None,
-                seqused_kv=seqused_kv,
-                sinks=None,
-                metadata=metadata,
-                softmax_scale=softmax_scale,
-                cmp_ratio=1,
-                ori_mask_mode=4,
-                cmp_mask_mode=3,
-                ori_win_left=0,
-                ori_win_right=0,
-                layout_q="TND",
-                layout_kv="PA_ND",
-                return_softmax_lse=True,
-            )[0]
-
-        return operator
-
-    def _vllm_ascend_quant_sparse_attention_callable(
-        self,
-        torch,
-        request: OperatorBenchmarkRequest,
-        case,
-        *,
-        device,
-        dtype,
-        metadata_op,
-        attention_op,
-    ):
-        payload = materialize_sparse_attention_inputs(
-            case, dtype=request.dtype, seed=request.seed
-        )
-        batch, query_heads, query_tokens, head_dim = payload["query_shape"]
-        _, kv_heads, context_tokens, _ = payload["key_shape"]
-        selected_tokens = payload["indices_shape"][2]
-        a5_physical_layout = (
-            head_dim == 512
-            and kv_heads == 1
-            and query_heads in {64, 128}
-            and selected_tokens in {512, 1024}
-        )
-        cmp_ratio = 4 if a5_physical_layout else 1
-        ori_context_tokens = context_tokens
-        cmp_context_tokens = context_tokens // cmp_ratio
-        ori_block_size = 128 if ori_context_tokens % 128 == 0 else ori_context_tokens
-        cmp_block_size = 128 if cmp_context_tokens % 128 == 0 else cmp_context_tokens
-        ori_blocks_per_batch = ori_context_tokens // ori_block_size
-        cmp_blocks_per_batch = cmp_context_tokens // cmp_block_size
-        kv_head_dim = 640 if a5_physical_layout else head_dim
-        query_dtype = getattr(torch, "bfloat16", dtype)
-        kv_dtype = getattr(torch, "float8_e4m3fn", dtype)
-        scale_dtype = getattr(torch, "float32", dtype)
-
-        query = self._tensor(
-            torch,
-            self._materialized_bhtd_values_as_bthd(
-                payload["query"],
-                batch=batch,
-                heads=query_heads,
-                tokens=query_tokens,
-                dim=head_dim,
-            ),
-            device=device,
-            dtype=query_dtype,
-        )
-        query = query.reshape(batch * query_tokens, query_heads, head_dim)
-        ori_kv = None
-        ori_block_table = None
-        cu_seqlens_ori_kv = None
-        if a5_physical_layout:
-            ori_kv = self._tensor(
-                torch,
-                self._materialized_kv_values_as_bthd(
-                    payload["values"],
-                    batch=batch,
-                    kv_heads=kv_heads,
-                    context_tokens=context_tokens,
-                    kept_context_tokens=ori_context_tokens,
-                    logical_dim=head_dim,
-                    physical_dim=kv_head_dim,
-                ),
-                device=device,
-                dtype=kv_dtype,
-            )
-            ori_kv = ori_kv.reshape(
-                batch * ori_blocks_per_batch,
-                ori_block_size,
-                kv_heads,
-                kv_head_dim,
-            )
-            ori_block_table = self._tensor(
-                torch,
-                tuple(range(batch * ori_blocks_per_batch)),
-                device=device,
-                dtype=torch.int32,
-            ).reshape(batch, ori_blocks_per_batch)
-            cu_seqlens_ori_kv = self._tensor(
-                torch,
-                tuple(index * ori_context_tokens for index in range(batch + 1)),
-                device=device,
-                dtype=torch.int32,
-            )
-        cmp_kv = self._tensor(
-            torch,
-            self._materialized_kv_values_as_bthd(
-                payload["keys"],
-                batch=batch,
-                kv_heads=kv_heads,
-                context_tokens=context_tokens,
-                kept_context_tokens=cmp_context_tokens,
-                logical_dim=head_dim,
-                physical_dim=kv_head_dim,
-            ),
-            device=device,
-            dtype=kv_dtype,
-        )
-        cmp_kv = cmp_kv.reshape(
-            batch * cmp_blocks_per_batch, cmp_block_size, kv_heads, kv_head_dim
-        )
-        cmp_indices = payload["indices"]
-        if a5_physical_layout:
-            cmp_indices = tuple(index % cmp_context_tokens for index in cmp_indices)
-        cmp_sparse_indices = self._tensor(
-            torch,
-            cmp_indices,
-            device=device,
-            dtype=torch.int32,
-        ).reshape(batch * query_tokens, kv_heads, selected_tokens)
-        cmp_block_table = self._tensor(
-            torch,
-            tuple(range(batch * cmp_blocks_per_batch)),
-            device=device,
-            dtype=torch.int32,
-        ).reshape(batch, cmp_blocks_per_batch)
-        cu_seqlens_q = self._tensor(
-            torch,
-            tuple(index * query_tokens for index in range(batch + 1)),
-            device=device,
-            dtype=torch.int32,
-        )
-        cu_seqlens_cmp_kv = self._tensor(
-            torch,
-            tuple(index * cmp_context_tokens for index in range(batch + 1)),
-            device=device,
-            dtype=torch.int32,
-        )
-        seqused_kv = self._tensor(
-            torch,
-            tuple(context_tokens for _ in range(batch)),
-            device=device,
-            dtype=torch.int32,
-        )
-        sinks = None
-        if a5_physical_layout:
-            sinks = self._tensor(
-                torch,
-                tuple(0.0 for _ in range(query_heads)),
-                device=device,
-                dtype=scale_dtype,
-            ).reshape((query_heads,))
-        softmax_scale = head_dim ** -0.5
-
-        metadata = metadata_op(
-            num_heads_q=query_heads,
-            num_heads_kv=kv_heads,
-            head_dim=head_dim,
-            kv_quant_mode=1,
-            cu_seqlens_q=cu_seqlens_q,
-            cu_seqlens_ori_kv=cu_seqlens_ori_kv,
-            cu_seqlens_cmp_kv=cu_seqlens_cmp_kv,
-            seqused_q=None,
-            seqused_kv=seqused_kv,
-            batch_size=batch,
-            max_seqlen_q=query_tokens,
-            max_seqlen_kv=context_tokens,
-            ori_topk=0,
-            cmp_topk=selected_tokens,
-            tile_size=64,
-            rope_head_dim=64,
-            cmp_ratio=cmp_ratio,
-            ori_mask_mode=4,
-            cmp_mask_mode=3,
-            ori_win_left=127,
-            ori_win_right=0,
-            layout_q="TND",
-            layout_kv="PA_ND",
-            has_ori_kv=a5_physical_layout,
-            has_cmp_kv=True,
-            device=str(device),
-        )
-
-        def operator():
-            return attention_op(
-                query,
-                kv_quant_mode=1,
-                ori_kv=ori_kv,
-                cmp_kv=cmp_kv,
-                ori_sparse_indices=None,
-                cmp_sparse_indices=cmp_sparse_indices,
-                ori_block_table=ori_block_table,
-                cmp_block_table=cmp_block_table,
-                cu_seqlens_q=cu_seqlens_q,
-                cu_seqlens_ori_kv=None,
-                cu_seqlens_cmp_kv=None,
-                seqused_q=None,
-                seqused_kv=seqused_kv,
-                sinks=sinks,
-                metadata=metadata,
-                tile_size=64,
-                rope_head_dim=64,
-                softmax_scale=softmax_scale,
-                cmp_ratio=cmp_ratio,
-                ori_mask_mode=4,
-                cmp_mask_mode=3,
-                ori_win_left=127,
-                ori_win_right=0,
-                layout_q="TND",
-                layout_kv="PA_ND",
-                return_softmax_lse=True,
-            )[0]
-
-        return operator
 
     def _before_run_operator(self, request: OperatorBenchmarkRequest) -> None:
         if request.implementation == "simt":
@@ -1223,15 +548,21 @@ class AscendBackend(TorchOperatorBackend):
         self._load_simt_op_module(request, op_name)
 
     def _simt_op_module_name(self, op_name: str, version: str | None) -> str | None:
-        return _ASCEND_SIMT_OP_MODULES.get((op_name, version or "v1"))
+        plugin = get_operator_plugin(op_name)
+        if plugin.simt_module_name is None:
+            return None
+        return plugin.simt_module_name(version)
 
-    def _load_simt_op_module(self, request: OperatorBenchmarkRequest, op_name: str) -> None:
+    def _load_simt_op_module(self, request: OperatorBenchmarkRequest, op_name: str):
         module_name = self._simt_op_module_name(op_name, request.implementation_version)
         if module_name is None:
-            return
+            raise RuntimeError(
+                "Ascend SIMT operator requested but no Python module is registered "
+                f"for {op_name} version {request.implementation_version or 'v1'}"
+            )
         importlib.invalidate_caches()
         try:
-            importlib.import_module(module_name)
+            return importlib.import_module(module_name)
         except ModuleNotFoundError as exc:
             raise RuntimeError(
                 "Ascend SIMT operator deployment completed but Python module "
@@ -1251,20 +582,3 @@ class AscendBackend(TorchOperatorBackend):
                 "Ascend SIMT operator deployment failed "
                 f"({script_path}, exit {result.returncode}): {result.stderr.strip()}"
             )
-
-    def _softmax(self, torch, tensor, dim: int | None, request: OperatorBenchmarkRequest):
-        if request.implementation == "simt":
-            module_name = self._simt_op_module_name(request.op, request.implementation_version)
-            if module_name is None:
-                raise RuntimeError(
-                    "Ascend SIMT softmax requested but no SIMT operator module is "
-                    f"registered for version {request.implementation_version or 'v1'}"
-                )
-            try:
-                aten_softmax_module = importlib.import_module(module_name)
-            except ModuleNotFoundError as exc:
-                raise RuntimeError(
-                    f"Ascend SIMT softmax requested but {module_name} is not importable"
-                ) from exc
-            return aten_softmax_module.ops.spatial_softmax_forward(tensor, int(dim))
-        return torch.softmax(tensor, dim=dim)

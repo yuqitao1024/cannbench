@@ -47,6 +47,48 @@ def test_operator_plugins_cover_registered_operator_names():
     assert plugin_names == list_operator_names()
 
 
+def test_operator_plugins_own_external_implementation_hooks():
+    softmax = get_operator_plugin("softmax")
+    lightning_indexer = get_operator_plugin("lightning_indexer")
+    sparse_attention = get_operator_plugin("sparse_attention")
+
+    assert callable(softmax.build_simt_callable)
+    assert softmax.simt_module_name("v1") == "aten_softmax"
+    assert softmax.simt_module_name("v2") == "aten_softmax_v2"
+    assert softmax.simt_module_name("v3") == "aten_softmax_v3"
+
+    assert callable(lightning_indexer.build_cuda_library_callable)
+    assert callable(lightning_indexer.build_vllm_ascend_callable)
+    assert callable(sparse_attention.build_cuda_library_callable)
+    assert callable(sparse_attention.build_vllm_ascend_callable)
+
+
+def test_operator_plugin_default_profile_kernel_selection_comes_from_plugin():
+    plugin = get_operator_plugin("embedding")
+
+    selection = plugin.profile_kernel_selection(
+        backend="nvidia",
+        implementation=None,
+        implementation_version=None,
+    )
+
+    assert selection.kernel_name_patterns == ("embedding",)
+
+
+def test_non_operator_source_does_not_hardcode_builtin_operator_names():
+    checked_files = [
+        path
+        for path in Path("src/cannbench").rglob("*.py")
+        if "src/cannbench/operators/" not in path.as_posix()
+    ]
+
+    for path in checked_files:
+        source = path.read_text(encoding="utf-8")
+        for operator_name in list_operator_names():
+            assert f'"{operator_name}"' not in source, path
+            assert f"'{operator_name}'" not in source, path
+
+
 def test_softmax_operator_plugin_owns_dataset_and_materialization():
     plugin = get_operator_plugin("softmax")
 

@@ -2,9 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-SUPPORTED_SOFTMAX_DIMS = {-1, -2, 0, 1}
-
-
 def _normalize_payload_value(value: object) -> object:
     if isinstance(value, tuple):
         return tuple(_normalize_payload_value(item) for item in value)
@@ -101,40 +98,6 @@ class OperatorCase:
             "source_op": self.source_op,
             "payload": _json_payload_value(self.payload),
         }
-
-
-def build_softmax_case(
-    *,
-    case_id: str,
-    family: str,
-    dimensions: tuple[int, ...],
-    dim: int,
-    source_kind: str,
-    source_project: str,
-    source_model: str,
-    source_file: str,
-    source_op: str,
-) -> OperatorCase:
-    normalized_dimensions = tuple(int(value) for value in dimensions)
-    if not normalized_dimensions:
-        raise ValueError("dimensions must be non-empty")
-    if any(value <= 0 for value in normalized_dimensions):
-        raise ValueError("dimensions must be positive integers")
-    if dim < -len(normalized_dimensions) or dim >= len(normalized_dimensions):
-        raise ValueError("dim must address an axis in dimensions")
-    return OperatorCase(
-        case_id=case_id,
-        family=family,
-        source_kind=source_kind,
-        source_project=source_project,
-        source_model=source_model,
-        source_file=source_file,
-        source_op=source_op,
-        payload={
-            "dimensions": normalized_dimensions,
-            "dim": dim,
-        },
-    )
 
 
 @dataclass(frozen=True)

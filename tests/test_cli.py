@@ -15,7 +15,6 @@ from cannbench.core.remote import RemoteCollectionResult, RemoteEndpoint
 from cannbench.core.result import (
     OperatorBenchmarkResult,
     OperatorCase,
-    build_softmax_case,
 )
 from cannbench.core.prepared_input import (
     build_prepared_operator_input,
@@ -31,16 +30,15 @@ def sample_result() -> OperatorBenchmarkResult:
         device_name="Fake GPU",
         op="softmax",
         dtype="float16",
-        case=build_softmax_case(
+        case=OperatorCase(
             case_id="t5_attention",
             family="attention",
-            dimensions=(4, 8, 1024, 1024),
-            dim=-1,
             source_kind="real_model",
             source_project="TritonBench",
             source_model="T5Small",
             source_file="tritonbench/tritonbench/data/input_configs/hf_train/T5Small_train.json",
             source_op="softmax",
+            payload={"dimensions": (4, 8, 1024, 1024), "dim": -1},
         ),
         warmup=2,
         iterations=3,
@@ -2140,7 +2138,7 @@ def test_main_rejects_dsa_fused_operator_with_prepared_input(tmp_path, capsys):
 
     captured = capsys.readouterr()
     assert excinfo.value.code == 2
-    assert "--prepared-input and --prepared-dir are not supported for DSA fused operators" in captured.err
+    assert "--prepared-input and --prepared-dir are not supported for workflow operators" in captured.err
 
 
 def test_main_rejects_dsa_fused_operator_case_with_wrong_phase(capsys):

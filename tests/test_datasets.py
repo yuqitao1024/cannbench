@@ -1,9 +1,4 @@
 import pytest
-
-from cannbench.datasets.synthetic import (
-    build_softmax_smoke_case,
-    build_softmax_stress_case,
-)
 from cannbench.operators.builtin.cross_entropy import (
     get_cross_entropy_case,
     get_cross_entropy_dataset,
@@ -160,40 +155,6 @@ def test_get_softmax_dataset_rejects_unknown_name():
 def test_get_softmax_case_rejects_unknown_case_id():
     with pytest.raises(ValueError, match="Unknown softmax case"):
         get_softmax_case("smoke", "missing")
-
-
-def test_build_softmax_smoke_case_applies_shared_metadata():
-    case = build_softmax_smoke_case(
-        case_id="tiny_attention_scores",
-        family="attention",
-        shape=(2, 4, 8, 8),
-        dim=-1,
-        source_model="smoke_attention_fixture",
-    )
-
-    assert case.case_id == "tiny_attention_scores"
-    assert case.shape == (2, 4, 8, 8)
-    assert case.source_kind == "synthetic_smoke"
-    assert case.source_project == "cannbench"
-    assert case.source_file == "built-in"
-    assert case.source_op == "softmax"
-
-
-def test_build_softmax_stress_case_applies_shared_metadata():
-    case = build_softmax_stress_case(
-        case_id="small_reduction_axis",
-        family="reduction_edge",
-        shape=(16384, 2),
-        dim=-1,
-        source_model="softmax_small_axis_boundary",
-    )
-
-    assert case.case_id == "small_reduction_axis"
-    assert case.shape == (16384, 2)
-    assert case.source_kind == "synthetic_boundary"
-    assert case.source_project == "cannbench"
-    assert case.source_file == "generated"
-    assert case.source_op == "softmax"
 
 
 def test_materialized_softmax_inputs_are_deterministic_for_same_seed():

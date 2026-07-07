@@ -4,7 +4,22 @@ from types import SimpleNamespace
 import pytest
 
 from cannbench.core.config import OperatorBenchmarkRequest
+from cannbench.operators import TorchOperatorContext, get_operator_plugin
 from cannbench.operators.builtin.sparse_attention.cases import SparseAttentionCase
+
+
+def _build_sparse_attention_vllm_callable(*, backend, torch, request, case, device, dtype):
+    plugin = get_operator_plugin("sparse_attention")
+    return plugin.build_vllm_ascend_callable(
+        TorchOperatorContext(
+            backend=backend,
+            torch=torch,
+            request=request,
+            case=case,
+            device=device,
+            dtype=dtype,
+        )
+    )
 
 
 def test_operator_request_preserves_external_implementation():
@@ -420,10 +435,11 @@ def test_ascend_vllm_sparse_attention_uses_a5_kv_physical_dim(monkeypatch):
     )
     request = SimpleNamespace(dtype="bfloat16", seed=0)
 
-    operator = AscendBackend()._vllm_ascend_sparse_attention_callable(
-        FakeTorch(),
-        request,
-        case,
+    operator = _build_sparse_attention_vllm_callable(
+        backend=AscendBackend(),
+        torch=FakeTorch(),
+        request=request,
+        case=case,
         device="npu",
         dtype="bfloat16",
     )
@@ -508,10 +524,11 @@ def test_ascend_vllm_sparse_attention_a5_setup_avoids_device_permute(monkeypatch
     )
     request = SimpleNamespace(dtype="bfloat16", seed=0)
 
-    operator = AscendBackend()._vllm_ascend_sparse_attention_callable(
-        FakeTorch(),
-        request,
-        case,
+    operator = _build_sparse_attention_vllm_callable(
+        backend=AscendBackend(),
+        torch=FakeTorch(),
+        request=request,
+        case=case,
         device="npu",
         dtype="bfloat16",
     )

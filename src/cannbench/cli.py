@@ -50,16 +50,7 @@ from cannbench.core.execution import (
     LocalBenchExecutor,
     RemoteBenchExecutor,
 )
-from cannbench.operators.builtin._dsa_fused import DSA_FUSED_OPERATORS
-from cannbench.operators.builtin.dsa_decode import (
-    build_dsa_decode_workflow,
-    list_dsa_decode_workflows,
-)
-from cannbench.operators.builtin.dsa_prefill import (
-    build_dsa_prefill_workflow,
-    list_dsa_prefill_workflows,
-)
-from cannbench.operators import list_operator_names
+from cannbench.operators import get_operator_plugin, list_operator_names
 
 DATASET_CHOICES = (
     "smoke",
@@ -133,6 +124,19 @@ def _resolve_implementation_version(implementation: str | None, version: str | N
     return version or "v1"
 
 
+def _workflow_plugin(op: str | None):
+    if op is None:
+        return None
+    plugin = get_operator_plugin(op)
+    if plugin.build_workflow is None or plugin.list_workflows is None:
+        return None
+    return plugin
+
+
+def _is_workflow_operator(op: str | None) -> bool:
+    return op is not None and _workflow_plugin(op) is not None
+
+
 def _prepared_manifest_path(base_dir: Path, op: str, dataset: str, case_id: str, dtype: str, seed: int) -> Path:
     return base_dir / op / dataset / f"{case_id}-{dtype}-seed{seed}.json"
 
@@ -142,11 +146,12 @@ def _build_request_from_prepared(
     args: argparse.Namespace,
 ) -> OperatorBenchmarkRequest:
     if args.op and prepared.op != args.op:
-        is_dsa_component = (
-            args.op in DSA_FUSED_OPERATORS
-            and prepared.op in {"lightning_indexer", "sparse_attention"}
+        workflow_plugin = _workflow_plugin(args.op)
+        is_workflow_component = (
+            workflow_plugin is not None
+            and prepared.op in workflow_plugin.component_operator_names
         )
-        if not is_dsa_component:
+        if not is_workflow_component:
             raise ValueError(
                 f"prepared input operator mismatch: expected {args.op}, got {prepared.op}"
             )
@@ -266,10 +271,10 @@ def _validate_benchmark_selection(
 
     if prepared_input is not None and prepared_dir is not None:
         raise ValueError("--prepared-input and --prepared-dir are mutually exclusive")
-    if op in DSA_FUSED_OPERATORS and (prepared_input is not None or prepared_dir is not None):
-        raise ValueError("--prepared-input and --prepared-dir are not supported for DSA fused operators")
-    if op in DSA_FUSED_OPERATORS and not allow_batch:
-        raise ValueError("DSA fused operators are only supported for bench")
+    if _is_workflow_operator(op) and (prepared_input is not None or prepared_dir is not None):
+        raise ValueError("--prepared-input and --prepared-dir are not supported for workflow operators")
+    if _is_workflow_operator(op) and not allow_batch:
+        raise ValueError("workflow operators are only supported for bench")
     if (prepared_input is not None or prepared_dir is not None) and getattr(args, "dataset_provided", False):
         raise ValueError("--dataset cannot be used with --prepared-input or --prepared-dir")
     if (prepared_input is not None or prepared_dir is not None) and case_id is not None:
@@ -334,14 +339,6 @@ def _build_canonical_run_name(
     )
 
 
-def _dsa_fused_operator_phase(op: str) -> str:
-    if op == "dsa_decode":
-        return "decode"
-    if op == "dsa_prefill":
-        return "prefill"
-    raise ValueError(f"unsupported DSA fused operator: {op}")
-
-
 def _resolve_bench_run_name(
     args: argparse.Namespace,
     plans: list[PreparedInputPlan],
@@ -349,11 +346,11 @@ def _resolve_bench_run_name(
     if args.run_name:
         return args.run_name
     op_arg = getattr(args, "op", None)
-    if op_arg in DSA_FUSED_OPERATORS:
+    if _is_workflow_operator(op_arg):
         signatures = {plan.dtype for plan in plans}
         if len(signatures) != 1:
             raise ValueError(
-                "automatic DSA fused run-name requires a single dtype combination"
+                "automatic workflow run-name requires a single dtype combination"
             )
         dtype = next(iter(signatures))
         return _build_canonical_run_name(
@@ -451,18 +448,14 @@ def _plan_from_workflow_step(step) -> PreparedInputPlan:
     )
 
 
-def _plans_from_dsa_fused_operator_selection(args: argparse.Namespace) -> list[PreparedInputPlan]:
-    phase = _dsa_fused_operator_phase(args.op)
+def _plans_from_workflow_operator_selection(args: argparse.Namespace) -> list[PreparedInputPlan]:
+    plugin = _workflow_plugin(args.op)
+    if plugin is None or plugin.build_workflow is None or plugin.list_workflows is None:
+        raise ValueError(f"{args.op} is not a workflow operator")
     dataset = args.dataset
-    build_workflow = (
-        build_dsa_decode_workflow if args.op == "dsa_decode" else build_dsa_prefill_workflow
-    )
-    list_workflows = (
-        list_dsa_decode_workflows if args.op == "dsa_decode" else list_dsa_prefill_workflows
-    )
     if args.case_id is not None:
         workflows = [
-            build_workflow(
+            plugin.build_workflow(
                 dataset=dataset,
                 case_id=args.case_id,
                 dtype=args.dtype,
@@ -471,7 +464,7 @@ def _plans_from_dsa_fused_operator_selection(args: argparse.Namespace) -> list[P
         ]
     else:
         workflows = list(
-            list_workflows(
+            plugin.list_workflows(
                 dataset,
                 dtype=args.dtype,
                 seed=args.seed,
@@ -479,9 +472,7 @@ def _plans_from_dsa_fused_operator_selection(args: argparse.Namespace) -> list[P
         )
 
     if not workflows:
-        raise ValueError(
-            f"No runnable DSA {phase} workflows for dataset {dataset}"
-        )
+        raise ValueError(f"No runnable workflows for {args.op} dataset {dataset}")
 
     return [
         _plan_from_workflow_step(step)
@@ -625,15 +616,17 @@ def _sum_metric(records: list[dict[str, object]], name: str) -> float:
     return sum(float(record["metrics"][name]) for record in records)
 
 
-def _aggregate_dsa_workflow_benchmark_records(
+def _aggregate_workflow_benchmark_records(
     *,
     args: argparse.Namespace,
     run_name: str,
     plans: list,
     component_records: list[dict[str, object]],
 ) -> list[dict[str, object]]:
-    if getattr(args, "op", None) not in DSA_FUSED_OPERATORS:
+    plugin = _workflow_plugin(getattr(args, "op", None))
+    if plugin is None:
         return component_records
+    component_operator_names = plugin.component_operator_names
 
     records_by_case: dict[str, list[dict[str, object]]] = {}
     for record in component_records:
@@ -647,18 +640,14 @@ def _aggregate_dsa_workflow_benchmark_records(
     for case_id in _ordered_unique_case_ids(plans):
         records = records_by_case.get(case_id, [])
         records_by_op = {str(record["operator"]): record for record in records}
-        if (
-            "lightning_indexer" not in records_by_op
-            or "sparse_attention" not in records_by_op
-        ):
+        if any(name not in records_by_op for name in component_operator_names):
             continue
 
-        sparse_record = records_by_op["sparse_attention"]
         ordered_component_records = [
-            records_by_op["lightning_indexer"],
-            sparse_record,
+            records_by_op[name] for name in component_operator_names
         ]
-        dtype = str(sparse_record["dtype"])
+        reference_record = ordered_component_records[-1]
+        dtype = str(reference_record["dtype"])
         seed = seeds_by_case[case_id]
         workflow_prepared = build_prepared_operator_input(
             op=args.op,
@@ -683,12 +672,12 @@ def _aggregate_dsa_workflow_benchmark_records(
                 "dataset": args.dataset,
                 "case_id": case_id,
                 "family": workflow_case.family,
-                "shape": sparse_record["shape"],
+                "shape": reference_record["shape"],
                 "dtype": dtype,
-                "backend": sparse_record["backend"],
-                "device_class": sparse_record["device_class"],
-                "implementation": sparse_record["implementation"],
-                "implementation_version": sparse_record["implementation_version"],
+                "backend": reference_record["backend"],
+                "device_class": reference_record["device_class"],
+                "implementation": reference_record["implementation"],
+                "implementation_version": reference_record["implementation_version"],
                 "source_kind": workflow_case.source_kind,
                 "source_project": workflow_case.source_project,
                 "source_model": workflow_case.source_model,
@@ -911,7 +900,7 @@ def _run_local_bench_with_plans(
         implementation=getattr(args, "implementation", None),
         summary_rows=summary_rows,
         failure_rows=failure_rows,
-        benchmark_records=_aggregate_dsa_workflow_benchmark_records(
+        benchmark_records=_aggregate_workflow_benchmark_records(
             args=args,
             run_name=run_name,
             plans=plans,
@@ -1036,7 +1025,7 @@ def _run_remote_bench_with_plans(
         implementation=getattr(args, "implementation", None),
         summary_rows=summary_rows,
         failure_rows=failure_rows,
-        benchmark_records=_aggregate_dsa_workflow_benchmark_records(
+        benchmark_records=_aggregate_workflow_benchmark_records(
             args=args,
             run_name=run_name,
             plans=plans,
@@ -1108,8 +1097,8 @@ def _run_single_bench(args: argparse.Namespace) -> None:
     )
 
 
-def _run_dsa_fused_operator_bench(args: argparse.Namespace) -> None:
-    plans = _plans_from_dsa_fused_operator_selection(args)
+def _run_workflow_operator_bench(args: argparse.Namespace) -> None:
+    plans = _plans_from_workflow_operator_selection(args)
     run_name = _resolve_bench_run_name(args, plans)
     if args.endpoint is None:
         _run_local_bench_with_plans(
@@ -1130,8 +1119,8 @@ def _run_dsa_fused_operator_bench(args: argparse.Namespace) -> None:
 
 
 def _run_bench_command(args: argparse.Namespace) -> None:
-    if getattr(args, "op", None) in DSA_FUSED_OPERATORS:
-        _run_dsa_fused_operator_bench(args)
+    if _is_workflow_operator(getattr(args, "op", None)):
+        _run_workflow_operator_bench(args)
         return
     if _is_batch_mode(args):
         if args.endpoint is None:

@@ -55,6 +55,8 @@ PLUGIN = create_dsa_fused_plugin(
     get_dataset=get_dsa_prefill_dataset,
     get_case=get_dsa_prefill_case,
     materialize_inputs=materialize_dsa_prefill_inputs,
+    build_workflow=build_dsa_prefill_workflow,
+    list_workflows=list_dsa_prefill_workflows,
     sort_order=31,
 )
 
