@@ -239,7 +239,7 @@ def test_operator_request_defaults_output_formats():
         iterations=10,
     )
 
-    assert request.output_formats == ("json", "csv", "md")
+    assert request.output_formats == ("json", "csv")
 
 
 def test_operator_request_defaults_seed():

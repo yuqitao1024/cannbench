@@ -41,7 +41,6 @@ from cannbench.core.prepared_input import (
     write_prepared_operator_input,
 )
 from cannbench.core.remote import collect_remote_artifacts, read_remote_endpoint
-from cannbench.core.report import write_local_report
 from cannbench.core.output import (
     build_benchmark_artifact_stem,
     write_benchmark_outputs,
@@ -231,7 +230,6 @@ def build_parser() -> argparse.ArgumentParser:
     bench = subparsers.add_parser("bench")
     _benchmark_args(bench)
     bench.add_argument("--endpoint", type=Path)
-    bench.add_argument("--run-id")
     bench.add_argument("--capture-output", action="store_true", default=False)
 
     internal_run = subparsers.add_parser("internal-run")
@@ -269,12 +267,6 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8000)
     serve.add_argument("--enable-gpu-upload", action="store_true", default=False)
-
-    report = subparsers.add_parser("report")
-    report.add_argument("--nvidia", type=Path, required=True)
-    report.add_argument("--ascend", type=Path, required=True)
-    report.add_argument("--accuracy", type=Path, required=True)
-    report.add_argument("--output", type=Path, required=True)
 
     return parser
 
@@ -1009,7 +1001,7 @@ def _run_batch_remote_bench(args: argparse.Namespace) -> None:
         plans=plans,
         run_name=run_name,
         endpoint=endpoint,
-        parent_run_id=args.run_id or run_name,
+        parent_run_id=run_name,
     )
 
 
@@ -1030,7 +1022,7 @@ def _run_single_bench(args: argparse.Namespace) -> None:
         plans=plans,
         run_name=run_name,
         endpoint=endpoint,
-        parent_run_id=args.run_id or run_name,
+        parent_run_id=run_name,
     )
 
 
@@ -1051,7 +1043,7 @@ def _run_dsa_fused_operator_bench(args: argparse.Namespace) -> None:
         plans=plans,
         run_name=run_name,
         endpoint=endpoint,
-        parent_run_id=args.run_id or run_name,
+        parent_run_id=run_name,
     )
 
 
@@ -1138,16 +1130,6 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "compare":
         try:
             _run_compare_command(args)
-        except (RuntimeError, ValueError) as exc:
-            parser.error(str(exc))
-    elif args.command == "report":
-        try:
-            write_local_report(
-                output_path=args.output,
-                nvidia_dir=args.nvidia,
-                ascend_dir=args.ascend,
-                accuracy_path=args.accuracy,
-            )
         except (RuntimeError, ValueError) as exc:
             parser.error(str(exc))
     elif args.command == "publish":

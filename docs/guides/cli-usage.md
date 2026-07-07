@@ -11,7 +11,6 @@ CannBench exposes these primary commands:
 - `compare`: capture two backend outputs and compare correctness on the controller side.
 - `publish`: copy frontend-facing run artifacts into `published/`.
 - `serve`: host the static frontend and published result files.
-- `report`: generate a local Markdown report from collected run directories.
 
 `internal-run` is reserved for CannBench remote execution internals and should not be used directly in normal workflows.
 

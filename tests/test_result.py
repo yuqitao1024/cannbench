@@ -75,12 +75,12 @@ def test_result_to_json_dict_contains_core_fields():
     }
 
 
-def test_write_benchmark_outputs_creates_json_csv_and_markdown(tmp_path):
+def test_write_benchmark_outputs_creates_json_and_csv(tmp_path):
     result = _sample_result()
 
-    paths = write_benchmark_outputs(tmp_path, "sample-run", result, ("json", "csv", "md"))
+    paths = write_benchmark_outputs(tmp_path, "sample-run", result, ("json", "csv"))
 
-    assert sorted(paths.keys()) == ["csv", "json", "md"]
+    assert sorted(paths.keys()) == ["csv", "json"]
     assert json.loads(paths["json"].read_text())["backend"] == "nvidia"
     with paths["csv"].open(newline="") as handle:
         rows = list(reader(handle))
@@ -108,13 +108,6 @@ def test_write_benchmark_outputs_creates_json_csv_and_markdown(tmp_path):
         "5",
         "10",
     ]
-    markdown = paths["md"].read_text()
-    assert "| backend | nvidia |" in markdown
-    assert "| case_id | tiny_logits |" in markdown
-    assert "| source_model | smoke_fixture |" in markdown
-    assert "latency_ms" not in markdown
-    assert "throughput_ops_per_sec" not in markdown
-
 
 def test_write_benchmark_outputs_creates_only_requested_formats(tmp_path):
     paths = write_benchmark_outputs(tmp_path, "json-only", _sample_result(), ("json",))
@@ -122,7 +115,6 @@ def test_write_benchmark_outputs_creates_only_requested_formats(tmp_path):
     assert sorted(paths.keys()) == ["json"]
     assert paths["json"].name == "json-only.json"
     assert not (tmp_path / "json-only.csv").exists()
-    assert not (tmp_path / "json-only.md").exists()
 
 
 def test_write_benchmark_outputs_rejects_unsupported_formats(tmp_path):

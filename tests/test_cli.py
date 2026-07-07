@@ -518,26 +518,6 @@ def test_build_parser_defaults_bench_dataset_to_realistic():
     assert args.dataset == "realistic"
 
 
-def test_build_parser_exposes_report_subcommand():
-    parser = build_parser()
-    args = parser.parse_args(
-        [
-            "report",
-            "--nvidia",
-            "results/nvidia-softmax",
-            "--ascend",
-            "results/ascend-softmax",
-            "--accuracy",
-            "results/accuracy.json",
-            "--output",
-            "results/report.md",
-        ]
-    )
-
-    assert args.command == "report"
-    assert args.output.name == "report.md"
-
-
 def test_build_parser_accepts_ascend_backend():
     parser = build_parser()
     args = parser.parse_args(
@@ -636,7 +616,7 @@ def test_main_runs_internal_run_and_writes_outputs(tmp_path, monkeypatch):
     assert captured["output_dir"] == tmp_path
     assert captured["run_name"] == "softmax-run"
     assert captured["result"] is result
-    assert captured["formats"] == ("json", "csv", "md")
+    assert captured["formats"] == ("json", "csv")
 
 
 def test_main_runs_bench_and_maps_simt_to_simt_op_deployment(tmp_path, monkeypatch):
@@ -849,7 +829,7 @@ def test_main_remote_bench_uses_remote_executor(tmp_path, monkeypatch):
             "tiny_logits",
             "--output-dir",
             str(tmp_path),
-            "--run-id",
+            "--run-name",
             "executor-remote",
         ]
     )
@@ -976,7 +956,7 @@ def test_main_runs_single_remote_bench_with_profile_layout_and_meta(tmp_path, mo
             str(tmp_path / "ascend.json"),
             "--output-dir",
             str(tmp_path),
-            "--run-id",
+            "--run-name",
             "single-collect-profiled",
             "--op",
             "softmax",
@@ -990,8 +970,7 @@ def test_main_runs_single_remote_bench_with_profile_layout_and_meta(tmp_path, mo
         ]
     )
 
-    canonical = "opbench-ascend-950pr-cannops-softmax-smoke-float16"
-    layout = build_run_layout(tmp_path, canonical)
+    layout = build_run_layout(tmp_path, "single-collect-profiled")
     summary = json.loads((layout.meta_dir / "summary.json").read_text())
     benchmark_records = json.loads((layout.meta_dir / "benchmark-records.json").read_text())
     failures = json.loads((layout.meta_dir / "failures.json").read_text())
@@ -1396,8 +1375,6 @@ def test_main_bench_invokes_remote_collection(tmp_path, monkeypatch):
             str(prepared_path),
             "--output-dir",
             str(output_dir),
-            "--run-id",
-            "softmax-run",
             "--capture-output",
             "--warmup",
             "3",
@@ -1413,7 +1390,7 @@ def test_main_bench_invokes_remote_collection(tmp_path, monkeypatch):
     assert captured["endpoint_path"] == endpoint_path
     assert Path(captured["prepared_input"]).is_relative_to(build_run_layout(output_dir, canonical).prepared_dir)
     assert captured["output_dir"].parent == build_run_layout(output_dir, canonical).root
-    assert captured["run_id"] == "softmax-run"
+    assert captured["run_id"] == canonical
     assert captured["capture_output"] is True
     assert captured["profile_device_time"] is True
     assert captured["warmup"] == 3
@@ -1479,8 +1456,6 @@ def test_main_remote_bench_builds_prepared_input_when_case_is_provided(tmp_path,
             str(endpoint_path),
             "--output-dir",
             str(output_dir),
-            "--run-id",
-            "softmax-run",
             "--op",
             "softmax",
             "--dtype",
@@ -1677,8 +1652,6 @@ def test_main_runs_batch_remote_bench_and_writes_aggregated_artifacts(tmp_path, 
             str(tmp_path / "ascend.json"),
             "--output-dir",
             str(output_dir),
-            "--run-id",
-            "remote-root",
             "--run-name",
             "softmax-remote-batch",
             "--op",
@@ -1698,8 +1671,8 @@ def test_main_runs_batch_remote_bench_and_writes_aggregated_artifacts(tmp_path, 
 
     assert exit_code == 0
     assert [call["run_id"] for call in captured_calls] == [
-        "remote-root/softmax-smoke-tiny_logits-float16-seed1",
-        "remote-root/softmax-stress-wide_vocab_lm_logits-float16-seed2",
+        "softmax-remote-batch/softmax-smoke-tiny_logits-float16-seed1",
+        "softmax-remote-batch/softmax-stress-wide_vocab_lm_logits-float16-seed2",
     ]
     assert all(call["endpoint"] == endpoint for call in captured_calls)
     assert [call["deploy_simt_op"] for call in captured_calls] == [True, False]
@@ -1945,36 +1918,6 @@ def test_main_rejects_batch_remote_bench_when_run_directory_exists(tmp_path, mon
     captured = capsys.readouterr()
     assert excinfo.value.code == 2
     assert "batch run directory already exists and is not empty" in captured.err
-
-
-def test_main_report_writes_local_report(tmp_path, monkeypatch):
-    captured: dict[str, object] = {}
-
-    def fake_write_local_report(**kwargs):
-        captured.update(kwargs)
-        return kwargs["output_path"]
-
-    monkeypatch.setattr("cannbench.cli.write_local_report", fake_write_local_report)
-
-    exit_code = main(
-        [
-            "report",
-            "--nvidia",
-            str(tmp_path / "nvidia"),
-            "--ascend",
-            str(tmp_path / "ascend"),
-            "--accuracy",
-            str(tmp_path / "accuracy.json"),
-            "--output",
-            str(tmp_path / "report.md"),
-        ]
-    )
-
-    assert exit_code == 0
-    assert captured["nvidia_dir"] == tmp_path / "nvidia"
-    assert captured["ascend_dir"] == tmp_path / "ascend"
-    assert captured["accuracy_path"] == tmp_path / "accuracy.json"
-    assert captured["output_path"] == tmp_path / "report.md"
 
 
 def test_main_publish_copies_run_artifacts(tmp_path, monkeypatch):

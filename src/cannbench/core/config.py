@@ -35,7 +35,7 @@ class OperatorBenchmarkRequest:
     deploy_simt_op: bool = False
     implementation_version: str | None = None
     output_formats: tuple[str, ...] = field(
-        default_factory=lambda: ("json", "csv", "md")
+        default_factory=lambda: ("json", "csv")
     )
     case_payload: dict[str, object] = field(init=False)
     dimensions: tuple[int, ...] | None = field(init=False, default=None)

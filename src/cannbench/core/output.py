@@ -4,7 +4,7 @@ from pathlib import Path
 
 from cannbench.core.result import OperatorBenchmarkResult
 
-SUPPORTED_OUTPUT_FORMATS = frozenset({"json", "csv", "md"})
+SUPPORTED_OUTPUT_FORMATS = frozenset({"json", "csv"})
 
 
 def build_benchmark_artifact_stem(
@@ -69,30 +69,5 @@ def write_benchmark_outputs(
                 ]
             )
         created["csv"] = csv_path
-
-    if "md" in formats:
-        md_path = output_dir / f"{run_name}.md"
-        md_path.write_text(
-            "\n".join(
-                [
-                    "# CannBench Operator Benchmark",
-                    "",
-                    "| field | value |",
-                    "| --- | --- |",
-                    f"| backend | {result.backend} |",
-                    f"| device_name | {result.device_name} |",
-                    f"| op | {result.op} |",
-                    f"| dtype | {result.dtype} |",
-                    f"| case_id | {result.case.case_id} |",
-                    f"| family | {result.case.family} |",
-                    f"| payload | {result.case.payload_summary} |",
-                    f"| source_model | {result.case.source_model} |",
-                    f"| warmup | {result.warmup} |",
-                    f"| iterations | {result.iterations} |",
-                    "",
-                ]
-            )
-        )
-        created["md"] = md_path
 
     return created
