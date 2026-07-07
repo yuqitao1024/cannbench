@@ -3,6 +3,7 @@ __pycache__/
 .pytest_cache/
 dist/
 runs/
+uploads/
 docs/superpowers/
 .superpowers/
 web/node_modules/

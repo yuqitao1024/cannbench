@@ -610,6 +610,119 @@ def _build_benchmark_record_entry(
     )
 
 
+def _ordered_unique_case_ids(plans: list) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for plan in plans:
+        if plan.case_id in seen:
+            continue
+        seen.add(plan.case_id)
+        ordered.append(plan.case_id)
+    return ordered
+
+
+def _sum_metric(records: list[dict[str, object]], name: str) -> float:
+    return sum(float(record["metrics"][name]) for record in records)
+
+
+def _aggregate_dsa_workflow_benchmark_records(
+    *,
+    args: argparse.Namespace,
+    run_name: str,
+    plans: list,
+    component_records: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    if getattr(args, "op", None) not in DSA_FUSED_OPERATORS:
+        return component_records
+
+    records_by_case: dict[str, list[dict[str, object]]] = {}
+    for record in component_records:
+        records_by_case.setdefault(str(record["case_id"]), []).append(record)
+
+    seeds_by_case: dict[str, int] = {}
+    for plan in plans:
+        seeds_by_case.setdefault(plan.case_id, plan.seed)
+
+    workflow_records: list[dict[str, object]] = []
+    for case_id in _ordered_unique_case_ids(plans):
+        records = records_by_case.get(case_id, [])
+        records_by_op = {str(record["operator"]): record for record in records}
+        if (
+            "lightning_indexer" not in records_by_op
+            or "sparse_attention" not in records_by_op
+        ):
+            continue
+
+        sparse_record = records_by_op["sparse_attention"]
+        ordered_component_records = [
+            records_by_op["lightning_indexer"],
+            sparse_record,
+        ]
+        dtype = str(sparse_record["dtype"])
+        seed = seeds_by_case[case_id]
+        workflow_prepared = build_prepared_operator_input(
+            op=args.op,
+            dtype=dtype,
+            dataset=args.dataset,
+            case_id=case_id,
+            seed=seed,
+        )
+        workflow_case = workflow_prepared.case
+        workflow_artifact_stem = build_benchmark_artifact_stem(
+            op=args.op,
+            dataset=args.dataset,
+            case_id=case_id,
+            dtype=dtype,
+            seed=seed,
+        )
+        workflow_records.append(
+            {
+                "schema_version": 1,
+                "run_id": f"{run_name}/{workflow_artifact_stem}",
+                "operator": args.op,
+                "dataset": args.dataset,
+                "case_id": case_id,
+                "family": workflow_case.family,
+                "shape": sparse_record["shape"],
+                "dtype": dtype,
+                "backend": sparse_record["backend"],
+                "device_class": sparse_record["device_class"],
+                "implementation": sparse_record["implementation"],
+                "implementation_version": sparse_record["implementation_version"],
+                "source_kind": workflow_case.source_kind,
+                "source_project": workflow_case.source_project,
+                "source_model": workflow_case.source_model,
+                "source_file": workflow_case.source_file,
+                "source_op": workflow_case.source_op,
+                "metrics": {
+                    "latency_ms_avg": _sum_metric(ordered_component_records, "latency_ms_avg"),
+                    "latency_ms_p50": _sum_metric(ordered_component_records, "latency_ms_p50"),
+                    "latency_ms_p95": _sum_metric(ordered_component_records, "latency_ms_p95"),
+                    "sample_count": min(
+                        int(record["metrics"]["sample_count"])
+                        for record in ordered_component_records
+                    ),
+                },
+                "accuracy": {
+                    "passed": all(
+                        bool(record.get("accuracy", {}).get("passed", False))
+                        for record in ordered_component_records
+                    ),
+                    "max_abs_error": max(
+                        float(record.get("accuracy", {}).get("max_abs_error", 0.0))
+                        for record in ordered_component_records
+                    ),
+                    "max_rel_error": max(
+                        float(record.get("accuracy", {}).get("max_rel_error", 0.0))
+                        for record in ordered_component_records
+                    ),
+                },
+                "diff_ref": None,
+            }
+        )
+    return workflow_records
+
+
 def _prepare_batch_run_layout(output_dir: Path, run_name: str):
     layout = build_run_layout(output_dir, run_name)
     if layout.root.exists() and any(layout.root.iterdir()):
@@ -798,7 +911,12 @@ def _run_local_bench_with_plans(
         implementation=getattr(args, "implementation", None),
         summary_rows=summary_rows,
         failure_rows=failure_rows,
-        benchmark_records=benchmark_records,
+        benchmark_records=_aggregate_dsa_workflow_benchmark_records(
+            args=args,
+            run_name=run_name,
+            plans=plans,
+            component_records=benchmark_records,
+        ),
     )
     _emit_run_event(
         f"[run] bench completed run_name={run_name} backend={args.backend} "
@@ -918,7 +1036,12 @@ def _run_remote_bench_with_plans(
         implementation=getattr(args, "implementation", None),
         summary_rows=summary_rows,
         failure_rows=failure_rows,
-        benchmark_records=benchmark_records,
+        benchmark_records=_aggregate_dsa_workflow_benchmark_records(
+            args=args,
+            run_name=run_name,
+            plans=plans,
+            component_records=benchmark_records,
+        ),
     )
     if failure_rows:
         label = "single" if len(plans) == 1 else "batch"

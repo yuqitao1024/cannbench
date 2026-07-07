@@ -6,6 +6,8 @@
     "opbench-nvidia-h800-cuda-pytorch-softmax-realistic-float16",
     "opbench-ascend-950pr-simt-v3-softmax-realistic-float16",
     "opbench-ascend-950pr-vllm-ascend-dsa_decode-realistic-bfloat16",
-    "opbench-ascend-950pr-vllm-ascend-dsa_prefill-realistic-bfloat16"
+    "opbench-ascend-950pr-vllm-ascend-dsa_prefill-realistic-bfloat16",
+    "opbench-nvidia-h800-cuda-library-dsa_decode-realistic-bfloat16",
+    "opbench-nvidia-h800-cuda-library-dsa_prefill-realistic-bfloat16"
   ]
 }

@@ -2489,6 +2489,96 @@ def test_main_runs_dsa_decode_workflow_as_two_local_cases(tmp_path, monkeypatch,
     assert "mode=local-batch cases=2" in captured.out
 
 
+def test_main_runs_profiled_dsa_workflow_and_writes_workflow_benchmark_record(
+    tmp_path, monkeypatch
+):
+    captured_requests: list[object] = []
+
+    class FakeBackend:
+        def run_operator(self, request):
+            captured_requests.append(request)
+            return result_for_request(request)
+
+        def profile_operator_device_time(self, request):
+            latency = 0.003 if request.op == "lightning_indexer" else 0.007
+            return LocalDeviceProfileResult(
+                benchmark_result=result_for_request(request),
+                profile=ProfileArtifacts(
+                    device_name="NVIDIA H800 PCIe",
+                    profile_summary=DeviceProfileSummary(
+                        backend="nvidia",
+                        sample_count=1,
+                        latency_ms_avg=latency,
+                        latency_ms_p50=latency,
+                        latency_ms_p95=latency,
+                        latency_ms_p99=latency,
+                        source_files=("ncu.csv",),
+                    ),
+                    profile_artifacts=(("ncu.csv", b"Kernel Name,Metric Name,Metric Unit,Metric Value\n"),),
+                    perf_artifacts=(
+                        (
+                            "benchmark.json",
+                            (
+                                json.dumps(result_for_request(request).to_json_dict()) + "\n"
+                            ).encode("utf-8"),
+                        ),
+                    ),
+                ),
+            )
+
+    monkeypatch.setattr("cannbench.cli.get_backend", lambda name: FakeBackend())
+
+    exit_code = main(
+        [
+            "bench",
+            "--backend",
+            "nvidia",
+            "--implementation",
+            "cuda_library",
+            "--op",
+            "dsa_decode",
+            "--dataset",
+            "smoke",
+            "--case-id",
+            "vllm_ascend_a5_decode_b1_ctx512_top512",
+            "--dtype",
+            "bfloat16",
+            "--output-dir",
+            str(tmp_path),
+            "--run-name",
+            "dsa-decode-profiled",
+        ]
+    )
+
+    layout = build_run_layout(tmp_path, "dsa-decode-profiled")
+    summary = json.loads((layout.meta_dir / "summary.json").read_text())
+    benchmark_records = json.loads((layout.meta_dir / "benchmark-records.json").read_text())
+
+    assert exit_code == 0
+    assert [request.op for request in captured_requests] == [
+        "lightning_indexer",
+        "sparse_attention",
+    ]
+    assert summary["metadata"]["total_cases"] == 2
+    assert len(benchmark_records["records"]) == 1
+    record = benchmark_records["records"][0]
+    assert record["run_id"] == (
+        "dsa-decode-profiled/"
+        "dsa_decode-smoke-vllm_ascend_a5_decode_b1_ctx512_top512-bfloat16-seed0"
+    )
+    assert record["operator"] == "dsa_decode"
+    assert record["dataset"] == "smoke"
+    assert record["case_id"] == "vllm_ascend_a5_decode_b1_ctx512_top512"
+    assert record["family"] == "decode_workflow"
+    assert record["shape"] == [1, 64, 512]
+    assert record["implementation"] == "cuda_library"
+    assert record["implementation_version"] == "cuda-library"
+    assert record["metrics"]["latency_ms_avg"] == 0.01
+    assert record["metrics"]["latency_ms_p50"] == 0.01
+    assert record["metrics"]["latency_ms_p95"] == 0.01
+    assert record["metrics"]["sample_count"] == 1
+
+
 def test_main_runs_dsa_prefill_workflow_selection_as_batch(tmp_path, monkeypatch):
     captured_requests: list[object] = []
 
