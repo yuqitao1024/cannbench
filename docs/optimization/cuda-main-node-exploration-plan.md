@@ -5,7 +5,7 @@
 本计划基于以下两份材料整理：
 
 - `docs/treasure-map/cuda-route-nodes.md`
-- `docs/cuda-operator-optimization-best-practices.md`
+- `docs/optimization/cuda-operator-optimization-best-practices.md`
 
 计划范围暂时只覆盖 CUDA 性能优化主节点，不展开支线节点。探索周期按 `3` 人、`8` 周设计，人员为 `小A`、`小B`、`小C`。排期目标是：
 
