@@ -1,0 +1,247 @@
+{
+  "records": [
+    {
+      "schema_version": 1,
+      "run_id": "opbench-nvidia-h800-cuda-pytorch-index_add-realistic-float16/index_add-realistic-allenai_longformer_large_index_add_inplace-float16-seed7",
+      "operator": "index_add",
+      "dataset": "realistic",
+      "case_id": "allenai_longformer_large_index_add_inplace",
+      "family": "longformer_global_accumulation",
+      "shape": [
+        4718592
+      ],
+      "dtype": "float16",
+      "backend": "nvidia",
+      "device_class": "H800",
+      "implementation": "cuda-pytorch",
+      "implementation_version": "cuda-pytorch",
+      "source_kind": "real_model",
+      "source_project": "TritonBench",
+      "source_model": "AllenaiLongformerBase",
+      "source_file": "hf_train/AllenaiLongformerBase_train.json",
+      "source_op": "torch.Tensor.index_add_",
+      "metrics": {
+        "latency_ms_avg": 0.172576,
+        "latency_ms_p50": 0.172576,
+        "latency_ms_p95": 0.172576,
+        "sample_count": 1
+      },
+      "accuracy": {
+        "passed": true,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0
+      },
+      "diff_ref": null
+    },
+    {
+      "schema_version": 1,
+      "run_id": "opbench-nvidia-h800-cuda-pytorch-index_add-realistic-float16/index_add-realistic-basic_gnn_gin_neighbor_index_add-float16-seed7",
+      "operator": "index_add",
+      "dataset": "realistic",
+      "case_id": "basic_gnn_gin_neighbor_index_add",
+      "family": "gnn_neighbor_accumulation",
+      "shape": [
+        10000,
+        64
+      ],
+      "dtype": "float16",
+      "backend": "nvidia",
+      "device_class": "H800",
+      "implementation": "cuda-pytorch",
+      "implementation_version": "cuda-pytorch",
+      "source_kind": "real_model",
+      "source_project": "TritonBench",
+      "source_model": "basic_gnn_gin",
+      "source_file": "torchbench_train/basic_gnn_gin_train.json",
+      "source_op": "torch.index_add",
+      "metrics": {
+        "latency_ms_avg": 0.12809600000000002,
+        "latency_ms_p50": 0.12809600000000002,
+        "latency_ms_p95": 0.12809600000000002,
+        "sample_count": 1
+      },
+      "accuracy": {
+        "passed": true,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0
+      },
+      "diff_ref": null
+    },
+    {
+      "schema_version": 1,
+      "run_id": "opbench-nvidia-h800-cuda-pytorch-index_add-realistic-float16/index_add-realistic-bert_hidden_index_add-float16-seed7",
+      "operator": "index_add",
+      "dataset": "realistic",
+      "case_id": "bert_hidden_index_add",
+      "family": "hidden_accumulation",
+      "shape": [
+        16,
+        128,
+        768
+      ],
+      "dtype": "float16",
+      "backend": "nvidia",
+      "device_class": "H800",
+      "implementation": "cuda-pytorch",
+      "implementation_version": "cuda-pytorch",
+      "source_kind": "real_model",
+      "source_project": "TritonBench",
+      "source_model": "BERT_pytorch",
+      "source_file": "torchbench_train/BERT_pytorch_train.json",
+      "source_op": "torch.index_add",
+      "metrics": {
+        "latency_ms_avg": 0.022175999999999998,
+        "latency_ms_p50": 0.022175999999999998,
+        "latency_ms_p95": 0.022175999999999998,
+        "sample_count": 1
+      },
+      "accuracy": {
+        "passed": true,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0
+      },
+      "diff_ref": null
+    },
+    {
+      "schema_version": 1,
+      "run_id": "opbench-nvidia-h800-cuda-pytorch-index_add-realistic-float16/index_add-realistic-bigbird_block_index_add-float16-seed7",
+      "operator": "index_add",
+      "dataset": "realistic",
+      "case_id": "bigbird_block_index_add",
+      "family": "block_sparse_accumulation",
+      "shape": [
+        384,
+        64,
+        64
+      ],
+      "dtype": "float16",
+      "backend": "nvidia",
+      "device_class": "H800",
+      "implementation": "cuda-pytorch",
+      "implementation_version": "cuda-pytorch",
+      "source_kind": "real_model",
+      "source_project": "TritonBench",
+      "source_model": "hf_BigBird",
+      "source_file": "torchbench_train/hf_BigBird_train.json",
+      "source_op": "torch.index_add",
+      "metrics": {
+        "latency_ms_avg": 0.041824,
+        "latency_ms_p50": 0.041824,
+        "latency_ms_p95": 0.041824,
+        "sample_count": 1
+      },
+      "accuracy": {
+        "passed": true,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0
+      },
+      "diff_ref": null
+    },
+    {
+      "schema_version": 1,
+      "run_id": "opbench-nvidia-h800-cuda-pytorch-index_add-realistic-float16/index_add-realistic-opt_hidden_index_add-float16-seed7",
+      "operator": "index_add",
+      "dataset": "realistic",
+      "case_id": "opt_hidden_index_add",
+      "family": "hidden_accumulation",
+      "shape": [
+        8,
+        256,
+        2048
+      ],
+      "dtype": "float16",
+      "backend": "nvidia",
+      "device_class": "H800",
+      "implementation": "cuda-pytorch",
+      "implementation_version": "cuda-pytorch",
+      "source_kind": "real_model",
+      "source_project": "TritonBench",
+      "source_model": "OPTForCausalLM",
+      "source_file": "hf_train/OPTForCausalLM_train.json",
+      "source_op": "torch.index_add",
+      "metrics": {
+        "latency_ms_avg": 0.050783999999999996,
+        "latency_ms_p50": 0.050783999999999996,
+        "latency_ms_p95": 0.050783999999999996,
+        "sample_count": 1
+      },
+      "accuracy": {
+        "passed": true,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0
+      },
+      "diff_ref": null
+    },
+    {
+      "schema_version": 1,
+      "run_id": "opbench-nvidia-h800-cuda-pytorch-index_add-realistic-float16/index_add-realistic-t5_hidden_index_add-float16-seed7",
+      "operator": "index_add",
+      "dataset": "realistic",
+      "case_id": "t5_hidden_index_add",
+      "family": "hidden_accumulation",
+      "shape": [
+        4,
+        8,
+        1024
+      ],
+      "dtype": "float16",
+      "backend": "nvidia",
+      "device_class": "H800",
+      "implementation": "cuda-pytorch",
+      "implementation_version": "cuda-pytorch",
+      "source_kind": "real_model",
+      "source_project": "TritonBench",
+      "source_model": "T5Small",
+      "source_file": "hf_train/T5Small_train.json",
+      "source_op": "torch.index_add",
+      "metrics": {
+        "latency_ms_avg": 0.051712,
+        "latency_ms_p50": 0.051712,
+        "latency_ms_p95": 0.051712,
+        "sample_count": 1
+      },
+      "accuracy": {
+        "passed": true,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0
+      },
+      "diff_ref": null
+    },
+    {
+      "schema_version": 1,
+      "run_id": "opbench-nvidia-h800-cuda-pytorch-index_add-realistic-float16/index_add-realistic-xlnet_memory_index_add-float16-seed7",
+      "operator": "index_add",
+      "dataset": "realistic",
+      "case_id": "xlnet_memory_index_add",
+      "family": "memory_accumulation",
+      "shape": [
+        8,
+        16,
+        512,
+        1023
+      ],
+      "dtype": "float16",
+      "backend": "nvidia",
+      "device_class": "H800",
+      "implementation": "cuda-pytorch",
+      "implementation_version": "cuda-pytorch",
+      "source_kind": "real_model",
+      "source_project": "TritonBench",
+      "source_model": "XLNetLMHeadModel",
+      "source_file": "hf_train/XLNetLMHeadModel_train.json",
+      "source_op": "torch.index_add",
+      "metrics": {
+        "latency_ms_avg": 0.513856,
+        "latency_ms_p50": 0.513856,
+        "latency_ms_p95": 0.513856,
+        "sample_count": 1
+      },
+      "accuracy": {
+        "passed": true,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0
+      },
+      "diff_ref": null
+    }
+  ]
+}
