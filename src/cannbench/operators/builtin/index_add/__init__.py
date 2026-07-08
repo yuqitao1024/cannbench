@@ -82,6 +82,15 @@ def _build_profile_kernel_selection(ctx: ProfileKernelSelectionContext):
         return ProfileKernelSelection(
             kernel_name_patterns=("index_add", "aten_index_add")
         )
+    if ctx.backend == "nvidia":
+        return ProfileKernelSelection(
+            kernel_name_patterns=(
+                "indexadd",
+                "inplaceindexadd",
+                "indexfuncsmallindex",
+                "indexfunclargeindex",
+            )
+        )
     return ProfileKernelSelection(kernel_name_patterns=("indexadd", "inplaceindexadd"))
 
 
