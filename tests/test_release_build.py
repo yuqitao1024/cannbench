@@ -24,6 +24,7 @@ def test_stage_release_tree_copies_project_files_and_generates_prepared_inputs(t
     assert (stage_dir / "install.sh").is_file()
     assert (stage_dir / "tools" / "check_gpu_dsa_env.py").is_file()
     assert (stage_dir / "deploy" / "systemd" / "cannbench-serve.service").is_file()
+    assert (stage_dir / "deploy" / "nginx" / "cannbench-https.conf").is_file()
     assert (stage_dir / "published" / "index.json").is_file()
     assert (
         stage_dir
@@ -51,8 +52,13 @@ def test_release_install_assets_target_opt_cannbench(tmp_path):
     service_unit = (stage_dir / "deploy" / "systemd" / "cannbench-serve.service").read_text(encoding="utf-8")
 
     assert 'INSTALL_DIR="/opt/cannbench"' in install_script
+    assert 'NGINX_CONF_DEST="/etc/nginx/conf.d/cannbench.conf"' in install_script
+    assert 'NGINX_SSL_DIR="/etc/nginx/ssl/cannbench"' in install_script
+    assert 'SSL_CERT_SRC="/etc/nginx/ssl/cannbench/fullchain.pem"' in install_script
+    assert 'SSL_KEY_SRC="/etc/nginx/ssl/cannbench/privkey.pem"' in install_script
     assert "WorkingDirectory=/opt/cannbench" in service_unit
     assert "PYTHONPATH=/opt/cannbench/src" in service_unit
+    assert "--host 127.0.0.1 --port 8000" in service_unit
     assert "/opt/cannbench/cannbench-release" not in install_script
     assert "/opt/cannbench/cannbench-release" not in service_unit
 
