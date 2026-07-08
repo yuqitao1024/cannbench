@@ -2,9 +2,16 @@
 
 ## Status
 
-Proposed design. Scope is limited to design and implementation planning for
-Ascend-only DSA operator acceleration in CannBench. This document does not
-change workflow boundaries or public backend architecture.
+Design accepted. Initial implementation scaffolding exists for:
+
+- `lightning_indexer` SIMT dispatch
+- `sparse_attention` SIMT dispatch
+- v1 reference wrappers for `prefill` and `decode`
+
+High-performance mixed cube-plus-SIMT kernels remain to be substituted behind
+the same operator-local interfaces. Scope remains limited to Ascend-only DSA
+operator acceleration in CannBench, without changing workflow boundaries or
+public backend architecture.
 
 ## Context
 

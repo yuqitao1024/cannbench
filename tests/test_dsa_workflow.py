@@ -58,6 +58,34 @@ def test_build_prefill_workflow_uses_indexer_then_sparse_prefill():
     assert workflow.steps[1].prepared.case.payload["phase"] == "prefill"
 
 
+def test_dsa_prefill_components_support_simt_ready_shapes():
+    workflow = build_dsa_prefill_workflow(
+        dataset="realistic",
+        case_id="deepseek_v4pro_prefill_b1_q512_ctx4096_top1024",
+        dtype="float16",
+        seed=0,
+    )
+
+    assert tuple(step.op for step in workflow.steps) == (
+        "lightning_indexer",
+        "sparse_attention",
+    )
+
+
+def test_dsa_decode_components_support_simt_ready_shapes():
+    workflow = build_dsa_decode_workflow(
+        dataset="realistic",
+        case_id="deepseek_128k_decode_top2048",
+        dtype="float16",
+        seed=0,
+    )
+
+    assert tuple(step.op for step in workflow.steps) == (
+        "lightning_indexer",
+        "sparse_attention",
+    )
+
+
 def test_list_dsa_workflows_filters_to_cases_with_matching_component_cases():
     decode_workflows = list_dsa_decode_workflows("realistic")
     prefill_workflows = list_dsa_prefill_workflows("smoke")

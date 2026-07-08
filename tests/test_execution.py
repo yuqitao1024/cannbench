@@ -77,3 +77,14 @@ def test_bench_case_executor_requires_execute_case():
 
     with pytest.raises(NotImplementedError):
         executor.execute_case()
+
+
+def test_bench_execution_artifacts_can_represent_sparse_attention_tuple_outputs():
+    artifacts = BenchExecutionArtifacts(
+        output_artifacts=(
+            ("output.json", b"{}"),
+            ("lse.json", b"{}"),
+        )
+    )
+
+    assert len(artifacts.output_artifacts) == 2

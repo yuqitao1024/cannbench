@@ -403,6 +403,14 @@ def test_lightning_indexer_realistic_splits_are_a5_fused_contract_compatible():
         assert all(case.context_tokens % 128 == 0 for case in dataset.cases)
 
 
+def test_lightning_indexer_realistic_prefill_dataset_contains_v4pro_and_v32_cases():
+    dataset = get_lightning_indexer_dataset("realistic_prefill")
+    case_ids = {case.case_id for case in dataset.cases}
+
+    assert "deepseek_v4pro_prefill_b1_q512_ctx4096_top1024" in case_ids
+    assert "deepseek_v32_prefill_b1_q128_ctx16384_top2048" in case_ids
+
+
 def test_get_sparse_attention_case_preserves_realistic_source_metadata():
     case = get_sparse_attention_case("realistic", "nanogpt_prefill_64_top32")
 
@@ -562,6 +570,14 @@ def test_sparse_attention_realistic_splits_are_a5_fused_contract_compatible():
         expected_selected = {512, 1024, 2048} if split == "realistic_decode" else {512, 1024, 2048}
         assert all(case.selected_tokens in expected_selected for case in dataset.cases)
         assert all(case.context_tokens % 128 == 0 for case in dataset.cases)
+
+
+def test_sparse_attention_realistic_prefill_dataset_contains_v4pro_and_v32_cases():
+    dataset = get_sparse_attention_dataset("realistic_prefill")
+    case_ids = {case.case_id for case in dataset.cases}
+
+    assert "deepseek_v4pro_prefill_b1_q512_ctx4096_top1024" in case_ids
+    assert "deepseek_v32_prefill_b1_q128_ctx16384_top2048" in case_ids
 
 
 def test_materialized_sparse_attention_inputs_are_deterministic_for_same_seed():
