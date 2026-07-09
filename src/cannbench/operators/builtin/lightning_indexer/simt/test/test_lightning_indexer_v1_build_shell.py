@@ -27,7 +27,7 @@ def test_lightning_indexer_prefill_family_4x64_bridge_uses_bmm_for_score_body():
         "aten_dsa_lightning_indexer/csrc/lightning_indexer.asc"
     ).read_text(encoding="utf-8")
 
-    assert "at::bmm(" in source
+    assert "at::bmm(" in source or "at::matmul(" in source
     assert (
         "launch_lightning_indexer_prefill_family_4x64_postprocess_float" in source
     )
@@ -46,6 +46,25 @@ def test_lightning_indexer_prefill_family_4x64_bridge_tiles_context_scores():
         "auto scores = at::bmm(query_2d, key_bmm).reshape("
         not in source
     )
+
+
+def test_lightning_indexer_prefill_family_4x64_bridge_avoids_key_repeat():
+    source = Path(
+        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
+        "aten_dsa_lightning_indexer/csrc/lightning_indexer.asc"
+    ).read_text(encoding="utf-8")
+
+    assert ".repeat({query_count, 1, 1})" not in source
+
+
+def test_lightning_indexer_prefill_family_4x64_bridge_tiles_queries_too():
+    source = Path(
+        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
+        "aten_dsa_lightning_indexer/csrc/lightning_indexer.asc"
+    ).read_text(encoding="utf-8")
+
+    assert "for (int64_t query_start = 0; query_start < query_count;" in source
+    assert "query.narrow(1, query_start, current_query)" in source
 
 
 def test_lightning_indexer_prefill_family_4x64_kernel_is_postprocess_only():
