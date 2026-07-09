@@ -83,7 +83,7 @@ def test_sparse_attention_hd128_kernel_is_postprocess_only():
     source = Path(
         "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
         "aten_dsa_sparse_attention/csrc/simt/"
-        "sparse_attention_decode_family_hd128.asc"
+        "sparse_attention_postprocess_family_hd128.asc"
     ).read_text(encoding="utf-8")
 
     assert "dot += query[" not in source
@@ -93,7 +93,27 @@ def test_sparse_attention_hd512_kernel_is_postprocess_only():
     source = Path(
         "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
         "aten_dsa_sparse_attention/csrc/simt/"
-        "sparse_attention_prefill_family_hd512.asc"
+        "sparse_attention_postprocess_family_hd512.asc"
     ).read_text(encoding="utf-8")
 
     assert "dot += query[" not in source
+
+
+def test_sparse_attention_hd128_postprocess_source_uses_postprocess_symbol_names():
+    source = Path(
+        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+        "aten_dsa_sparse_attention/csrc/simt/"
+        "sparse_attention_postprocess_family_hd128.asc"
+    ).read_text(encoding="utf-8")
+
+    assert "sparse_attention_postprocess_family_hd128_kernel" in source
+
+
+def test_sparse_attention_hd512_postprocess_source_uses_postprocess_symbol_names():
+    source = Path(
+        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+        "aten_dsa_sparse_attention/csrc/simt/"
+        "sparse_attention_postprocess_family_hd512.asc"
+    ).read_text(encoding="utf-8")
+
+    assert "sparse_attention_postprocess_family_hd512_kernel" in source
