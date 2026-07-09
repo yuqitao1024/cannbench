@@ -105,7 +105,27 @@ class AscendBuildExtension(build_ext):
 
 def get_extensions():
     sources = list(glob.glob(os.path.join(EXTENSIONS_DIR, "*.asc")))
-    sources += list(glob.glob(os.path.join(EXTENSIONS_DIR, "simt", "*.asc")))
+    simt_sources = list(glob.glob(os.path.join(EXTENSIONS_DIR, "simt", "*.asc")))
+    if os.path.join(
+        EXTENSIONS_DIR,
+        "simt",
+        "lightning_indexer_decode_family_64x128.asc",
+    ) in simt_sources:
+        simt_sources.remove(
+            os.path.join(
+                EXTENSIONS_DIR,
+                "simt",
+                "lightning_indexer_decode_family_64x128.asc",
+            )
+        )
+    simt_sources.append(
+        os.path.join(
+            EXTENSIONS_DIR,
+            "simt",
+            "lightning_indexer_postprocess_family_64x128.asc",
+        )
+    )
+    sources += simt_sources
     return [
         Extension(
             name=f"{library_name}._C",

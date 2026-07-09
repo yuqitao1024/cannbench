@@ -143,10 +143,28 @@ def test_lightning_indexer_family_64x128_kernel_is_postprocess_only():
     source = Path(
         "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
         "aten_dsa_lightning_indexer/csrc/simt/"
-        "lightning_indexer_decode_family_64x128.asc"
+        "lightning_indexer_postprocess_family_64x128.asc"
     ).read_text(encoding="utf-8")
 
     assert (
         "for (int32_t dim_index = 0; dim_index < kFamily64x128HeadDim; ++dim_index)"
         not in source
     )
+
+
+def test_lightning_indexer_family_64x128_postprocess_kernel_has_dedicated_filename():
+    source = Path(
+        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/setup.py"
+    ).read_text(encoding="utf-8")
+
+    assert "lightning_indexer_postprocess_family_64x128.asc" in source
+
+
+def test_lightning_indexer_family_64x128_postprocess_source_uses_postprocess_symbol_names():
+    source = Path(
+        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
+        "aten_dsa_lightning_indexer/csrc/simt/"
+        "lightning_indexer_postprocess_family_64x128.asc"
+    ).read_text(encoding="utf-8")
+
+    assert "lightning_indexer_postprocess_family_64x128_kernel" in source
