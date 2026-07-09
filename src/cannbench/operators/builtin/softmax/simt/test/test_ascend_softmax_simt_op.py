@@ -227,6 +227,48 @@ def test_ascend_softmax_v3_fast_path_uses_1024_threads_per_block():
     assert "row_softmax_fast_block_x() {\n  constexpr int64_t kCudaFastPathThreads = 1024;" in source
 
 
+def test_ascend_softmax_v3_fast_path_uses_real_ilp_and_shifted_half2():
+    source = (
+        SIMT_OP_V3_ROOT
+        / "aten_softmax_v3"
+        / "csrc"
+        / "simt"
+        / "spatial_softmax.asc"
+    ).read_text()
+    fast_start = source.index("row_softmax_fast_forward_vf")
+    reg_start = source.index("row_softmax_fast_reg_forward_vf")
+    fast_source = source[fast_start:reg_start]
+
+    assert "constexpr int64_t kFastILP = 4;" in fast_source
+    assert "offset = threadIdx.x * kILP" in source
+    assert "offset += blockDim.x * kILP" in source
+    assert "fast_ilp_softmax_write" in source
+    assert "fast_fp16x2_reduce" in source
+    assert "fast_fp16x2_write" in source
+    assert "const int64_t fp16x2_shift = (row * dim_size) % 2;" in fast_source
+    assert "aligned_data = data + shift" in source
+    assert "aligned_input = input + shift" in source
+
+
+def test_ascend_softmax_v3_fast_path_has_register_cache_variant():
+    source = (
+        SIMT_OP_V3_ROOT
+        / "aten_softmax_v3"
+        / "csrc"
+        / "simt"
+        / "spatial_softmax.asc"
+    ).read_text()
+
+    assert "row_softmax_fast_reg_forward_vf" in source
+    assert "row_softmax_fast_reg_forward_kernel" in source
+    assert "row_softmax_fast_register_count" in source
+    assert "use_register_like_row_softmax_fast" in source
+    assert "register_count > 1 && register_count <= 8" in source
+    assert "scalar_t elements[kRegCount]" in source
+    assert "dispatch_row_fast_forward_kernel" in source
+    assert "launch_row_fast_reg_forward_kernel" in source
+
+
 def test_ascend_softmax_v3_uses_mixed_simd_simt_vf_launch_model():
     source = (
         SIMT_OP_V3_ROOT
@@ -238,15 +280,18 @@ def test_ascend_softmax_v3_uses_mixed_simd_simt_vf_launch_model():
 
     assert "__simt_vf__ __launch_bounds__(kThreadsPerBlock) inline void row_softmax_persistent_forward_vf" in source
     assert "__simt_vf__ __launch_bounds__(1024) inline void row_softmax_fast_forward_vf" in source
+    assert "__simt_vf__ __launch_bounds__(1024) inline void row_softmax_fast_reg_forward_vf" in source
     assert "__simt_vf__ inline void cunn_spatial_softmax_forward_vf" in source
     assert "__global__ __vector__ void row_softmax_persistent_forward_kernel" in source
     assert "__global__ __vector__ void row_softmax_fast_forward_kernel" in source
+    assert "__global__ __vector__ void row_softmax_fast_reg_forward_kernel" in source
     assert "__global__ __vector__ void cunn_spatial_softmax_forward_kernel" in source
     assert "asc_vf_call<row_softmax_persistent_forward_vf" in source
     assert "asc_vf_call<row_softmax_fast_forward_vf" in source
+    assert "asc_vf_call<row_softmax_fast_reg_forward_vf" in source
     assert "asc_vf_call<cunn_spatial_softmax_forward_vf" in source
     assert "<<<grid_x,\n         0,\n         acl_stream>>>" in source
-    assert "<<<grid_x,\n             dynamic_ubuf_bytes,\n             acl_stream>>>" in source
+    assert "<<<grid_x,\n         dynamic_ubuf_bytes,\n         acl_stream>>>" in source
     assert "<<<launch.grid_x * launch.grid_y,\n           launch.dynamic_ubuf_bytes,\n           acl_stream>>>" in source
 
 
