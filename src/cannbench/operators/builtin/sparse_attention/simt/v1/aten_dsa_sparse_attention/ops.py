@@ -16,11 +16,24 @@ __all__ = [
 
 
 def sparse_attention_forward(query, keys, values, indices, *, phase: str, family: str, causal: bool):
+    custom_op = _load_registered_op()
+    if custom_op is not None and phase == "prefill" and family == "family_hd512":
+        return custom_op(query, keys, values, indices, phase, family, causal)
     if phase == "prefill" and family in {"family_hd512", "family_hd128"}:
         return _prefill_reference(query, keys, values, indices, causal=causal)
     if phase == "decode" and family in {"family_hd512", "family_hd128"}:
         return _decode_reference(query, keys, values, indices, causal=causal)
     return _fallback_reference(query, keys, values, indices, causal=causal)
+
+
+def _load_registered_op():
+    if torch is None:
+        return None
+    try:
+        namespace = torch.ops.aten_dsa_sparse_attention
+        return getattr(namespace, "sparse_attention_forward")
+    except Exception:
+        return None
 
 
 def _prefill_reference(query, keys, values, indices, *, causal: bool):
