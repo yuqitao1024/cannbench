@@ -240,6 +240,102 @@ The division of responsibility should stay stable across families.
 - online softmax bookkeeping
 - partial merge and split-KV merge logic
 
+## First Hybrid Slice
+
+The first concrete mixed cube-plus-SIMT implementation slice should be:
+
+- `lightning_indexer`
+- `prefill`
+- `family_4x64`
+
+This slice is intentionally smaller than the A5-compatible and V4-Pro-like
+families. It is the lowest-risk place to prove the programming-model boundary
+with a real custom op while preserving the existing CannBench operator plugin
+contract.
+
+### Entry Boundary
+
+The first hybrid slice must keep the current public runtime boundary unchanged.
+
+The operator entry stays:
+
+```python
+torch.ops.aten_dsa_lightning_indexer.lightning_indexer_forward(
+    query,
+    keys,
+    weights,
+    top_k: int,
+    phase: str,
+    family: str,
+) -> Tensor
+```
+
+No plugin, workflow, or backend interface changes should be introduced for this
+slice.
+
+### Internal Responsibility Split
+
+For `lightning_indexer prefill family_4x64`, the implementation should move the
+main dot-product body off the current pure-SIMT loop and into the cube-heavy
+portion of the custom-op implementation.
+
+#### Cube / SIMD Responsibilities
+
+- compute the `Q x K^T` score body for the active `(batch, query)` work unit
+- iterate over `context` in tiles rather than materializing all scores globally
+- produce only tile-local per-head scores needed by the following SIMT stage
+
+#### SIMT Responsibilities
+
+- apply `ReLU` to tile-local head scores
+- apply `weights[b, q, h]`
+- reduce across `H=4`
+- maintain TopK state for the active `(batch, query)` row
+- write final selected indices
+
+### Internal Dataflow
+
+The first hybrid slice should use a single custom-op entry with internal
+phasing rather than multiple public operators.
+
+Recommended execution model:
+
+1. assign one outer work unit to each `(batch, query)` row
+2. iterate over `context` in tiles
+3. run cube-heavy score computation for the current tile
+4. immediately consume that tile in SIMT for `ReLU`, weighting, head reduction,
+   and online TopK update
+5. after the final tile, write only TopK indices to output
+
+### Temporary State Rules
+
+The implementation must not materialize a long-lived full global-memory logits
+tensor for this slice.
+
+Allowed temporary state:
+
+- tile-local score storage
+- per-row TopK state
+
+Disallowed first-slice behavior:
+
+- full `B x Q x H x C` score materialization to global memory before TopK
+- keeping the pure-SIMT inner dot-product loop and merely renaming the kernel
+
+### First-Slice Success Criteria
+
+The first hybrid slice is successful only if all of the following are true:
+
+- external operator and workflow interfaces remain unchanged
+- `family_4x64` `prefill` correctness matches the current reference path
+- the implementation no longer performs the main `4 x 64` dot-product body in
+  the SIMT inner loop
+- the implementation still avoids full-logit global materialization
+
+Performance optimization beyond that boundary remains important, but the first
+goal is to make the cube-plus-SIMT responsibility split real in code rather
+than continuing to iterate on a pure-SIMT kernel.
+
 ## Operator Design
 
 ### lightning_indexer
@@ -356,14 +452,16 @@ tiling and less aggressive fusion.
 
 Implementation order should be:
 
-1. `lightning_indexer` prefill `family_64x128`
-2. `sparse_attention` prefill `family_hd512`
-3. `lightning_indexer` prefill `family_4x64`
+1. `lightning_indexer` prefill `family_4x64` first hybrid slice
+2. `lightning_indexer` prefill `family_64x128`
+3. `sparse_attention` prefill `family_hd512`
 4. `sparse_attention` prefill `family_hd128`
 5. decode implementations for both operators and both kernel families
 
 Rationale:
 
+- `family_4x64` is the smallest practical slice for validating the mixed
+  execution boundary under the existing single-op runtime contract
 - prefill offers larger compute envelopes and better opportunity to validate the
   mixed cube-plus-SIMT design
 - prefill is the right place to prove:
