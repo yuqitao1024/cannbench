@@ -343,6 +343,38 @@ def test_sparse_attention_forward_prefers_registered_custom_op_for_prefill_famil
     }
 
 
+def test_sparse_attention_forward_prefers_registered_custom_op_for_prefill_family_hd128(
+    monkeypatch,
+):
+    captured = {}
+
+    def fake_custom_op(query, keys, values, indices, phase, family, causal):
+        del query, keys, values, indices
+        captured["phase"] = phase
+        captured["family"] = family
+        captured["causal"] = causal
+        return "custom"
+
+    monkeypatch.setattr(ops, "_load_registered_op", lambda: fake_custom_op, raising=False)
+
+    actual = ops.sparse_attention_forward(
+        object(),
+        object(),
+        object(),
+        object(),
+        phase="prefill",
+        family="family_hd128",
+        causal=True,
+    )
+
+    assert actual == "custom"
+    assert captured == {
+        "phase": "prefill",
+        "family": "family_hd128",
+        "causal": True,
+    }
+
+
 def test_custom_op_prefill_family_hd512_matches_reference_when_registered():
     if ops.torch is None:
         return
@@ -375,6 +407,45 @@ def test_custom_op_prefill_family_hd512_matches_reference_when_registered():
         indices,
         phase="prefill",
         family="family_hd512",
+        causal=True,
+    )
+
+    assert ops.torch.allclose(custom_out.float(), reference_out.float(), atol=5e-2, rtol=5e-2)
+    assert ops.torch.allclose(custom_lse.float(), reference_lse.float(), atol=5e-2, rtol=5e-2)
+
+
+def test_custom_op_prefill_family_hd128_matches_reference_when_registered():
+    if ops.torch is None:
+        return
+
+    namespace = getattr(ops.torch.ops, "aten_dsa_sparse_attention", None)
+    if namespace is None or not hasattr(namespace, "sparse_attention_forward"):
+        return
+
+    npu_namespace = getattr(ops.torch, "npu", None)
+    if npu_namespace is None or not npu_namespace.is_available():
+        return
+
+    device = ops.torch.device("npu")
+    query = ops.torch.randn(1, 128, 8, 128, device=device, dtype=ops.torch.float16)
+    keys = ops.torch.randn(1, 1, 8, 128, device=device, dtype=ops.torch.float16)
+    values = ops.torch.randn(1, 1, 8, 128, device=device, dtype=ops.torch.float16)
+    indices = ops.torch.randint(0, 8, (1, 8, 8), device=device, dtype=ops.torch.long)
+
+    reference_out, reference_lse = ops._prefill_reference(
+        query,
+        keys,
+        values,
+        indices,
+        causal=True,
+    )
+    custom_out, custom_lse = ops.sparse_attention_forward(
+        query,
+        keys,
+        values,
+        indices,
+        phase="prefill",
+        family="family_hd128",
         causal=True,
     )
 
