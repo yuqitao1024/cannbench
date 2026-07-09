@@ -16,6 +16,18 @@ This spec covers the full intended scope:
 Implementation priority is allowed to be staged later in the plan, but scope is
 defined here in full.
 
+Current implementation status:
+
+- the first real custom-op slice exists for `lightning_indexer prefill
+  family_4x64`
+- unsupported `lightning_indexer` phases/families continue to use the Python
+  reference fallback
+- `lightning_indexer decode`, `lightning_indexer family_64x128`, and all
+  `sparse_attention` custom-op slices remain pending
+- runtime exactness for the real `PrivateUse1` path still requires validation
+  in an Ascend environment with `torch`, `torch_npu`, `bisheng`, and an
+  available NPU runtime
+
 ## Goal
 
 Build real Ascend SIMT custom-op implementations behind the existing CannBench

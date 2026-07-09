@@ -37,3 +37,38 @@ def test_lightning_indexer_forward_uses_decode_reference_for_decode_fast_path(
 
     assert actual == "decode"
     assert captured["top_k"] == 4
+
+
+def test_lightning_indexer_forward_skips_registered_custom_op_for_decode(monkeypatch):
+    captured: dict[str, object] = {
+        "custom_calls": 0,
+        "decode_calls": 0,
+    }
+
+    def unexpected_custom(query, keys, weights, top_k, phase, family):
+        del query, keys, weights, top_k, phase, family
+        captured["custom_calls"] += 1
+        raise AssertionError("decode should not use the registered prefill custom op")
+
+    def fake_decode(query, keys, weights, *, top_k):
+        del query, keys, weights
+        captured["decode_calls"] += 1
+        captured["top_k"] = top_k
+        return "decode"
+
+    monkeypatch.setattr(ops, "_load_registered_op", lambda: unexpected_custom)
+    monkeypatch.setattr(ops, "_decode_reference", fake_decode, raising=False)
+
+    actual = ops.lightning_indexer_forward(
+        object(),
+        object(),
+        object(),
+        top_k=8,
+        phase="decode",
+        family="family_4x64",
+    )
+
+    assert actual == "decode"
+    assert captured["custom_calls"] == 0
+    assert captured["decode_calls"] == 1
+    assert captured["top_k"] == 8

@@ -70,6 +70,14 @@ def test_operator_plugins_own_external_implementation_hooks():
     assert callable(sparse_attention.build_vllm_ascend_callable)
 
 
+def test_lightning_indexer_operator_plugin_registers_simt_hook():
+    lightning_indexer = get_operator_plugin("lightning_indexer")
+
+    assert callable(lightning_indexer.build_simt_callable)
+    assert lightning_indexer.simt_module_name("v1") == "aten_dsa_lightning_indexer"
+    assert lightning_indexer.simt_module_name("v2") is None
+
+
 def test_operator_plugin_default_profile_kernel_selection_comes_from_plugin():
     plugin = get_operator_plugin("embedding")
 

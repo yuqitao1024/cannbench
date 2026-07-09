@@ -23,11 +23,24 @@ def lightning_indexer_forward(
     phase: str,
     family: str,
 ):
+    custom_op = _load_registered_op()
+    if custom_op is not None and phase == "prefill" and family == "family_4x64":
+        return custom_op(query, keys, weights, top_k, phase, family)
     if phase == "prefill" and family in {"family_64x128", "family_4x64"}:
         return _prefill_reference(query, keys, weights, top_k=top_k)
     if phase == "decode" and family in {"family_64x128", "family_4x64"}:
         return _decode_reference(query, keys, weights, top_k=top_k)
     return _fallback_reference(query, keys, weights, top_k=top_k)
+
+
+def _load_registered_op():
+    if torch is None:
+        return None
+    try:
+        namespace = torch.ops.aten_dsa_lightning_indexer
+        return getattr(namespace, "lightning_indexer_forward")
+    except Exception:
+        return None
 
 
 def _prefill_reference(query, keys, weights, *, top_k: int):

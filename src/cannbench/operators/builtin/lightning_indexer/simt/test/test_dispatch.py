@@ -150,3 +150,15 @@ def test_build_simt_callable_passes_family_to_operator():
     assert captured["top_k"] == 2048
     assert captured["phase"] == "decode"
     assert captured["family"] == "family_4x64"
+
+
+def test_plugin_exposes_supported_prefill_and_decode_simt_cases():
+    prefill_case = get_lightning_indexer_case("realistic", "opt_prefill_2048_top512")
+    decode_case = get_lightning_indexer_case("realistic", "llama4_decode_32760_top2048")
+
+    assert prefill_case.phase == "prefill"
+    assert prefill_case.index_heads == 4
+    assert prefill_case.index_dim == 64
+    assert decode_case.phase == "decode"
+    assert decode_case.index_heads == 4
+    assert decode_case.index_dim == 64
