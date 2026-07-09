@@ -22,6 +22,8 @@ def sparse_attention_forward(query, keys, values, indices, *, phase: str, family
             return custom_op(query, keys, values, indices, phase, family, causal)
         if phase == "decode" and family == "family_hd512":
             return custom_op(query, keys, values, indices, phase, family, causal)
+        if phase == "decode" and family == "family_hd128":
+            return custom_op(query, keys, values, indices, phase, family, causal)
     if phase == "prefill" and family in {"family_hd512", "family_hd128"}:
         return _prefill_reference(query, keys, values, indices, causal=causal)
     if phase == "decode" and family in {"family_hd512", "family_hd128"}:
