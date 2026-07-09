@@ -21,7 +21,7 @@
       "source_file": "hf_train/AllenaiLongformerBase_train.json",
       "source_op": "torch.Tensor.index_add_",
       "metrics": {
-        "latency_ms": 0.597190002
+        "latency_ms": 0.5968525085
       },
       "accuracy": {
         "passed": true,
@@ -52,7 +52,7 @@
       "source_file": "torchbench_train/basic_gnn_gin_train.json",
       "source_op": "torch.index_add",
       "metrics": {
-        "latency_ms": 0.109333
+        "latency_ms": 0.1089594995
       },
       "accuracy": {
         "passed": true,
@@ -84,7 +84,7 @@
       "source_file": "torchbench_train/BERT_pytorch_train.json",
       "source_op": "torch.index_add",
       "metrics": {
-        "latency_ms": 0.016806999
+        "latency_ms": 0.016517499999999997
       },
       "accuracy": {
         "passed": true,
@@ -116,7 +116,228 @@
       "source_file": "torchbench_train/hf_BigBird_train.json",
       "source_op": "torch.index_add",
       "metrics": {
-        "latency_ms": 0.037835999
+        "latency_ms": 0.037632999
+      },
+      "accuracy": {
+        "passed": true,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0
+      },
+      "diff_ref": "index_add/simt/v1"
+    },
+    {
+      "schema_version": 1,
+      "run_id": "opbench-ascend-950pr-simt-v1-index_add-realistic-float16/index_add-realistic-block_sparse_mid_index_add-float16-seed7",
+      "operator": "index_add",
+      "dataset": "realistic",
+      "case_id": "block_sparse_mid_index_add",
+      "family": "block_sparse_accumulation",
+      "shape": [
+        128,
+        64,
+        64
+      ],
+      "dtype": "float16",
+      "backend": "ascend",
+      "device_class": "950PR",
+      "implementation": "simt",
+      "implementation_version": "v1",
+      "source_kind": "realistic_model_shape",
+      "source_project": "cannbench",
+      "source_model": "BlockSparseTransformer",
+      "source_file": "curated_block_sparse_mid_shape",
+      "source_op": "torch.index_add",
+      "metrics": {
+        "latency_ms": 0.011915
+      },
+      "accuracy": {
+        "passed": true,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0
+      },
+      "diff_ref": "index_add/simt/v1"
+    },
+    {
+      "schema_version": 1,
+      "run_id": "opbench-ascend-950pr-simt-v1-index_add-realistic-float16/index_add-realistic-embedding_backward_vocab_grad_index_add-float16-seed7",
+      "operator": "index_add",
+      "dataset": "realistic",
+      "case_id": "embedding_backward_vocab_grad_index_add",
+      "family": "embedding_gradient_accumulation",
+      "shape": [
+        8000,
+        512
+      ],
+      "dtype": "float16",
+      "backend": "ascend",
+      "device_class": "950PR",
+      "implementation": "simt",
+      "implementation_version": "v1",
+      "source_kind": "realistic_model_shape",
+      "source_project": "cannbench",
+      "source_model": "TransformerEmbeddingBackward",
+      "source_file": "curated_embedding_backward_shape",
+      "source_op": "torch.index_add",
+      "metrics": {
+        "latency_ms": 0.020914500500000002
+      },
+      "accuracy": {
+        "passed": true,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0
+      },
+      "diff_ref": "index_add/simt/v1"
+    },
+    {
+      "schema_version": 1,
+      "run_id": "opbench-ascend-950pr-simt-v1-index_add-realistic-float16/index_add-realistic-gpt_decoder_hidden_index_add-float16-seed7",
+      "operator": "index_add",
+      "dataset": "realistic",
+      "case_id": "gpt_decoder_hidden_index_add",
+      "family": "hidden_accumulation",
+      "shape": [
+        8,
+        512,
+        768
+      ],
+      "dtype": "float16",
+      "backend": "ascend",
+      "device_class": "950PR",
+      "implementation": "simt",
+      "implementation_version": "v1",
+      "source_kind": "realistic_model_shape",
+      "source_project": "cannbench",
+      "source_model": "GPTDecoder",
+      "source_file": "curated_transformer_decoder_shape",
+      "source_op": "torch.index_add",
+      "metrics": {
+        "latency_ms": 0.016330500999999997
+      },
+      "accuracy": {
+        "passed": true,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0
+      },
+      "diff_ref": "index_add/simt/v1"
+    },
+    {
+      "schema_version": 1,
+      "run_id": "opbench-ascend-950pr-simt-v1-index_add-realistic-float16/index_add-realistic-last_dim_memory_medium_index_add-float16-seed7",
+      "operator": "index_add",
+      "dataset": "realistic",
+      "case_id": "last_dim_memory_medium_index_add",
+      "family": "memory_accumulation",
+      "shape": [
+        2,
+        8,
+        128,
+        2048
+      ],
+      "dtype": "float16",
+      "backend": "ascend",
+      "device_class": "950PR",
+      "implementation": "simt",
+      "implementation_version": "v1",
+      "source_kind": "realistic_model_shape",
+      "source_project": "cannbench",
+      "source_model": "SegmentMemoryTransformer",
+      "source_file": "curated_last_dim_memory_shape",
+      "source_op": "torch.index_add",
+      "metrics": {
+        "latency_ms": 0.047625
+      },
+      "accuracy": {
+        "passed": true,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0
+      },
+      "diff_ref": "index_add/simt/v1"
+    },
+    {
+      "schema_version": 1,
+      "run_id": "opbench-ascend-950pr-simt-v1-index_add-realistic-float16/index_add-realistic-llama_hidden_large_batch_index_add-float16-seed7",
+      "operator": "index_add",
+      "dataset": "realistic",
+      "case_id": "llama_hidden_large_batch_index_add",
+      "family": "hidden_accumulation",
+      "shape": [
+        16,
+        512,
+        512
+      ],
+      "dtype": "float16",
+      "backend": "ascend",
+      "device_class": "950PR",
+      "implementation": "simt",
+      "implementation_version": "v1",
+      "source_kind": "realistic_model_shape",
+      "source_project": "cannbench",
+      "source_model": "LlamaDecoder",
+      "source_file": "curated_large_batch_hidden_shape",
+      "source_op": "torch.index_add",
+      "metrics": {
+        "latency_ms": 0.020862499
+      },
+      "accuracy": {
+        "passed": true,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0
+      },
+      "diff_ref": "index_add/simt/v1"
+    },
+    {
+      "schema_version": 1,
+      "run_id": "opbench-ascend-950pr-simt-v1-index_add-realistic-float16/index_add-realistic-llama_moe_token_combine_index_add-float16-seed7",
+      "operator": "index_add",
+      "dataset": "realistic",
+      "case_id": "llama_moe_token_combine_index_add",
+      "family": "moe_token_combine",
+      "shape": [
+        2048,
+        1024
+      ],
+      "dtype": "float16",
+      "backend": "ascend",
+      "device_class": "950PR",
+      "implementation": "simt",
+      "implementation_version": "v1",
+      "source_kind": "realistic_model_shape",
+      "source_project": "cannbench",
+      "source_model": "LlamaMoE",
+      "source_file": "curated_moe_token_combine_shape",
+      "source_op": "torch.index_add",
+      "metrics": {
+        "latency_ms": 0.038049
+      },
+      "accuracy": {
+        "passed": true,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0
+      },
+      "diff_ref": "index_add/simt/v1"
+    },
+    {
+      "schema_version": 1,
+      "run_id": "opbench-ascend-950pr-simt-v1-index_add-realistic-float16/index_add-realistic-longformer_medium_1d_index_add_inplace-float16-seed7",
+      "operator": "index_add",
+      "dataset": "realistic",
+      "case_id": "longformer_medium_1d_index_add_inplace",
+      "family": "longformer_global_accumulation",
+      "shape": [
+        1048576
+      ],
+      "dtype": "float16",
+      "backend": "ascend",
+      "device_class": "950PR",
+      "implementation": "simt",
+      "implementation_version": "v1",
+      "source_kind": "realistic_model_shape",
+      "source_project": "cannbench",
+      "source_model": "LongformerMedium",
+      "source_file": "curated_global_token_1d_shape",
+      "source_op": "torch.Tensor.index_add_",
+      "metrics": {
+        "latency_ms": 0.1345905
       },
       "accuracy": {
         "passed": true,
@@ -148,7 +369,38 @@
       "source_file": "hf_train/OPTForCausalLM_train.json",
       "source_op": "torch.index_add",
       "metrics": {
-        "latency_ms": 0.038089001000000004
+        "latency_ms": 0.0383775005
+      },
+      "accuracy": {
+        "passed": true,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0
+      },
+      "diff_ref": "index_add/simt/v1"
+    },
+    {
+      "schema_version": 1,
+      "run_id": "opbench-ascend-950pr-simt-v1-index_add-realistic-float16/index_add-realistic-packed_sequence_restore_index_add-float16-seed7",
+      "operator": "index_add",
+      "dataset": "realistic",
+      "case_id": "packed_sequence_restore_index_add",
+      "family": "packed_sequence_restore",
+      "shape": [
+        2048,
+        512
+      ],
+      "dtype": "float16",
+      "backend": "ascend",
+      "device_class": "950PR",
+      "implementation": "simt",
+      "implementation_version": "v1",
+      "source_kind": "realistic_model_shape",
+      "source_project": "cannbench",
+      "source_model": "PackedSequenceTransformer",
+      "source_file": "curated_packed_sequence_restore_shape",
+      "source_op": "torch.index_add",
+      "metrics": {
+        "latency_ms": 0.011856499999999999
       },
       "accuracy": {
         "passed": true,
@@ -180,7 +432,7 @@
       "source_file": "hf_train/T5Small_train.json",
       "source_op": "torch.index_add",
       "metrics": {
-        "latency_ms": 0.046967998999999996
+        "latency_ms": 0.0475010015
       },
       "accuracy": {
         "passed": true,
@@ -213,7 +465,7 @@
       "source_file": "hf_train/XLNetLMHeadModel_train.json",
       "source_op": "torch.index_add",
       "metrics": {
-        "latency_ms": 1.025239014
+        "latency_ms": 1.025187561
       },
       "accuracy": {
         "passed": true,

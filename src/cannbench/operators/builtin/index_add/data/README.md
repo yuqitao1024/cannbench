@@ -25,6 +25,26 @@ This directory contains the built-in `torch.index_add` benchmark datasets used b
 | `bert_hidden_index_add` | `hidden_accumulation` | `[16, 128, 768]` | `[128]` | `[16, 128, 768]` | `1` | `BERT_pytorch` | `torchbench_train/BERT_pytorch_train.json` |
 | `t5_hidden_index_add` | `hidden_accumulation` | `[4, 8, 1024]` | `[1024]` | `[4, 1024, 1024]` | `1` | `T5Small` | `hf_train/T5Small_train.json` |
 | `opt_hidden_index_add` | `hidden_accumulation` | `[8, 256, 2048]` | `[256]` | `[8, 256, 2048]` | `1` | `OPTForCausalLM` | `hf_train/OPTForCausalLM_train.json` |
+| `basic_gnn_gin_neighbor_index_add` | `gnn_neighbor_accumulation` | `[10000, 64]` | `[200000]` | `[200000, 64]` | `-2` | `basic_gnn_gin` | `torchbench_train/basic_gnn_gin_train.json` |
+| `bigbird_block_index_add` | `block_sparse_accumulation` | `[384, 64, 64]` | `[1008]` | `[1008, 64, 64]` | `0` | `hf_BigBird` | `torchbench_train/hf_BigBird_train.json` |
+| `xlnet_memory_index_add` | `memory_accumulation` | `[8, 16, 512, 1023]` | `[512]` | `[8, 16, 512, 512]` | `3` | `XLNetLMHeadModel` | `hf_train/XLNetLMHeadModel_train.json` |
+| `allenai_longformer_large_index_add_inplace` | `longformer_global_accumulation` | `[4718592]` | `[9437184]` | `[9437184]` | `0` | `AllenaiLongformerBase` | `hf_train/AllenaiLongformerBase_train.json` |
+| `gpt_decoder_hidden_index_add` | `hidden_accumulation` | `[8, 512, 768]` | `[256]` | `[8, 256, 768]` | `1` | `GPTDecoder` | `curated_transformer_decoder_shape` |
+| `llama_moe_token_combine_index_add` | `moe_token_combine` | `[2048, 1024]` | `[4096]` | `[4096, 1024]` | `0` | `LlamaMoE` | `curated_moe_token_combine_shape` |
+| `embedding_backward_vocab_grad_index_add` | `embedding_gradient_accumulation` | `[8000, 512]` | `[4096]` | `[4096, 512]` | `0` | `TransformerEmbeddingBackward` | `curated_embedding_backward_shape` |
+| `packed_sequence_restore_index_add` | `packed_sequence_restore` | `[2048, 512]` | `[2048]` | `[2048, 512]` | `0` | `PackedSequenceTransformer` | `curated_packed_sequence_restore_shape` |
+| `llama_hidden_large_batch_index_add` | `hidden_accumulation` | `[16, 512, 512]` | `[256]` | `[16, 256, 512]` | `1` | `LlamaDecoder` | `curated_large_batch_hidden_shape` |
+| `block_sparse_mid_index_add` | `block_sparse_accumulation` | `[128, 64, 64]` | `[256]` | `[256, 64, 64]` | `0` | `BlockSparseTransformer` | `curated_block_sparse_mid_shape` |
+| `last_dim_memory_medium_index_add` | `memory_accumulation` | `[2, 8, 128, 2048]` | `[512]` | `[2, 8, 128, 512]` | `3` | `SegmentMemoryTransformer` | `curated_last_dim_memory_shape` |
+| `longformer_medium_1d_index_add_inplace` | `longformer_global_accumulation` | `[1048576]` | `[2097152]` | `[2097152]` | `0` | `LongformerMedium` | `curated_global_token_1d_shape` |
+
+The additional curated realistic shapes cover model-relevant accumulation
+patterns that appear around embedding-gradient accumulation, routed-token
+combination in MoE-style models, packed/ragged sequence restoration,
+block-sparse/global-token accumulation, and memory-style last-dimension
+updates. Dense Transformer inference usually does not make `index_add` a main
+hot operator; these cases focus on sparse, routed, ragged, or backward-style
+paths where duplicate indices and scatter-add semantics are more representative.
 
 ### Stress
 
