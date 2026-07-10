@@ -98,3 +98,12 @@ def test_index_add_simt_v2_keeps_hidden_accumulation_on_generic_path():
     assert "launch_index_add_3d_dim1_float" not in cpp_source
     assert "index_add_3d_dim1_kernel" not in asc_source
     assert "if (rank == 3 && wrapped_dim == 1)" not in cpp_source
+
+
+def test_index_add_simt_v2_uses_supported_thread_block_size():
+    asc_source = (SIMT_INDEX_ADD_V2_ROOT / "simt" / "index_add.asc").read_text()
+
+    assert "__launch_bounds__(1024)" in asc_source
+    assert "threads_per_block = 1024" in asc_source
+    assert "__launch_bounds__(2048)" not in asc_source
+    assert "threads_per_block = 2048" not in asc_source

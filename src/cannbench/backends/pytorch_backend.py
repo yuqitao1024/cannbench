@@ -42,7 +42,7 @@ def _ascend_msprof_op_options(
     del request
     return [
         f"--output={profile_dir}",
-        f"--launch-count=1",
+        f"--launch-count=10",
     ]
 
 
