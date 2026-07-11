@@ -40,18 +40,21 @@ def test_sparse_attention_forward_uses_decode_reference_for_decode_fast_path(
     assert captured["causal"] is True
 
 
-def test_sparse_attention_forward_prefers_registered_custom_op_for_decode_family_hd512(
+def test_sparse_attention_forward_uses_decode_reference_for_decode_family_hd512_even_when_custom_op_is_registered(
     monkeypatch,
 ):
     captured: dict[str, object] = {}
 
     def fake_custom_op(query, keys, values, indices, phase, family, causal):
-        del query, keys, values, indices
-        captured["phase"] = phase
-        captured["family"] = family
-        captured["causal"] = causal
-        return "custom"
+        del query, keys, values, indices, phase, family, causal
+        raise AssertionError("decode family_hd512 should not use the custom op in single-path mode")
 
+    def fake_decode(query, keys, values, indices, *, causal):
+        del query, keys, values, indices
+        captured["causal"] = causal
+        return "decode"
+
+    monkeypatch.setattr(ops, "_decode_reference", fake_decode, raising=False)
     monkeypatch.setattr(ops, "_load_registered_op", lambda: fake_custom_op, raising=False)
 
     actual = ops.sparse_attention_forward(
@@ -64,12 +67,8 @@ def test_sparse_attention_forward_prefers_registered_custom_op_for_decode_family
         causal=True,
     )
 
-    assert actual == "custom"
-    assert captured == {
-        "phase": "decode",
-        "family": "family_hd512",
-        "causal": True,
-    }
+    assert actual == "decode"
+    assert captured == {"causal": True}
 
 
 def test_sparse_attention_forward_prefers_registered_custom_op_for_decode_family_hd128(

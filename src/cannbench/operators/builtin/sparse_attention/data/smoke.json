@@ -218,6 +218,24 @@
       "source_op": "sparse_attention"
     },
     {
+      "case_id": "tiny_hd128_prefill_top8",
+      "family": "prefill_sparse_attention",
+      "batch": 1,
+      "query_heads": 128,
+      "kv_heads": 1,
+      "query_tokens": 8,
+      "context_tokens": 8,
+      "selected_tokens": 8,
+      "head_dim": 128,
+      "causal": true,
+      "phase": "prefill",
+      "source_kind": "synthetic_smoke",
+      "source_project": "cannbench",
+      "source_model": "sparse_attention_hd128_prefill_smoke",
+      "source_file": "built-in",
+      "source_op": "sparse_attention"
+    },
+    {
       "case_id": "tiny_mqa_decode_top8",
       "family": "mqa_sparse_attention",
       "batch": 2,

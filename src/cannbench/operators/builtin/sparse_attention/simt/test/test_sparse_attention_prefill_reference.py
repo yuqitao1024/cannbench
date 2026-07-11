@@ -311,36 +311,35 @@ def test_sparse_attention_forward_uses_fallback_reference_outside_prefill_fast_p
     assert captured["causal"] is False
 
 
-def test_sparse_attention_forward_prefers_registered_custom_op_for_prefill_family_hd512(
+def test_sparse_attention_forward_uses_reference_for_prefill_family_hd512_even_when_custom_op_is_registered(
     monkeypatch,
 ):
-    captured = {}
+    monkeypatch.setattr(ops, "torch", FakeTorch)
 
     def fake_custom_op(query, keys, values, indices, phase, family, causal):
-        del query, keys, values, indices
-        captured["phase"] = phase
-        captured["family"] = family
-        captured["causal"] = causal
-        return "custom"
+        del query, keys, values, indices, phase, family, causal
+        raise AssertionError("prefill family_hd512 should not use the custom op in single-path mode")
 
     monkeypatch.setattr(ops, "_load_registered_op", lambda: fake_custom_op, raising=False)
 
     actual = ops.sparse_attention_forward(
-        object(),
-        object(),
-        object(),
-        object(),
+        _fake_query(),
+        _fake_keys(),
+        _fake_values(),
+        _fake_indices(),
         phase="prefill",
         family="family_hd512",
         causal=True,
     )
 
-    assert actual == "custom"
-    assert captured == {
-        "phase": "prefill",
-        "family": "family_hd512",
-        "causal": True,
-    }
+    reference = ops._prefill_reference(
+        _fake_query(),
+        _fake_keys(),
+        _fake_values(),
+        _fake_indices(),
+        causal=True,
+    )
+    assert actual == reference
 
 
 def test_sparse_attention_forward_prefers_registered_custom_op_for_prefill_family_hd128(
