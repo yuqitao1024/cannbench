@@ -152,6 +152,40 @@ def test_ascend_softmax_v3_persistent_kernel_uses_shape_aware_launch_bounds():
     assert "row_softmax_persistent_forward_kernel" in kernel_template
 
 
+def test_ascend_softmax_v3_isolates_512_and_1024_persistent_kernels():
+    source = (
+        SIMT_OP_V3_ROOT
+        / "aten_softmax_v3"
+        / "csrc"
+        / "simt"
+        / "spatial_softmax.asc"
+    ).read_text()
+    persistent_512 = (
+        SIMT_OP_V3_ROOT
+        / "aten_softmax_v3"
+        / "csrc"
+        / "simt"
+        / "persistent_512.asc"
+    ).read_text()
+    persistent_1024 = (
+        SIMT_OP_V3_ROOT
+        / "aten_softmax_v3"
+        / "csrc"
+        / "simt"
+        / "persistent_1024.asc"
+    ).read_text()
+
+    assert "void dispatch_row_persistent_forward_kernel_512_fp16(" in source
+    assert "void dispatch_row_persistent_forward_kernel_512_fp32(" in source
+    assert "dispatch_row_persistent_forward_kernel_512_fp16(" in source
+    assert "dispatch_row_persistent_forward_kernel_512_fp32(" in source
+    assert 'TORCH_CHECK(false, "unsupported 512-thread persistent dtype combination");' in source
+    assert "__launch_bounds__(512)" in persistent_512
+    assert "dispatch_row_persistent_forward_kernel_with_512_threads" in persistent_512
+    assert "__launch_bounds__(1024)" in persistent_1024
+    assert "dispatch_row_persistent_forward_kernel_with_1024_threads" in persistent_1024
+
+
 def test_ascend_softmax_v2_persistent_path_uses_cuda_style_register_warp_kernel():
     source = (
         SIMT_OP_V2_ROOT
