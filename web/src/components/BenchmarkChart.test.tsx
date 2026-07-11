@@ -124,7 +124,7 @@ describe("BenchmarkChart", () => {
     expect(option.tooltip.extraCssText).toContain("overflow-y:auto");
   });
 
-  it("summarizes selected series against the CUDA baseline", async () => {
+  it("summarizes selected series against the CUDA baseline with geometric mean", async () => {
     const series: ChartSeries[] = [
       {
         key: "nvidia-h800-cuda-pytorch",
@@ -132,7 +132,8 @@ describe("BenchmarkChart", () => {
         records: [],
         points: [
           { caseId: "a", latencyMs: 0.01, record: null },
-          { caseId: "b", latencyMs: 0.02, record: null }
+          { caseId: "b", latencyMs: 0.02, record: null },
+          { caseId: "c", latencyMs: 0.04, record: null }
         ]
       },
       {
@@ -140,8 +141,9 @@ describe("BenchmarkChart", () => {
         name: "Ascend 950PR SIMT v2",
         records: [],
         points: [
-          { caseId: "a", latencyMs: 0.03, record: null },
-          { caseId: "b", latencyMs: 0.06, record: null }
+          { caseId: "a", latencyMs: 0.01, record: null },
+          { caseId: "b", latencyMs: 0.02, record: null },
+          { caseId: "c", latencyMs: 0.16, record: null }
         ]
       },
       {
@@ -150,17 +152,18 @@ describe("BenchmarkChart", () => {
         records: [],
         points: [
           { caseId: "a", latencyMs: 0.005, record: null },
-          { caseId: "b", latencyMs: 0.01, record: null }
+          { caseId: "b", latencyMs: 0.01, record: null },
+          { caseId: "c", latencyMs: 0.02, record: null }
         ]
       }
     ];
-    const segments: ChartSegment[] = [{ key: "realistic", label: "realistic", start: 0, end: 1 }];
+    const segments: ChartSegment[] = [{ key: "realistic", label: "realistic", start: 0, end: 2 }];
 
     render(<BenchmarkChart series={series} segments={segments} />);
 
     expect(screen.getByText(/vs cuda baseline/i)).toBeInTheDocument();
     expect(screen.getByText(/Ascend 950PR SIMT v2/i)).toBeInTheDocument();
-    expect(screen.getByText(/3.00x slower/i)).toHaveClass("is-slower");
+    expect(screen.getByText(/1.59x slower/i)).toHaveClass("is-slower");
     expect(screen.getByText(/Ascend 950PR CANN Ops/i)).toBeInTheDocument();
     expect(screen.getByText(/2.00x faster/i)).toHaveClass("is-faster");
   });

@@ -42,16 +42,15 @@ function ratioClassName(ratio: number) {
   return ratio >= 1 ? "is-slower" : "is-faster";
 }
 
-function median(values: number[]) {
+function geometricMean(values: number[]) {
   if (values.length === 0) {
     return null;
   }
-  const sorted = [...values].sort((left, right) => left - right);
-  const middle = Math.floor(sorted.length / 2);
-  if (sorted.length % 2 === 1) {
-    return sorted[middle];
+  if (values.some((value) => value <= 0)) {
+    return null;
   }
-  return (sorted[middle - 1] + sorted[middle]) / 2;
+  const logSum = values.reduce((sum, value) => sum + Math.log(value), 0);
+  return Math.exp(logSum / values.length);
 }
 
 function cudaPointByCase(series: ChartSeries[]) {
@@ -80,7 +79,7 @@ function baselineSummary(series: ChartSeries[]): BaselineSummaryItem[] {
           return point.latencyMs / cudaPoint.latencyMs;
         })
         .filter((value): value is number => value !== null);
-      const ratio = median(ratios);
+      const ratio = geometricMean(ratios);
       return ratio === null ? null : { key: item.key, name: item.name, ratio };
     })
     .filter((item): item is BaselineSummaryItem => item !== null);
