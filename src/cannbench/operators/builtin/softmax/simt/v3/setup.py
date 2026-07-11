@@ -2,6 +2,7 @@ import glob
 import os
 import sysconfig
 from distutils.errors import CompileError
+from pathlib import Path
 from shutil import which
 
 from setuptools import Extension, find_packages, setup
@@ -63,6 +64,74 @@ class AscendBuildExtension(build_ext):
         if not which("bisheng"):
             raise RuntimeError("bisheng command not found")
 
+    def _common_compile_args(self, dep_paths, abi_value, opt_flag, debug_mode):
+        args = [
+            "bisheng",
+            "-x",
+            "asc",
+            f"--npu-arch={NPU_ARCH}",
+            "-fPIC",
+            "-std=c++17",
+            opt_flag,
+            f"-D_GLIBCXX_USE_CXX11_ABI={abi_value}",
+        ]
+        if debug_mode:
+            args.append("-g")
+        for include_dir in dep_paths["include_dirs"]:
+            args.append(f"-I{include_dir}")
+        return args
+
+    def _compile_sources_to_objects(
+        self,
+        sources,
+        dep_paths,
+        abi_value,
+        opt_flag,
+        debug_mode,
+    ):
+        os.makedirs(self.build_temp, exist_ok=True)
+        object_files = []
+        common_args = self._common_compile_args(
+            dep_paths, abi_value, opt_flag, debug_mode
+        )
+        for source in sources:
+            relative_source = os.path.relpath(source, BASE_DIR)
+            object_name = relative_source.replace(os.sep, "_") + ".o"
+            object_path = Path(self.build_temp) / object_name
+            compile_cmd = [
+                *common_args,
+                "-c",
+                source,
+                "-o",
+                str(object_path),
+            ]
+            self.spawn(compile_cmd)
+            object_files.append(str(object_path))
+        return object_files
+
+    def _link_objects(self, ext_fullpath, object_files, dep_paths):
+        link_cmd = [
+            "bisheng",
+            "-shared",
+            "-fPIC",
+            *object_files,
+        ]
+        for library_dir in dep_paths["library_dirs"]:
+            link_cmd.append(f"-L{library_dir}")
+        link_cmd.extend(
+            [
+                "-ltorch_npu",
+                "-ltorch_python",
+                "-ltorch_cpu",
+                "-ltorch",
+                "-lc10",
+                "-lm",
+                "-o",
+                ext_fullpath,
+            ]
+        )
+        self.spawn(link_cmd)
+
     def build_extension(self, ext):
         self._check_bisheng_compiler()
         if not NPU_ARCH:
@@ -77,43 +146,15 @@ class AscendBuildExtension(build_ext):
         debug_mode = os.getenv("DEBUG", "0") == "1"
         opt_flag = "-O0" if debug_mode else "-O3"
 
-        compile_cmd = [
-            "bisheng",
-            "-x",
-            "asc",
-            f"--npu-arch={NPU_ARCH}",
-            "-shared",
-            "-fPIC",
-            "-std=c++17",
-            opt_flag,
-            f"-D_GLIBCXX_USE_CXX11_ABI={abi_value}",
-            *ext.sources,
-        ]
-
-        if debug_mode:
-            compile_cmd.append("-g")
-
-        for include_dir in dep_paths["include_dirs"]:
-            compile_cmd.append(f"-I{include_dir}")
-
-        for library_dir in dep_paths["library_dirs"]:
-            compile_cmd.append(f"-L{library_dir}")
-
-        compile_cmd.extend(
-            [
-                "-ltorch_npu",
-                "-ltorch_python",
-                "-ltorch_cpu",
-                "-ltorch",
-                "-lc10",
-                "-lm",
-                "-o",
-                ext_fullpath,
-            ]
-        )
-
         try:
-            self.spawn(compile_cmd)
+            object_files = self._compile_sources_to_objects(
+                ext.sources,
+                dep_paths,
+                abi_value,
+                opt_flag,
+                debug_mode,
+            )
+            self._link_objects(ext_fullpath, object_files, dep_paths)
         except Exception as exc:
             raise CompileError(str(exc)) from exc
 
