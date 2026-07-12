@@ -27,7 +27,7 @@ def test_sparse_attention_hd128_bridge_uses_hybrid_score_body():
         "aten_dsa_sparse_attention/csrc/sparse_attention.asc"
     ).read_text(encoding="utf-8")
 
-    assert "at::bmm(" in source
+    assert "at::matmul(" in source
     assert "launch_sparse_attention_hd128_postprocess_float" in source
 
 
@@ -47,9 +47,19 @@ def test_sparse_attention_hd512_bridge_uses_hybrid_score_body():
         "aten_dsa_sparse_attention/csrc/sparse_attention.asc"
     ).read_text(encoding="utf-8")
 
-    assert "at::bmm(" in source
+    assert "at::matmul(" in source
     assert "launch_sparse_attention_hd512_postprocess_float" in source
     assert "sparse_attention_forward_family_hd512_hybrid(" in source
+
+
+def test_sparse_attention_score_helper_avoids_reshape_bmm_path():
+    source = Path(
+        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+        "aten_dsa_sparse_attention/csrc/sparse_attention.asc"
+    ).read_text(encoding="utf-8")
+
+    assert "at::bmm(" not in source
+    assert ".reshape(\n      {batch_size * query_heads * current_query, 1, query_tile.size(3)})" not in source
 
 
 def test_sparse_attention_hd512_bridge_uses_named_tile_constants():
