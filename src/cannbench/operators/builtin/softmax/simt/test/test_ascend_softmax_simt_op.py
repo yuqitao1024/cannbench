@@ -177,13 +177,28 @@ def test_ascend_softmax_v3_isolates_512_and_1024_persistent_kernels():
 
     assert "void dispatch_row_persistent_forward_kernel_512_fp16(" in source
     assert "void dispatch_row_persistent_forward_kernel_512_fp32(" in source
+    assert "if (dim_size == 1024) {" in source
+    assert "dispatch_row_persistent_forward_kernel_1024_fp16(" in source
+    assert "dispatch_row_persistent_forward_kernel_1024_fp32(" in source
     assert "dispatch_row_persistent_forward_kernel_512_fp16(" in source
     assert "dispatch_row_persistent_forward_kernel_512_fp32(" in source
     assert 'TORCH_CHECK(false, "unsupported 512-thread persistent dtype combination");' in source
+    assert '#include "c_api/asc_simd.h"' in persistent_512
     assert "__launch_bounds__(512)" in persistent_512
     assert "dispatch_row_persistent_forward_kernel_with_512_threads" in persistent_512
-    assert "__launch_bounds__(1024)" in persistent_1024
+    assert "row_softmax_persistent_hybrid_pipeline_kernel" in persistent_512
+    assert "asc_copy_gm2ub_align" in persistent_512
+    assert "asc_copy_ub2gm_align" in persistent_512
+    assert "asc_sync_notify(PIPE_V, PIPE_MTE2, EVENT_ID0);" in persistent_512
+    assert "asc_sync_notify(PIPE_V, PIPE_MTE2, EVENT_ID1);" in persistent_512
+    assert '#include "c_api/asc_simd.h"' in persistent_1024
+    assert "__launch_bounds__(256)" in persistent_1024
     assert "dispatch_row_persistent_forward_kernel_with_1024_threads" in persistent_1024
+    assert "row_softmax_persistent_hybrid_pipeline_kernel" in persistent_1024
+    assert "asc_copy_gm2ub_align" in persistent_1024
+    assert "asc_copy_ub2gm_align" in persistent_1024
+    assert "asc_sync_notify(PIPE_V, PIPE_MTE2, EVENT_ID0);" in persistent_1024
+    assert "asc_sync_notify(PIPE_V, PIPE_MTE2, EVENT_ID1);" in persistent_1024
 
 
 def test_ascend_softmax_v2_persistent_path_uses_cuda_style_register_warp_kernel():
