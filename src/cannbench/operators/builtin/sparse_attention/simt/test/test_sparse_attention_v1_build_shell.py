@@ -210,3 +210,13 @@ def test_sparse_attention_bridge_does_not_keep_debug_zero_output_path():
     ).read_text(encoding="utf-8")
 
     assert "output_tile.zero_();" not in source
+
+
+def test_sparse_attention_bridge_does_not_use_aten_softmax_path():
+    source = Path(
+        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+        "aten_dsa_sparse_attention/csrc/sparse_attention.asc"
+    ).read_text(encoding="utf-8")
+
+    assert "at::softmax(" not in source
+    assert "at::logsumexp(" not in source
