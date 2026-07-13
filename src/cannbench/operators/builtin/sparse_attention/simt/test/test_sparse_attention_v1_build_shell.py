@@ -78,8 +78,47 @@ def test_sparse_attention_hd512_bridge_uses_hybrid_score_body():
     ).read_text(encoding="utf-8")
 
     assert "launch_sparse_attention_score_" in source
+    assert "launch_sparse_attention_keys_gather_pack_hd512_float" in source
     assert "launch_sparse_attention_hd512_postprocess_float" in source
     assert "sparse_attention_forward_family_hd512_hybrid(" in source
+
+
+def test_sparse_attention_hd512_has_custom_gather_pack_source():
+    source = Path(
+        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+        "aten_dsa_sparse_attention/csrc/simt/"
+        "sparse_attention_keys_gather_pack_hd512.asc"
+    ).read_text(encoding="utf-8")
+
+    assert "selected_keys" in source
+    assert "indices" in source
+    assert "launch_sparse_attention_keys_gather_pack_hd512_float" in source
+
+
+def test_sparse_attention_hd512_score_source_uses_tensor_api():
+    source = Path(
+        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+        "aten_dsa_sparse_attention/csrc/simt/"
+        "sparse_attention_score_family_hd512.asc"
+    ).read_text(encoding="utf-8")
+
+    assert "tensor_api/tensor.h" in source
+    assert "MakeMmad(" in source
+    assert "__global__ __cube__" in source
+    assert "matmul_intf.h" not in source
+
+
+def test_sparse_attention_hd128_score_source_uses_tensor_api():
+    source = Path(
+        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+        "aten_dsa_sparse_attention/csrc/simt/"
+        "sparse_attention_score_family_hd128.asc"
+    ).read_text(encoding="utf-8")
+
+    assert "tensor_api/tensor.h" in source
+    assert "MakeMmad(" in source
+    assert "__global__ __cube__" in source
+    assert "simt_api/asc_simt.h" not in source
 
 
 def test_sparse_attention_score_helper_avoids_reshape_bmm_path():

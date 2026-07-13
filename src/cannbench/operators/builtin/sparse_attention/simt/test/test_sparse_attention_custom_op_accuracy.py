@@ -123,3 +123,35 @@ def test_custom_op_prefill_matches_reference_for_all_invalid_rows():
     indices = indices.clone()
     indices[:, :4, :] = case.context_tokens - 1
     _assert_matches_reference(case, query, keys, values, indices)
+
+
+def test_custom_op_prefill_lse_uses_negative_infinity_not_nan_for_all_invalid_rows():
+    _require_custom_sparse_attention_op()
+    case = get_sparse_attention_case(
+        "realistic_prefill",
+        "deepseek_a5_prefill_b1_q64_ctx512_top512",
+    )
+    query, keys, values, indices = _build_npu_inputs(case, seed=17)
+    indices = indices.clone()
+    indices[:, :4, :] = case.context_tokens - 1
+
+    reference_out, reference_lse = _run_reference(case, query, keys, values, indices)
+    custom_out, custom_lse = _run_custom_op(case, query, keys, values, indices)
+
+    del reference_out, custom_out
+
+    reference_lse = reference_lse.float()
+    custom_lse = custom_lse.float()
+
+    assert not ops.torch.isnan(reference_lse).any()
+    assert not ops.torch.isnan(custom_lse).any()
+    assert ops.torch.equal(ops.torch.isinf(custom_lse), ops.torch.isinf(reference_lse))
+
+    finite_mask = ops.torch.isfinite(reference_lse) & ops.torch.isfinite(custom_lse)
+    assert finite_mask.any()
+    assert ops.torch.allclose(
+        custom_lse[finite_mask],
+        reference_lse[finite_mask],
+        atol=5e-2,
+        rtol=5e-2,
+    )
