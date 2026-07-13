@@ -13,6 +13,12 @@ SIMT_INDEX_ADD_V2_ROOT = (
     / "aten_index_add_v2"
     / "csrc"
 )
+SIMT_INDEX_ADD_V3_ROOT = (
+    Path(__file__).resolve().parents[1]
+    / "v3"
+    / "aten_index_add_v3"
+    / "csrc"
+)
 
 
 def test_index_add_simt_v1_has_native_float16_path():
@@ -53,6 +59,7 @@ def test_index_add_plugin_routes_v2_to_isolated_module():
     assert plugin.simt_module_name("v1") == "aten_index_add"
     assert plugin.simt_module_name(None) == "aten_index_add"
     assert plugin.simt_module_name("v2") == "aten_index_add_v2"
+    assert plugin.simt_module_name("v3") == "aten_index_add_v3"
 
 
 def test_index_add_simt_v2_defines_shape_specialized_fast_paths():
@@ -107,3 +114,22 @@ def test_index_add_simt_v2_uses_supported_thread_block_size():
     assert "threads_per_block = 1024" in asc_source
     assert "__launch_bounds__(2048)" not in asc_source
     assert "threads_per_block = 2048" not in asc_source
+
+
+def test_index_add_simt_v3_defines_non_atomic_1d_dim0_diagnostic_path():
+    cpp_source = (SIMT_INDEX_ADD_V3_ROOT / "index_add.cpp").read_text()
+    asc_source = (SIMT_INDEX_ADD_V3_ROOT / "simt" / "index_add.asc").read_text()
+    setup_py = (SIMT_INDEX_ADD_V3_ROOT.parents[1] / "setup.py").read_text()
+    ops_py = (SIMT_INDEX_ADD_V3_ROOT.parents[0] / "ops.py").read_text()
+
+    assert 'library_name = "aten_index_add_v3"' in setup_py
+    assert "torch.ops.aten_index_add_v3" in ops_py
+    assert "TORCH_LIBRARY_FRAGMENT(aten_index_add_v3, m)" in cpp_source
+    assert "launch_index_add_1d_dim0_half" in cpp_source
+    assert "if (rank == 1 && wrapped_dim == 0)" in cpp_source
+
+    kernel_start = asc_source.index("void index_add_1d_dim0_kernel")
+    kernel_end = asc_source.index("template <typename scalar_t, typename alpha_t>", kernel_start + 1)
+    kernel_source = asc_source[kernel_start:kernel_end]
+    assert "asc_atomic_add" not in kernel_source
+    assert "output[index[j]] = output[index[j]] + val;" in kernel_source

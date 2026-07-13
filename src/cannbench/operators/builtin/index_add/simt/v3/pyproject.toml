@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aten_index_add_v3"
+version = "0.0.1"
+description = "Ascend SIMT index_add migration helper on torch_npu"
+requires-python = ">=3.11"
+dependencies = ["torch", "torch_npu"]
+
+[tool.setuptools]
+packages = ["aten_index_add_v3"]

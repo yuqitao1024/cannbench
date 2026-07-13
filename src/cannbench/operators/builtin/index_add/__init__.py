@@ -43,6 +43,8 @@ def _simt_module_name(version: str | None) -> str | None:
         return "aten_index_add"
     if resolved_version == "v2":
         return "aten_index_add_v2"
+    if resolved_version == "v3":
+        return "aten_index_add_v3"
     return None
 
 

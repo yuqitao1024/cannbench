@@ -1,0 +1,47 @@
+{
+  "name": "atomic_1d",
+  "cases": [
+    {
+      "case_id": "atomic_1d_unique_contiguous",
+      "family": "atomic_1d_no_contention_contiguous",
+      "input_shape": [1048576],
+      "index_shape": [1048576],
+      "src_shape": [1048576],
+      "dim": 0,
+      "index_pattern": "unique_contiguous",
+      "source_kind": "synthetic_atomic_diagnostic",
+      "source_project": "cannbench",
+      "source_model": "index_add_atomic_1d",
+      "source_file": "atomic_1d.json",
+      "source_op": "torch.index_add"
+    },
+    {
+      "case_id": "atomic_1d_unique_random_permutation",
+      "family": "atomic_1d_no_contention_random_write",
+      "input_shape": [1048576],
+      "index_shape": [1048576],
+      "src_shape": [1048576],
+      "dim": 0,
+      "index_pattern": "unique_random_permutation",
+      "source_kind": "synthetic_atomic_diagnostic",
+      "source_project": "cannbench",
+      "source_model": "index_add_atomic_1d",
+      "source_file": "atomic_1d.json",
+      "source_op": "torch.index_add"
+    },
+    {
+      "case_id": "atomic_1d_random_with_replacement",
+      "family": "atomic_1d_random_contention",
+      "input_shape": [1048576],
+      "index_shape": [2097152],
+      "src_shape": [2097152],
+      "dim": 0,
+      "index_pattern": "random_uniform",
+      "source_kind": "synthetic_atomic_diagnostic",
+      "source_project": "cannbench",
+      "source_model": "index_add_atomic_1d",
+      "source_file": "atomic_1d.json",
+      "source_op": "torch.index_add"
+    }
+  ]
+}

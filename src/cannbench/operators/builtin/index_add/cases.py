@@ -19,6 +19,7 @@ class IndexAddCase:
     source_model: str
     source_file: str
     source_op: str
+    index_pattern: str = "random_uniform"
 
     def __post_init__(self) -> None:
         input_shape = tuple(int(value) for value in self.input_shape)
@@ -36,6 +37,12 @@ class IndexAddCase:
             raise ValueError("dim must address an axis in input_shape")
         if src_shape[self.dim] != index_shape[0]:
             raise ValueError("src_shape along dim must match index_shape")
+        if self.index_pattern not in {
+            "random_uniform",
+            "unique_contiguous",
+            "unique_random_permutation",
+        }:
+            raise ValueError(f"unsupported index_pattern: {self.index_pattern}")
         object.__setattr__(self, "input_shape", input_shape)
         object.__setattr__(self, "index_shape", index_shape)
         object.__setattr__(self, "src_shape", src_shape)
