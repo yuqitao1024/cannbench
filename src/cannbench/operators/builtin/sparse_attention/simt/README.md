@@ -7,4 +7,4 @@ Fast-path families:
 - `family_hd512`
 - `family_hd128`
 
-Unsupported shapes use plugin-local fallback.
+Unsupported shapes are rejected by the SIMT plugin path.

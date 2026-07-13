@@ -133,6 +133,18 @@ def test_sparse_attention_score_helper_avoids_reshape_bmm_path():
     assert "run_sparse_attention_score_family_hd128_tile(" in source
 
 
+def test_sparse_attention_bridge_does_not_use_aten_gather_path():
+    source = Path(
+        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+        "aten_dsa_sparse_attention/csrc/sparse_attention.asc"
+    ).read_text(encoding="utf-8")
+
+    assert "at::gather(" not in source
+    assert "launch_sparse_attention_values_gather_hd512_float" in source
+    assert "launch_sparse_attention_keys_gather_pack_hd128_float" in source
+    assert "launch_sparse_attention_values_gather_hd128_float" in source
+
+
 def test_sparse_attention_hd512_bridge_uses_named_tile_constants():
     source = Path(
         "src/cannbench/operators/builtin/sparse_attention/simt/v1/"

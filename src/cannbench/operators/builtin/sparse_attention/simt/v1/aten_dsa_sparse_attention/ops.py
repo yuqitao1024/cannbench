@@ -11,20 +11,19 @@ except ImportError:
 __all__ = [
     "sparse_attention_forward",
     "_prefill_reference",
-    "_fallback_reference",
+    "_decode_reference",
 ]
 
 
 def sparse_attention_forward(query, keys, values, indices, *, phase: str, family: str, causal: bool):
+    if phase not in {"prefill", "decode"}:
+        raise RuntimeError(f"unsupported sparse_attention phase for custom op wrapper: {phase}")
+    if family not in {"family_hd512", "family_hd128"}:
+        raise RuntimeError(f"unsupported sparse_attention family for custom op wrapper: {family}")
     custom_op = _load_registered_op()
-    if custom_op is not None and phase in {"prefill", "decode"}:
-        if family in {"family_hd512", "family_hd128"}:
-            return custom_op(query, keys, values, indices, phase, family, causal)
-    if phase == "prefill" and family in {"family_hd512", "family_hd128"}:
-        return _prefill_reference(query, keys, values, indices, causal=causal)
-    if phase == "decode" and family in {"family_hd512", "family_hd128"}:
-        return _decode_reference(query, keys, values, indices, causal=causal)
-    return _fallback_reference(query, keys, values, indices, causal=causal)
+    if custom_op is None:
+        raise RuntimeError("aten_dsa_sparse_attention custom op is not registered")
+    return custom_op(query, keys, values, indices, phase, family, causal)
 
 
 def _load_registered_op():
@@ -60,12 +59,6 @@ def _prefill_reference(query, keys, values, indices, *, causal: bool):
         lse = lse.masked_fill(all_invalid, float("-inf"))
     output = (probabilities.to(query.dtype).unsqueeze(-1) * selected_values).sum(dim=-2)
     return output, lse
-
-
-def _fallback_reference(query, keys, values, indices, *, causal: bool):
-    return _prefill_reference(query, keys, values, indices, causal=causal)
-
-
 def _decode_reference(query, keys, values, indices, *, causal: bool):
     return _prefill_reference(query, keys, values, indices, causal=causal)
 

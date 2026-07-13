@@ -103,6 +103,10 @@ def _build_simt_callable(ctx):
         seed=ctx.request.seed,
     )
     family = _select_simt_family(payload)
+    if family == "fallback":
+        raise RuntimeError(
+            "sparse_attention SIMT custom op does not support this shape family"
+        )
     query = ctx.backend._tensor(
         ctx.torch,
         materialized_values_to_buffer(payload["query"]),

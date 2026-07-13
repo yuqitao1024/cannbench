@@ -148,3 +148,33 @@ def test_build_simt_callable_passes_family_to_operator():
     assert captured["phase"] == "decode"
     assert captured["family"] == "family_hd128"
     assert captured["causal"] is True
+
+
+def test_build_simt_callable_rejects_unsupported_family():
+    request = OperatorBenchmarkRequest(
+        backend="ascend",
+        op="sparse_attention",
+        dtype="float16",
+        dataset="smoke",
+        case_id="tiny_decode_top4",
+        seed=7,
+        implementation="simt",
+    )
+
+    ctx = TorchOperatorContext(
+        backend=SimpleNamespace(),
+        torch=SimpleNamespace(),
+        request=request,
+        case=get_sparse_attention_case("smoke", "tiny_decode_top4"),
+        device="npu",
+        dtype="float16",
+        implementation_module=SimpleNamespace(
+            ops=SimpleNamespace(sparse_attention_forward=lambda *args, **kwargs: None)
+        ),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="does not support this shape family",
+    ):
+        _build_simt_callable(ctx)

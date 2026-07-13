@@ -334,32 +334,20 @@ def test_prefill_reference_zeroes_all_masked_rows(monkeypatch):
     )
 
 
-def test_sparse_attention_forward_uses_fallback_reference_outside_prefill_fast_path(
-    monkeypatch,
-):
+def test_sparse_attention_forward_rejects_unsupported_family(monkeypatch):
     monkeypatch.setattr(ops, "torch", FakeTorch)
+    monkeypatch.setattr(ops, "_load_registered_op", lambda: None, raising=False)
 
-    captured = {}
-
-    def fake_fallback(query, keys, values, indices, *, causal):
-        del query, keys, values, indices
-        captured["causal"] = causal
-        return "fallback"
-
-    monkeypatch.setattr(ops, "_fallback_reference", fake_fallback)
-
-    actual = ops.sparse_attention_forward(
-        _fake_query(),
-        _fake_keys(),
-        _fake_values(),
-        _fake_indices(),
-        phase="decode",
-        family="fallback",
-        causal=False,
-    )
-
-    assert actual == "fallback"
-    assert captured["causal"] is False
+    with pytest.raises(RuntimeError, match="unsupported sparse_attention family"):
+        ops.sparse_attention_forward(
+            _fake_query(),
+            _fake_keys(),
+            _fake_values(),
+            _fake_indices(),
+            phase="decode",
+            family="fallback",
+            causal=False,
+        )
 
 
 @pytest.mark.parametrize("family", ["family_hd512", "family_hd128"])
@@ -394,6 +382,25 @@ def test_sparse_attention_forward_prefers_registered_custom_op_for_prefill_famil
         "family": family,
         "causal": True,
     }
+
+
+@pytest.mark.parametrize("family", ["family_hd512", "family_hd128"])
+def test_sparse_attention_forward_requires_registered_custom_op_for_prefill_family(
+    monkeypatch,
+    family,
+):
+    monkeypatch.setattr(ops, "_load_registered_op", lambda: None, raising=False)
+
+    with pytest.raises(RuntimeError, match="custom op is not registered"):
+        ops.sparse_attention_forward(
+            object(),
+            object(),
+            object(),
+            object(),
+            phase="prefill",
+            family=family,
+            causal=True,
+        )
 
 
 def _require_custom_sparse_attention_op():
