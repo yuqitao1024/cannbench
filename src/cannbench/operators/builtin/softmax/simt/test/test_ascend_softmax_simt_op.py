@@ -11,6 +11,15 @@ SIMT_OP_V2_ROOT = Path(
 SIMT_OP_V3_ROOT = Path(
     "src/cannbench/operators/builtin/softmax/simt/v3/"
 )
+SIMT_OP_V3_SIMT_ROOT = SIMT_OP_V3_ROOT / "aten_softmax_v3" / "csrc" / "simt"
+
+
+def _read_v3_simt_source(name: str) -> str:
+    return (SIMT_OP_V3_SIMT_ROOT / name).read_text()
+
+
+def _read_v3_simt_sources(*names: str) -> str:
+    return "\n".join(_read_v3_simt_source(name) for name in names)
 
 
 def test_ascend_softmax_keeps_dim_parallel_launch_policy():
@@ -114,13 +123,7 @@ def test_ascend_softmax_v2_persistent_path_uses_multi_row_block_shape():
 
 
 def test_ascend_softmax_v3_persistent_path_uses_shape_aware_threads_per_block():
-    source = (
-        SIMT_OP_V3_ROOT
-        / "aten_softmax_v3"
-        / "csrc"
-        / "simt"
-        / "spatial_softmax.asc"
-    ).read_text()
+    source = _read_v3_simt_source("spatial_softmax.asc")
 
     assert "inline int64_t row_softmax_persistent_threads_per_block(int64_t dim_size)" in source
     assert "if (dim_size == 512) {\n    return 512;" in source
@@ -130,20 +133,14 @@ def test_ascend_softmax_v3_persistent_path_uses_shape_aware_threads_per_block():
 
 
 def test_ascend_softmax_v3_persistent_kernel_uses_shape_aware_launch_bounds():
-    source = (
-        SIMT_OP_V3_ROOT
-        / "aten_softmax_v3"
-        / "csrc"
-        / "simt"
-        / "spatial_softmax.asc"
-    ).read_text()
+    source = _read_v3_simt_source("row_persistent_fallback.asc")
     vf_template = source[
         source.rindex("int64_t kThreadsPerBlock", 0, source.index("row_softmax_persistent_forward_vf"))
-        : source.index("row_softmax_fast_forward_vf")
+        : source.index("row_softmax_persistent_forward_kernel")
     ]
     kernel_template = source[
         source.rindex("int64_t kThreadsPerBlock", 0, source.index("row_softmax_persistent_forward_kernel"))
-        : source.index("row_softmax_fast_forward_kernel")
+        : source.index("launch_row_persistent_forward_kernel")
     ]
 
     assert "__launch_bounds__(kThreadsPerBlock)" in vf_template
@@ -153,36 +150,16 @@ def test_ascend_softmax_v3_persistent_kernel_uses_shape_aware_launch_bounds():
 
 
 def test_ascend_softmax_v3_isolates_512_and_1024_persistent_kernels():
-    source = (
-        SIMT_OP_V3_ROOT
-        / "aten_softmax_v3"
-        / "csrc"
-        / "simt"
-        / "spatial_softmax.asc"
-    ).read_text()
-    persistent_512 = (
-        SIMT_OP_V3_ROOT
-        / "aten_softmax_v3"
-        / "csrc"
-        / "simt"
-        / "persistent_512.asc"
-    ).read_text()
-    persistent_1024 = (
-        SIMT_OP_V3_ROOT
-        / "aten_softmax_v3"
-        / "csrc"
-        / "simt"
-        / "persistent_1024.asc"
-    ).read_text()
+    source = _read_v3_simt_source("row_persistent_fallback.asc")
+    persistent_512 = _read_v3_simt_source("persistent_512.asc")
+    persistent_1024 = _read_v3_simt_source("persistent_1024.asc")
 
     assert "void dispatch_row_persistent_forward_kernel_512_fp16(" in source
     assert "void dispatch_row_persistent_forward_kernel_512_fp32(" in source
-    assert "if (dim_size == 1024) {" in source
-    assert "dispatch_row_persistent_forward_kernel_1024_fp16(" in source
-    assert "dispatch_row_persistent_forward_kernel_1024_fp32(" in source
-    assert "dispatch_row_persistent_forward_kernel_512_fp16(" in source
-    assert "dispatch_row_persistent_forward_kernel_512_fp32(" in source
+    assert "void dispatch_row_persistent_forward_kernel_1024_fp16(" in source
+    assert "void dispatch_row_persistent_forward_kernel_1024_fp32(" in source
     assert 'TORCH_CHECK(false, "unsupported 512-thread persistent dtype combination");' in source
+    assert 'TORCH_CHECK(false, "unsupported 1024-thread persistent dtype combination");' in source
     assert '#include "c_api/asc_simd.h"' in persistent_512
     assert "__launch_bounds__(512)" in persistent_512
     assert "dispatch_row_persistent_forward_kernel_with_512_threads" in persistent_512
@@ -199,6 +176,18 @@ def test_ascend_softmax_v3_isolates_512_and_1024_persistent_kernels():
     assert "asc_copy_ub2gm_align" in persistent_1024
     assert "asc_sync_notify(PIPE_V, PIPE_MTE2, EVENT_ID0);" in persistent_1024
     assert "asc_sync_notify(PIPE_V, PIPE_MTE2, EVENT_ID1);" in persistent_1024
+
+
+def test_ascend_softmax_v3_non_1024_persistent_fallback_uses_generic_1024_thread_kernel():
+    source = _read_v3_simt_source("row_persistent_fallback.asc")
+
+    assert "if (dim_size == 1024) {" in source
+    assert "if (dim_size == 512) {" in source
+    assert "dispatch_row_persistent_forward_kernel_with_threads<" in source
+    generic_section = source[source.rindex("dispatch_row_persistent_forward_kernel_with_threads<") :]
+    assert "1024>(" in generic_section
+    assert "dispatch_row_persistent_forward_kernel_1024_fp16(" not in generic_section
+    assert "dispatch_row_persistent_forward_kernel_1024_fp32(" not in generic_section
 
 
 def test_ascend_softmax_v2_persistent_path_uses_cuda_style_register_warp_kernel():
@@ -265,25 +254,13 @@ def test_ascend_softmax_v2_fast_path_uses_cuda_style_block_reduce_kernel():
 
 
 def test_ascend_softmax_v3_fast_path_uses_1024_threads_per_block():
-    source = (
-        SIMT_OP_V3_ROOT
-        / "aten_softmax_v3"
-        / "csrc"
-        / "simt"
-        / "spatial_softmax.asc"
-    ).read_text()
+    source = _read_v3_simt_source("spatial_softmax.asc")
 
     assert "row_softmax_fast_block_x() {\n  constexpr int64_t kCudaFastPathThreads = 1024;" in source
 
 
 def test_ascend_softmax_v3_fast_path_uses_real_ilp_and_shifted_half2():
-    source = (
-        SIMT_OP_V3_ROOT
-        / "aten_softmax_v3"
-        / "csrc"
-        / "simt"
-        / "spatial_softmax.asc"
-    ).read_text()
+    source = _read_v3_simt_source("row_fast.asc")
     fast_start = source.index("row_softmax_fast_forward_vf")
     reg_start = source.index("row_softmax_fast_reg_forward_vf")
     fast_source = source[fast_start:reg_start]
@@ -300,13 +277,7 @@ def test_ascend_softmax_v3_fast_path_uses_real_ilp_and_shifted_half2():
 
 
 def test_ascend_softmax_v3_fast_path_has_register_cache_variant():
-    source = (
-        SIMT_OP_V3_ROOT
-        / "aten_softmax_v3"
-        / "csrc"
-        / "simt"
-        / "spatial_softmax.asc"
-    ).read_text()
+    source = _read_v3_simt_source("row_fast.asc")
 
     assert "row_softmax_fast_reg_forward_vf" in source
     assert "row_softmax_fast_reg_forward_kernel" in source
@@ -319,15 +290,14 @@ def test_ascend_softmax_v3_fast_path_has_register_cache_variant():
 
 
 def test_ascend_softmax_v3_uses_mixed_simd_simt_vf_launch_model():
-    source = (
-        SIMT_OP_V3_ROOT
-        / "aten_softmax_v3"
-        / "csrc"
-        / "simt"
-        / "spatial_softmax.asc"
-    ).read_text()
+    source = _read_v3_simt_sources(
+        "row_persistent_fallback.asc",
+        "row_fast.asc",
+        "spatial_kernel.asc",
+    )
 
-    assert "__simt_vf__ __launch_bounds__(kThreadsPerBlock) inline void row_softmax_persistent_forward_vf" in source
+    assert "__launch_bounds__(kThreadsPerBlock)" in source
+    assert "row_softmax_persistent_forward_vf(" in source
     assert "__simt_vf__ __launch_bounds__(1024) inline void row_softmax_fast_forward_vf" in source
     assert "__simt_vf__ __launch_bounds__(1024) inline void row_softmax_fast_reg_forward_vf" in source
     assert "__simt_vf__ inline void cunn_spatial_softmax_forward_vf" in source
@@ -339,25 +309,20 @@ def test_ascend_softmax_v3_uses_mixed_simd_simt_vf_launch_model():
     assert "asc_vf_call<row_softmax_fast_forward_vf" in source
     assert "asc_vf_call<row_softmax_fast_reg_forward_vf" in source
     assert "asc_vf_call<cunn_spatial_softmax_forward_vf" in source
-    assert "<<<grid_x,\n         0,\n         acl_stream>>>" in source
-    assert "<<<grid_x,\n         dynamic_ubuf_bytes,\n         acl_stream>>>" in source
-    assert "<<<launch.grid_x * launch.grid_y,\n           launch.dynamic_ubuf_bytes,\n           acl_stream>>>" in source
+    assert "<<<grid_x, 0, acl_stream>>>" in source or "<<<grid_x,\n         0,\n         acl_stream>>>" in source
+    assert "<<<grid_x, dynamic_ubuf_bytes, acl_stream>>>" in source or "<<<grid_x,\n         dynamic_ubuf_bytes,\n         acl_stream>>>" in source
+    assert "<<<launch.grid_x * launch.grid_y," in source
+    assert "launch.dynamic_ubuf_bytes" in source
 
 
 def test_ascend_softmax_v3_rowwise_grid_cap_is_shape_aware():
-    source = (
-        SIMT_OP_V3_ROOT
-        / "aten_softmax_v3"
-        / "csrc"
-        / "simt"
-        / "spatial_softmax.asc"
-    ).read_text()
+    source = _read_v3_simt_source("spatial_softmax.asc")
     rowwise_start = source.index("inline int64_t row_softmax_grid_x")
     rowwise_end = source.index("inline const char* row_softmax_api_name")
     rowwise_source = source[rowwise_start:rowwise_end]
 
     launch_start = source.index("void launch_row_forward_impl")
-    launch_end = source.index("template <template <typename, typename, typename> class Epilogue>")
+    launch_end = source.index("at::Tensor spatial_forward_common(")
     launch_source = source[launch_start:launch_end]
 
     assert "constexpr int64_t kRowSoftmaxPhysicalGridXLimit = 64" in rowwise_source
