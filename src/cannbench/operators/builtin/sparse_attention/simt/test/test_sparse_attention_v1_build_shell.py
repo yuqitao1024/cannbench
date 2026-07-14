@@ -133,6 +133,181 @@ def test_sparse_attention_score_helper_avoids_reshape_bmm_path():
     assert "run_sparse_attention_score_family_hd128_tile(" in source
 
 
+def test_sparse_attention_score_tiles_write_directly_to_full_scores():
+    bridge_source = Path(
+        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+        "aten_dsa_sparse_attention/csrc/sparse_attention.asc"
+    ).read_text(encoding="utf-8")
+    hd128_score_source = Path(
+        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+        "aten_dsa_sparse_attention/csrc/simt/"
+        "sparse_attention_score_family_hd128.asc"
+    ).read_text(encoding="utf-8")
+    hd512_score_source = Path(
+        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+        "aten_dsa_sparse_attention/csrc/simt/"
+        "sparse_attention_score_family_hd512.asc"
+    ).read_text(encoding="utf-8")
+    hd128_query_pack_source = Path(
+        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+        "aten_dsa_sparse_attention/csrc/simt/"
+        "sparse_attention_query_pack_hd128.asc"
+    ).read_text(encoding="utf-8")
+    hd512_query_pack_source = Path(
+        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+        "aten_dsa_sparse_attention/csrc/simt/"
+        "sparse_attention_query_pack_hd512.asc"
+    ).read_text(encoding="utf-8")
+
+    assert "scores_chunk" not in bridge_source
+    assert "score_stride" in bridge_source
+    assert "score_offset" in bridge_source
+    assert "score_stride" in hd128_score_source
+    assert "score_offset" in hd128_score_source
+    assert "score_stride" in hd512_score_source
+    assert "score_offset" in hd512_score_source
+
+
+def test_sparse_attention_postprocess_writes_directly_to_full_output():
+    bridge_source = Path(
+        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+        "aten_dsa_sparse_attention/csrc/sparse_attention.asc"
+    ).read_text(encoding="utf-8")
+    hd128_postprocess_source = Path(
+        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+        "aten_dsa_sparse_attention/csrc/simt/"
+        "sparse_attention_postprocess_family_hd128.asc"
+    ).read_text(encoding="utf-8")
+    hd512_postprocess_source = Path(
+        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+        "aten_dsa_sparse_attention/csrc/simt/"
+        "sparse_attention_postprocess_family_hd512.asc"
+    ).read_text(encoding="utf-8")
+
+    assert "output_tile" not in bridge_source
+    assert "lse_tile" not in bridge_source
+    assert ".copy_(output" not in bridge_source
+    assert ".copy_(lse" not in bridge_source
+    assert "output_query_stride" in bridge_source
+    assert "output_query_offset" in bridge_source
+    assert "output_query_stride" in hd128_postprocess_source
+    assert "output_query_offset" in hd128_postprocess_source
+    assert "output_query_stride" in hd512_postprocess_source
+    assert "output_query_offset" in hd512_postprocess_source
+
+
+def test_sparse_attention_key_gather_reads_full_indices_directly():
+    bridge_source = Path(
+        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+        "aten_dsa_sparse_attention/csrc/sparse_attention.asc"
+    ).read_text(encoding="utf-8")
+    hd128_gather_source = Path(
+        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+        "aten_dsa_sparse_attention/csrc/simt/"
+        "sparse_attention_keys_gather_pack_hd128.asc"
+    ).read_text(encoding="utf-8")
+    hd512_gather_source = Path(
+        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+        "aten_dsa_sparse_attention/csrc/simt/"
+        "sparse_attention_keys_gather_pack_hd512.asc"
+    ).read_text(encoding="utf-8")
+
+    assert "indices_chunk" not in bridge_source
+    assert ".narrow(2, selected_start" not in bridge_source
+    assert "indices_query_stride" in bridge_source
+    assert "indices_query_offset" in bridge_source
+    assert "indices_selected_stride" in bridge_source
+    assert "indices_selected_offset" in bridge_source
+    assert "indices_query_stride" in hd128_gather_source
+    assert "indices_selected_offset" in hd128_gather_source
+    assert "indices_query_stride" in hd512_gather_source
+    assert "indices_selected_offset" in hd512_gather_source
+
+
+def test_sparse_attention_postprocess_reads_full_indices_directly():
+    bridge_source = Path(
+        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+        "aten_dsa_sparse_attention/csrc/sparse_attention.asc"
+    ).read_text(encoding="utf-8")
+    hd128_postprocess_source = Path(
+        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+        "aten_dsa_sparse_attention/csrc/simt/"
+        "sparse_attention_postprocess_family_hd128.asc"
+    ).read_text(encoding="utf-8")
+    hd512_postprocess_source = Path(
+        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+        "aten_dsa_sparse_attention/csrc/simt/"
+        "sparse_attention_postprocess_family_hd512.asc"
+    ).read_text(encoding="utf-8")
+
+    assert "indices_tile" not in bridge_source
+    assert "indices.narrow(" not in bridge_source
+    assert "indices_query_stride" in hd128_postprocess_source
+    assert "indices_query_offset" in hd128_postprocess_source
+    assert "indices_selected_stride" in hd128_postprocess_source
+    assert "indices_selected_offset" in hd128_postprocess_source
+    assert "indices_query_stride" in hd512_postprocess_source
+    assert "indices_query_offset" in hd512_postprocess_source
+    assert "indices_selected_stride" in hd512_postprocess_source
+    assert "indices_selected_offset" in hd512_postprocess_source
+
+
+def test_sparse_attention_query_pack_replaces_aten_query_tile_materialization():
+    bridge_source = Path(
+        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+        "aten_dsa_sparse_attention/csrc/sparse_attention.asc"
+    ).read_text(encoding="utf-8")
+    hd128_score_source = Path(
+        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+        "aten_dsa_sparse_attention/csrc/simt/"
+        "sparse_attention_score_family_hd128.asc"
+    ).read_text(encoding="utf-8")
+    hd512_score_source = Path(
+        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+        "aten_dsa_sparse_attention/csrc/simt/"
+        "sparse_attention_score_family_hd512.asc"
+    ).read_text(encoding="utf-8")
+    hd128_query_pack_source = Path(
+        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+        "aten_dsa_sparse_attention/csrc/simt/"
+        "sparse_attention_query_pack_hd128.asc"
+    ).read_text(encoding="utf-8")
+    hd512_query_pack_source = Path(
+        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+        "aten_dsa_sparse_attention/csrc/simt/"
+        "sparse_attention_query_pack_hd512.asc"
+    ).read_text(encoding="utf-8")
+    hd128_postprocess_source = Path(
+        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+        "aten_dsa_sparse_attention/csrc/simt/"
+        "sparse_attention_postprocess_family_hd128.asc"
+    ).read_text(encoding="utf-8")
+    hd512_postprocess_source = Path(
+        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+        "aten_dsa_sparse_attention/csrc/simt/"
+        "sparse_attention_postprocess_family_hd512.asc"
+    ).read_text(encoding="utf-8")
+
+    assert "query.narrow(2, query_start, current_query)" not in bridge_source
+    assert ".mul(scale)" not in bridge_source
+    assert ".to(at::kHalf)" not in bridge_source
+    assert "run_sparse_attention_query_pack_hd512_tile(" in bridge_source
+    assert "run_sparse_attention_query_pack_hd128_tile(" in bridge_source
+    assert "query_query_stride" in bridge_source
+    assert "query_query_offset" in bridge_source
+    assert "query_query_stride" not in hd128_score_source
+    assert "query_query_offset" not in hd128_score_source
+    assert "query_query_stride" not in hd512_score_source
+    assert "query_query_offset" not in hd512_score_source
+    assert "query_query_stride" in hd128_query_pack_source
+    assert "query_query_offset" in hd128_query_pack_source
+    assert "query_query_stride" in hd512_query_pack_source
+    assert "query_query_offset" in hd512_query_pack_source
+    assert "score_scale" in bridge_source
+    assert "score_scale" in hd128_postprocess_source
+    assert "score_scale" in hd512_postprocess_source
+
+
 def test_sparse_attention_bridge_does_not_use_aten_gather_path():
     source = Path(
         "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
@@ -140,9 +315,7 @@ def test_sparse_attention_bridge_does_not_use_aten_gather_path():
     ).read_text(encoding="utf-8")
 
     assert "at::gather(" not in source
-    assert "launch_sparse_attention_values_gather_hd512_float" in source
     assert "launch_sparse_attention_keys_gather_pack_hd128_float" in source
-    assert "launch_sparse_attention_values_gather_hd128_float" in source
 
 
 def test_sparse_attention_hd512_bridge_uses_named_tile_constants():
@@ -173,6 +346,23 @@ def test_sparse_attention_hd128_bridge_extracts_tile_helper():
 
     assert "run_sparse_attention_family_hd128_tile(" in source
     assert "run_sparse_attention_score_family_hd128_tile(" in source
+    assert "run_sparse_attention_family_hd128_decode_direct_tile(" in source
+
+
+def test_sparse_attention_hd128_prefill_does_not_materialize_selected_values():
+    source = Path(
+        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+        "aten_dsa_sparse_attention/csrc/sparse_attention.asc"
+    ).read_text(encoding="utf-8")
+    prefill_source = source.split(
+        "std::tuple<at::Tensor, at::Tensor> sparse_attention_forward_family_hd128_hybrid("
+    )[1].split(
+        "std::tuple<at::Tensor, at::Tensor> sparse_attention_forward_family_hd128_decode_fused("
+    )[0]
+
+    assert "selected_values" not in prefill_source
+    assert "run_sparse_attention_values_gather_hd128_tile(" not in prefill_source
+    assert "run_sparse_attention_family_hd128_decode_direct_tile(" in prefill_source
 
 
 def test_sparse_attention_hd128_decode_bridge_uses_fused_decode_helpers():
