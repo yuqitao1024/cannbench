@@ -77,8 +77,8 @@ def test_sparse_attention_hd512_bridge_uses_hybrid_score_body():
         "aten_dsa_sparse_attention/csrc/sparse_attention.asc"
     ).read_text(encoding="utf-8")
 
-    assert "launch_sparse_attention_score_" in source
-    assert "launch_sparse_attention_keys_gather_pack_hd512_float" in source
+    assert "launch_sparse_attention_score_gather_hd512_float" in source
+    assert "launch_sparse_attention_keys_gather_pack_hd512_float" not in source
     assert "launch_sparse_attention_hd512_postprocess_float" in source
     assert "sparse_attention_forward_family_hd512_hybrid(" in source
 
@@ -135,8 +135,10 @@ def test_sparse_attention_score_helper_avoids_reshape_bmm_path():
 
     assert "at::bmm(" not in source
     assert "at::matmul(" not in source
-    assert "run_sparse_attention_score_family_hd512_tile(" in source
-    assert "run_sparse_attention_score_family_hd128_tile(" in source
+    assert "run_sparse_attention_score_gather_family_hd512_tile(" in source
+    assert "run_sparse_attention_score_gather_family_hd128_tile(" in source
+    assert "run_sparse_attention_score_family_hd512_tile(" not in source
+    assert "run_sparse_attention_score_family_hd128_tile(" not in source
 
 
 def test_sparse_attention_score_tiles_write_directly_to_full_scores():
@@ -341,7 +343,10 @@ def test_sparse_attention_bridge_does_not_use_aten_gather_path():
     ).read_text(encoding="utf-8")
 
     assert "at::gather(" not in source
-    assert "launch_sparse_attention_keys_gather_pack_hd128_float" in source
+    assert "launch_sparse_attention_keys_gather_pack_hd128_float" not in source
+    assert "launch_sparse_attention_keys_gather_pack_hd512_float" not in source
+    assert "run_sparse_attention_keys_gather_pack_hd128_tile(" not in source
+    assert "run_sparse_attention_keys_gather_pack_hd512_tile(" not in source
 
 
 def test_sparse_attention_hd512_bridge_uses_named_tile_constants():
@@ -361,7 +366,7 @@ def test_sparse_attention_hd512_bridge_extracts_tile_helper():
     ).read_text(encoding="utf-8")
 
     assert "run_sparse_attention_family_hd512_tile(" in source
-    assert "run_sparse_attention_score_family_hd512_tile(" in source
+    assert "run_sparse_attention_score_gather_family_hd512_tile(" in source
 
 
 def test_sparse_attention_hd128_bridge_extracts_tile_helper():
@@ -371,7 +376,7 @@ def test_sparse_attention_hd128_bridge_extracts_tile_helper():
     ).read_text(encoding="utf-8")
 
     assert "run_sparse_attention_family_hd128_tile(" in source
-    assert "run_sparse_attention_score_family_hd128_tile(" in source
+    assert "run_sparse_attention_score_gather_family_hd128_tile(" in source
     assert "run_sparse_attention_family_hd128_decode_direct_tile(" in source
 
 
@@ -391,36 +396,43 @@ def test_sparse_attention_hd128_prefill_does_not_materialize_selected_values():
     assert "run_sparse_attention_family_hd128_decode_direct_tile(" in prefill_source
 
 
-def test_sparse_attention_hd128_decode_bridge_uses_fused_decode_helpers():
+def test_sparse_attention_key_gather_score_boundary_is_fused_for_all_primary_paths():
     source = Path(
         "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
         "aten_dsa_sparse_attention/csrc/sparse_attention.asc"
     ).read_text(encoding="utf-8")
-    decode_source = source.split(
-        "std::tuple<at::Tensor, at::Tensor> sparse_attention_forward_family_hd128_decode_fused("
-    )[1].split(
-        "std::tuple<at::Tensor, at::Tensor> sparse_attention_forward("
-    )[0]
+    path_specs = [
+        (
+            "hd512_prefill",
+            "sparse_attention_forward_family_hd512_hybrid(",
+            "sparse_attention_forward_family_hd512_decode_fused(",
+            "run_sparse_attention_score_gather_family_hd512_tile(",
+        ),
+        (
+            "hd512_decode",
+            "sparse_attention_forward_family_hd512_decode_fused(",
+            "sparse_attention_forward_family_hd128_hybrid(",
+            "run_sparse_attention_score_gather_family_hd512_tile(",
+        ),
+        (
+            "hd128_prefill",
+            "sparse_attention_forward_family_hd128_hybrid(",
+            "sparse_attention_forward_family_hd128_decode_fused(",
+            "run_sparse_attention_score_gather_family_hd128_tile(",
+        ),
+        (
+            "hd128_decode",
+            "sparse_attention_forward_family_hd128_decode_fused(",
+            "std::tuple<at::Tensor, at::Tensor> sparse_attention_forward(",
+            "run_sparse_attention_score_gather_family_hd128_tile(",
+        ),
+    ]
 
-    assert 'phase == "decode"' in source
-    assert "sparse_attention_forward_family_hd128_decode_fused(" in source
-    assert "run_sparse_attention_score_gather_family_hd128_tile(" in decode_source
-    assert "selected_keys_chunk" not in decode_source
-    assert "run_sparse_attention_keys_gather_pack_hd128_tile(" not in decode_source
-    assert "run_sparse_attention_family_hd128_decode_direct_tile(" in decode_source
-
-
-def test_sparse_attention_hd512_decode_bridge_uses_fused_decode_helpers():
-    source = Path(
-        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
-        "aten_dsa_sparse_attention/csrc/sparse_attention.asc"
-    ).read_text(encoding="utf-8")
-
-    assert 'phase == "decode"' in source
-    assert "sparse_attention_forward_family_hd512_decode_fused(" in source
-    assert "run_sparse_attention_keys_gather_pack_hd512_tile(" in source
-    assert "run_sparse_attention_score_family_hd512_tile(" in source
-    assert "run_sparse_attention_family_hd512_decode_direct_tile(" in source
+    for _name, start_marker, end_marker, fused_call in path_specs:
+        path_source = source.split(start_marker)[1].split(end_marker)[0]
+        assert fused_call in path_source
+        assert "selected_keys_chunk" not in path_source
+        assert "run_sparse_attention_keys_gather_pack_hd" not in path_source
 
 
 def test_sparse_attention_hd128_kernel_is_postprocess_only():
@@ -480,7 +492,42 @@ def test_sparse_attention_hd128_decode_score_fuses_key_gather_but_not_postproces
     assert "launch_sparse_attention_hd128_postprocess_decode_direct_float" in postprocess_source
 
 
-def test_sparse_attention_hd512_decode_sources_keep_irregular_gather_out_of_score():
+def test_sparse_attention_hd128_score_gather_keeps_gather_on_aiv_side():
+    source = Path(
+        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+        "aten_dsa_sparse_attention/csrc/simt/"
+        "sparse_attention_score_family_hd128.asc"
+    ).read_text(encoding="utf-8")
+    aic_source = source.split("sparse_attention_score_gather_family_hd128_aic(")[1].split(
+        "__aicore__ inline void sparse_attention_score_gather_family_hd128_aiv("
+    )[0]
+
+    assert "sparse_attention_score_gather_family_hd128_aiv(" in source
+    assert "if ASCEND_IS_AIV" in source
+    assert "CrossCoreWaitFlag" in aic_source
+    assert "keys[" not in aic_source
+    assert "indices[" not in aic_source
+
+
+def test_sparse_attention_hd512_score_gather_keeps_gather_on_aiv_side():
+    source = Path(
+        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+        "aten_dsa_sparse_attention/csrc/simt/"
+        "sparse_attention_score_family_hd512.asc"
+    ).read_text(encoding="utf-8")
+    aic_source = source.split("sparse_attention_score_gather_family_hd512_aic(")[1].split(
+        "__aicore__ inline void sparse_attention_score_gather_family_hd512_aiv("
+    )[0]
+
+    assert "sparse_attention_score_gather_family_hd512_aiv(" in source
+    assert "if ASCEND_IS_AIV" in source
+    assert "CopyUB2L1" in source
+    assert "CrossCoreWaitFlag" in aic_source
+    assert "keys[" not in aic_source
+    assert "indices[" not in aic_source
+
+
+def test_sparse_attention_hd512_decode_score_fuses_key_gather_but_not_postprocess():
     score_source = Path(
         "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
         "aten_dsa_sparse_attention/csrc/simt/"
@@ -493,7 +540,7 @@ def test_sparse_attention_hd512_decode_sources_keep_irregular_gather_out_of_scor
     ).read_text(encoding="utf-8")
 
     assert "launch_sparse_attention_score_hd512_decode_direct_float" not in score_source
-    assert "indices[" not in score_source
+    assert "sparse_attention_score_gather_family_hd512" in score_source
     assert "launch_sparse_attention_hd512_postprocess_decode_direct_float" in postprocess_source
 
 
