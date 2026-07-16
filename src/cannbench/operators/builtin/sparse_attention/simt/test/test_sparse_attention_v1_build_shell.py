@@ -1,6 +1,18 @@
 from pathlib import Path
 
 
+def _score_source(head_dim: int) -> str:
+    return Path(
+        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+        "aten_dsa_sparse_attention/csrc/simt/"
+        f"sparse_attention_score_family_hd{head_dim}.asc"
+    ).read_text(encoding="utf-8")
+
+
+def _function_body(source: str, start_marker: str, end_marker: str) -> str:
+    return source.split(start_marker, 1)[1].split(end_marker, 1)[0]
+
+
 def test_sparse_attention_simt_v1_setup_uses_bisheng_toolchain():
     setup_py = Path(
         "src/cannbench/operators/builtin/sparse_attention/simt/v1/setup.py"
@@ -105,13 +117,45 @@ def test_sparse_attention_hd512_score_source_uses_tensor_api():
     assert "tensor_api/tensor.h" in source
     assert "MakeMmad(" in source
     assert "__global__ __aicore__" in source
-    assert "KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_2)" in source
+    assert "KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_1)" in source
     assert "ASCEND_IS_AIC" in source
     assert "TPipe" not in source
     assert "matmul_intf.h" not in source
 
 
-def test_sparse_attention_hd128_score_source_uses_tensor_api():
+def test_sparse_attention_score_sources_do_not_use_basic_api_or_crosscore_flags():
+    sources = (
+        Path(
+            "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+            "aten_dsa_sparse_attention/csrc/simt/"
+            "sparse_attention_score_family_hd128.asc"
+        ).read_text(encoding="utf-8"),
+        Path(
+            "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+            "aten_dsa_sparse_attention/csrc/simt/"
+            "sparse_attention_score_family_hd512.asc"
+        ).read_text(encoding="utf-8"),
+    )
+
+    for source in sources:
+        basic_api_includes = [
+            line.strip()
+            for line in source.splitlines()
+            if line.strip().startswith('#include "basic_api/')
+        ]
+        assert basic_api_includes == ['#include "basic_api/kernel_common.h"']
+        assert "basic_api/kernel_basic_intf.h" not in source
+        assert "basic_api/kernel_operator_block_sync_intf.h" not in source
+        assert "kernel_operator.h" not in source
+        assert "AscendC::LocalTensor" not in source
+        assert "SetFlag" not in source
+        assert "WaitFlag" not in source
+        assert "PipeBarrier" not in source
+        assert "CrossCoreSetFlag" not in source
+        assert "CrossCoreWaitFlag" not in source
+
+
+def test_sparse_attention_hd128_score_source_uses_tensor_and_simt_api():
     source = Path(
         "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
         "aten_dsa_sparse_attention/csrc/simt/"
@@ -119,12 +163,9 @@ def test_sparse_attention_hd128_score_source_uses_tensor_api():
     ).read_text(encoding="utf-8")
 
     assert "tensor_api/tensor.h" in source
+    assert "simt_api/asc_simt.h" in source
     assert "MakeMmad(" in source
     assert "__global__ __aicore__" in source
-    assert "KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_2)" in source
-    assert "ASCEND_IS_AIC" in source
-    assert "TPipe" not in source
-    assert "simt_api/asc_simt.h" not in source
 
 
 def test_sparse_attention_score_helper_avoids_reshape_bmm_path():
@@ -488,43 +529,107 @@ def test_sparse_attention_hd128_decode_score_fuses_key_gather_but_not_postproces
     ).read_text(encoding="utf-8")
 
     assert "launch_sparse_attention_score_hd128_decode_direct_float" not in score_source
-    assert "sparse_attention_score_gather_family_hd128" in score_source
+    assert "launch_sparse_attention_score_gather_hd128_float" in score_source
+    assert "sparse_attention_gather_pack_family_hd128_vf" in score_source
+    assert "asc_copy_ub2l1_sync(" in score_source
     assert "launch_sparse_attention_hd128_postprocess_decode_direct_float" in postprocess_source
 
 
 def test_sparse_attention_hd128_score_gather_keeps_gather_on_aiv_side():
-    source = Path(
-        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
-        "aten_dsa_sparse_attention/csrc/simt/"
-        "sparse_attention_score_family_hd128.asc"
-    ).read_text(encoding="utf-8")
-    aic_source = source.split("sparse_attention_score_gather_family_hd128_aic(")[1].split(
-        "__aicore__ inline void sparse_attention_score_gather_family_hd128_aiv("
-    )[0]
+    source = _score_source(128)
+    aic_source = _function_body(
+        source,
+        "__aicore__ inline void sparse_attention_score_family_hd128_aic(",
+        "__simt_vf__ __launch_bounds__(256) inline void sparse_attention_gather_pack_family_hd128_vf(",
+    )
+    gather_source = _function_body(
+        source,
+        "__simt_vf__ __launch_bounds__(256) inline void sparse_attention_gather_pack_family_hd128_vf(",
+        "__global__ __aicore__ __vector__ void sparse_attention_score_family_hd128_kernel(",
+    )
 
-    assert "sparse_attention_score_gather_family_hd128_aiv(" in source
-    assert "if ASCEND_IS_AIV" in source
-    assert "CrossCoreWaitFlag" in aic_source
+    assert "AscendC::Mutex::Lock<" in source
+    assert "AscendC::Mutex::Unlock<" in source
+    assert "keys[" in gather_source
+    assert "indices[" in gather_source
     assert "keys[" not in aic_source
     assert "indices[" not in aic_source
 
 
 def test_sparse_attention_hd512_score_gather_keeps_gather_on_aiv_side():
-    source = Path(
-        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
-        "aten_dsa_sparse_attention/csrc/simt/"
-        "sparse_attention_score_family_hd512.asc"
-    ).read_text(encoding="utf-8")
-    aic_source = source.split("sparse_attention_score_gather_family_hd512_aic(")[1].split(
-        "__aicore__ inline void sparse_attention_score_gather_family_hd512_aiv("
-    )[0]
+    source = _score_source(512)
+    aic_source = _function_body(
+        source,
+        "__aicore__ inline void sparse_attention_score_family_hd512_aic(",
+        "__simt_vf__ __launch_bounds__(256) inline void sparse_attention_gather_pack_family_hd512_vf(",
+    )
+    gather_source = _function_body(
+        source,
+        "__simt_vf__ __launch_bounds__(256) inline void sparse_attention_gather_pack_family_hd512_vf(",
+        "__global__ __aicore__ __vector__ void sparse_attention_score_family_hd512_kernel(",
+    )
 
-    assert "sparse_attention_score_gather_family_hd512_aiv(" in source
-    assert "if ASCEND_IS_AIV" in source
-    assert "CopyUB2L1" in source
-    assert "CrossCoreWaitFlag" in aic_source
+    assert "AscendC::Mutex::Lock<" in source
+    assert "AscendC::Mutex::Unlock<" in source
+    assert "keys[" in gather_source
+    assert "indices[" in gather_source
     assert "keys[" not in aic_source
     assert "indices[" not in aic_source
+
+
+def test_sparse_attention_score_gather_uses_single_mixed_kernel_launch():
+    for head_dim in (128, 512):
+        source = _score_source(head_dim)
+        launcher_source = source.split(
+            f'extern "C" void launch_sparse_attention_score_gather_hd{head_dim}_float(',
+            1,
+        )[1]
+        score_launch = (
+            f"sparse_attention_score_family_hd{head_dim}_kernel"
+            "<<<shape.used_core_num, 0, stream>>>"
+        )
+
+        assert score_launch in launcher_source
+        assert (
+            f"sparse_attention_gather_pack_family_hd{head_dim}_kernel<<<"
+            not in launcher_source
+        )
+
+
+def test_sparse_attention_hd512_score_gather_offsets_keys_by_batch_only():
+    source = _score_source(512)
+    launcher_source = source.split(
+        'extern "C" void launch_sparse_attention_score_gather_hd512_float(',
+        1,
+    )[1]
+
+    assert "const int64_t head_index = head_row % query_heads;" not in launcher_source
+    assert "batch_index * context_tokens * kHeadDim" in launcher_source
+
+
+def test_sparse_attention_score_aic_orders_copy_mmad_and_global_store():
+    for head_dim in (128, 512):
+        source = _score_source(head_dim)
+        body = _function_body(
+            source,
+            f"__aicore__ inline void sparse_attention_score_family_hd{head_dim}_aic(",
+            f"__global__ __aicore__ void sparse_attention_score_family_hd{head_dim}_kernel(",
+        )
+
+        assert "Copy(copy_gm_to_l1" in body
+        assert "Copy(copy_l1_to_l0" in body
+        assert "Mmad(" in body
+        assert "Copy(copy_l0c_to_gm" in body
+        assert body.rindex("Copy(copy_l0c_to_gm") > body.rindex("Mmad(")
+
+
+def test_sparse_attention_score_source_does_not_use_gm_tile_scratch_layout():
+    for head_dim in (128, 512):
+        source = _score_source(head_dim)
+
+        assert "SparseAttentionScratchLayout" not in source
+        assert "make_hd" not in source
+        assert "scratch.packed_keys" not in source
 
 
 def test_sparse_attention_hd512_decode_score_fuses_key_gather_but_not_postprocess():
@@ -540,7 +645,9 @@ def test_sparse_attention_hd512_decode_score_fuses_key_gather_but_not_postproces
     ).read_text(encoding="utf-8")
 
     assert "launch_sparse_attention_score_hd512_decode_direct_float" not in score_source
-    assert "sparse_attention_score_gather_family_hd512" in score_source
+    assert "launch_sparse_attention_score_gather_hd512_float" in score_source
+    assert "sparse_attention_gather_pack_family_hd512_vf" in score_source
+    assert "asc_copy_ub2l1_sync(" in score_source
     assert "launch_sparse_attention_hd512_postprocess_decode_direct_float" in postprocess_source
 
 

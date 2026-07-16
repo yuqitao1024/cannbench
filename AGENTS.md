@@ -137,6 +137,7 @@ If a schema change is required, update the relevant contract or guide in `docs/`
 For Ascend SIMT and mixed SIMT/TensorAPI operator implementations in this repository:
 
 - use only C API, Tensor API, and SIMT API in operator source code
+- kernel-local Mutex API may be used for intra-core pipeline synchronization when the same behavior cannot be expressed with the allowed copy/compute ordering alone
 - do not introduce new dependencies on C++ Basic API facilities
 
 In practice, avoid adding new usage of:
@@ -146,6 +147,14 @@ In practice, avoid adding new usage of:
 - `kernel_operator.h`
 - `AscendC::LocalTensor`
 - `SetFlag` / `WaitFlag` / `PipeBarrier` style Basic API synchronization helpers
+- `CrossCoreSetFlag` / `CrossCoreWaitFlag` style inter-core synchronization helpers
+
+Allowed exception inside the operator-local SIMT boundary:
+
+- `AscendC::Mutex::Lock`
+- `AscendC::Mutex::Unlock`
+
+Use this exception only for kernel-local pipeline synchronization. Do not use it to reintroduce inter-core coordination or to justify broader Basic API usage.
 
 This is the target implementation boundary for ongoing operator work.
 

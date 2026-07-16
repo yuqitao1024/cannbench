@@ -139,6 +139,22 @@ def test_lightning_indexer_prefill_family_64x128_uses_postprocess_kernel():
     assert "launch_lightning_indexer_prefill_family_64x128_postprocess_float" in source
 
 
+def test_lightning_indexer_bridge_declares_postprocess_launchers_with_c_linkage():
+    source = Path(
+        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
+        "aten_dsa_lightning_indexer/csrc/lightning_indexer.asc"
+    ).read_text(encoding="utf-8")
+
+    assert (
+        'extern "C" void launch_lightning_indexer_prefill_family_4x64_postprocess_float'
+        in source
+    )
+    assert (
+        'extern "C" void launch_lightning_indexer_prefill_family_64x128_postprocess_float'
+        in source
+    )
+
+
 def test_lightning_indexer_family_64x128_kernel_is_postprocess_only():
     source = Path(
         "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
@@ -193,3 +209,26 @@ def test_lightning_indexer_score_sources_use_tensor_api():
         assert "tensor_api/tensor.h" in source
         assert "MakeMmad(" in source
         assert "__global__ __cube__" in source
+
+
+def test_lightning_indexer_score_sources_do_not_use_basic_api():
+    sources = (
+        Path(
+            "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
+            "aten_dsa_lightning_indexer/csrc/simt/"
+            "lightning_indexer_score_family_4x64.asc"
+        ).read_text(encoding="utf-8"),
+        Path(
+            "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
+            "aten_dsa_lightning_indexer/csrc/simt/"
+            "lightning_indexer_score_family_64x128.asc"
+        ).read_text(encoding="utf-8"),
+    )
+
+    for source in sources:
+        assert "basic_api/" not in source
+        assert "AscendC::InitSocState" not in source
+        assert "AscendC::GetBlockIdx" not in source
+        assert "SetFlag" not in source
+        assert "WaitFlag" not in source
+        assert "PipeBarrier" not in source
