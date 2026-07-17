@@ -328,12 +328,12 @@ def test_lightning_indexer_smoke_includes_vllm_ascend_a5_prefill_case():
     assert case.source_op == "npu_vllm_quant_lightning_indexer"
 
 
-def test_lightning_indexer_realistic_splits_include_a5_cases():
+def test_lightning_indexer_stress_dataset_includes_nonofficial_a5_cases():
     decode_case = get_lightning_indexer_case(
-        "realistic_decode", "deepseek_a5_mtp3_b16_ctx1024_top1024"
+        "stress", "deepseek_a5_mtp3_b16_ctx1024_top1024"
     )
     prefill_case = get_lightning_indexer_case(
-        "realistic_prefill", "deepseek_a5_prefill_b1_q512_ctx512_top512"
+        "stress", "deepseek_a5_prefill_b1_q512_ctx512_top512"
     )
 
     assert decode_case.family == "decode_indexing"
@@ -350,51 +350,49 @@ def test_lightning_indexer_realistic_splits_include_a5_cases():
     assert prefill_case.top_k == 512
 
 
-def test_lightning_indexer_realistic_splits_are_a5_fused_contract_compatible():
+def test_lightning_indexer_realistic_splits_cover_declared_dsa_families():
     for split in ("realistic_decode", "realistic_prefill"):
         dataset = get_lightning_indexer_dataset(split)
 
-        expected_len = 20 if split == "realistic_decode" else 20
-        assert len(dataset.cases) == expected_len
+        assert len(dataset.cases) == (4 if split == "realistic_decode" else 9)
         if split == "realistic_decode":
             assert {case.source_kind for case in dataset.cases} == {
-                "library_compatible_realistic",
                 "paper_shape",
+                "official_operator_test",
+                "official_e2e_test",
+                "derived_official_e2e_test",
             }
             assert {case.source_project for case in dataset.cases} == {
-                "vllm-ascend",
-                "cannbench",
                 "DeepSeek",
+                "DeepSeek-V3.2+FlashMLA",
+                "DeepSeek-V4+vllm-ascend",
+                "GLM-5.2+vllm-ascend",
             }
             assert {case.source_model for case in dataset.cases} == {
-                "DeepSeek-V4-compatible",
-                "DeepSeek-A5-compatible",
                 "DeepSeek-V3.2",
-            }
-            assert {case.source_op for case in dataset.cases} == {
-                "npu_vllm_quant_lightning_indexer",
-                "lightning_indexer",
+                "DeepSeek-V4-Flash",
+                "GLM-5.2",
             }
         else:
             assert {case.source_kind for case in dataset.cases} == {
-                "library_compatible_realistic",
                 "paper_shape",
+                "official_operator_test",
+                "derived_official_operator_test",
+                "derived_official_e2e_test",
             }
             assert {case.source_project for case in dataset.cases} == {
-                "vllm-ascend",
                 "DeepSeek",
+                "DeepSeek-V3.2+FlashMLA",
+                "DeepSeek-V4+FlashMLA",
+                "GLM-5.2+vllm-ascend",
             }
             assert {case.source_model for case in dataset.cases} == {
-                "DeepSeek-V4-compatible",
-                "DeepSeek-A5-compatible",
-                "DeepSeek-V4-Pro-like",
                 "DeepSeek-V3.2",
+                "DeepSeek-V4-Flash",
+                "GLM-5.2",
             }
-            assert {case.source_op for case in dataset.cases} == {
-                "npu_vllm_quant_lightning_indexer",
-                "lightning_indexer",
-            }
-        expected_index_heads = {64, 4}
+        assert {case.source_op for case in dataset.cases} == {"lightning_indexer"}
+        expected_index_heads = {64, 32, 4}
         expected_index_dim = {128, 64}
         assert all(case.index_heads in expected_index_heads for case in dataset.cases)
         assert all(case.index_dim in expected_index_dim for case in dataset.cases)
@@ -403,12 +401,17 @@ def test_lightning_indexer_realistic_splits_are_a5_fused_contract_compatible():
         assert all(case.context_tokens % 128 == 0 for case in dataset.cases)
 
 
-def test_lightning_indexer_realistic_prefill_dataset_contains_v4pro_and_v32_cases():
-    dataset = get_lightning_indexer_dataset("realistic_prefill")
-    case_ids = {case.case_id for case in dataset.cases}
+def test_lightning_indexer_v4pro_moves_to_stress_but_v32_paper_stays_realistic():
+    stress_ids = {
+        case.case_id for case in get_lightning_indexer_dataset("stress").cases
+    }
+    realistic_ids = {
+        case.case_id
+        for case in get_lightning_indexer_dataset("realistic_prefill").cases
+    }
 
-    assert "deepseek_v4pro_prefill_b1_q512_ctx4096_top1024" in case_ids
-    assert "deepseek_v32_prefill_b1_q128_ctx16384_top2048" in case_ids
+    assert "deepseek_v4pro_prefill_b1_q512_ctx4096_top1024" in stress_ids
+    assert "deepseek_v32_prefill_b1_q128_ctx16384_top2048" in realistic_ids
 
 
 def test_get_sparse_attention_case_preserves_realistic_source_metadata():
@@ -489,12 +492,12 @@ def test_sparse_attention_smoke_includes_vllm_ascend_a5_prefill_case():
     assert case.source_op == "npu_kv_quant_sparse_attn_sharedkv"
 
 
-def test_sparse_attention_realistic_splits_include_a5_cases():
+def test_sparse_attention_stress_dataset_includes_nonofficial_a5_cases():
     decode_case = get_sparse_attention_case(
-        "realistic_decode", "deepseek_a5_mtp3_b16_ctx1024_top1024"
+        "stress", "deepseek_a5_mtp3_b16_ctx1024_top1024"
     )
     prefill_case = get_sparse_attention_case(
-        "realistic_prefill", "deepseek_a5_prefill_b1_q512_ctx512_top512"
+        "stress", "deepseek_a5_prefill_b1_q512_ctx512_top512"
     )
 
     assert decode_case.phase == "decode"
@@ -513,57 +516,55 @@ def test_sparse_attention_realistic_splits_include_a5_cases():
     assert prefill_case.head_dim == 512
 
 
-def test_sparse_attention_realistic_splits_are_a5_fused_contract_compatible():
+def test_sparse_attention_realistic_splits_cover_declared_dsa_families():
     for split, phase in (
         ("realistic_decode", "decode"),
         ("realistic_prefill", "prefill"),
     ):
         dataset = get_sparse_attention_dataset(split)
 
-        expected_len = 20 if split == "realistic_decode" else 20
-        assert len(dataset.cases) == expected_len
+        assert len(dataset.cases) == (4 if split == "realistic_decode" else 9)
         if split == "realistic_decode":
             assert {case.source_kind for case in dataset.cases} == {
-                "library_compatible_realistic",
                 "paper_shape",
+                "official_operator_test",
+                "official_e2e_test",
+                "derived_official_e2e_test",
             }
             assert {case.source_project for case in dataset.cases} == {
-                "vllm-ascend",
-                "cannbench",
                 "DeepSeek",
+                "DeepSeek-V3.2+FlashMLA",
+                "DeepSeek-V4+vllm-ascend",
+                "GLM-5.2+vllm-ascend",
             }
             assert {case.source_model for case in dataset.cases} == {
-                "DeepSeek-V4-compatible",
-                "DeepSeek-A5-compatible",
                 "DeepSeek-V3.2",
-            }
-            assert {case.source_op for case in dataset.cases} == {
-                "npu_kv_quant_sparse_attn_sharedkv",
-                "sparse_attention",
+                "DeepSeek-V4-Flash",
+                "GLM-5.2",
             }
         else:
             assert {case.source_kind for case in dataset.cases} == {
-                "library_compatible_realistic",
                 "paper_shape",
+                "official_operator_test",
+                "derived_official_operator_test",
+                "derived_official_e2e_test",
             }
             assert {case.source_project for case in dataset.cases} == {
-                "vllm-ascend",
                 "DeepSeek",
+                "DeepSeek-V3.2+FlashMLA",
+                "DeepSeek-V4+FlashMLA",
+                "GLM-5.2+vllm-ascend",
             }
             assert {case.source_model for case in dataset.cases} == {
-                "DeepSeek-V4-compatible",
-                "DeepSeek-A5-compatible",
-                "DeepSeek-V4-Pro-like",
                 "DeepSeek-V3.2",
+                "DeepSeek-V4-Flash",
+                "GLM-5.2",
             }
-            assert {case.source_op for case in dataset.cases} == {
-                "npu_kv_quant_sparse_attn_sharedkv",
-                "sparse_attention",
-            }
+        assert {case.source_op for case in dataset.cases} == {"sparse_attention"}
         assert all(case.phase == phase for case in dataset.cases)
         expected_query_heads = {64, 128} if split == "realistic_decode" else {64, 128}
         expected_kv_heads = {1}
-        expected_head_dim = {512, 128} if split == "realistic_decode" else {512, 128}
+        expected_head_dim = {576, 512, 256, 128}
         assert all(case.query_heads in expected_query_heads for case in dataset.cases)
         assert all(case.kv_heads in expected_kv_heads for case in dataset.cases)
         assert all(case.head_dim in expected_head_dim for case in dataset.cases)
@@ -572,12 +573,104 @@ def test_sparse_attention_realistic_splits_are_a5_fused_contract_compatible():
         assert all(case.context_tokens % 128 == 0 for case in dataset.cases)
 
 
-def test_sparse_attention_realistic_prefill_dataset_contains_v4pro_and_v32_cases():
-    dataset = get_sparse_attention_dataset("realistic_prefill")
-    case_ids = {case.case_id for case in dataset.cases}
+def test_sparse_attention_v4pro_moves_to_stress_but_v32_paper_stays_realistic():
+    stress_ids = {case.case_id for case in get_sparse_attention_dataset("stress").cases}
+    realistic_ids = {
+        case.case_id
+        for case in get_sparse_attention_dataset("realistic_prefill").cases
+    }
 
-    assert "deepseek_v4pro_prefill_b1_q512_ctx4096_top1024" in case_ids
-    assert "deepseek_v32_prefill_b1_q128_ctx16384_top2048" in case_ids
+    assert "deepseek_v4pro_prefill_b1_q512_ctx4096_top1024" in stress_ids
+    assert "deepseek_v32_prefill_b1_q128_ctx16384_top2048" in realistic_ids
+
+
+@pytest.mark.parametrize(
+    (
+        "split",
+        "case_id",
+        "index_shape",
+        "sparse_shape",
+        "source_model",
+        "source_kind",
+    ),
+    (
+        (
+            "realistic_decode",
+            "deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048",
+            (2, 2, 32768, 64, 128, 2048),
+            (2, 128, 1, 2, 32768, 2048, 576),
+            "DeepSeek-V3.2",
+            "official_operator_test",
+        ),
+        (
+            "realistic_prefill",
+            "deepseek_v32_flashmla_prefill_q4096_ctx32768_top2048",
+            (1, 4096, 32768, 64, 128, 2048),
+            (1, 128, 1, 4096, 32768, 2048, 576),
+            "DeepSeek-V3.2",
+            "official_operator_test",
+        ),
+        (
+            "realistic_decode",
+            "deepseek_v4_flash_vllm_decode_b16_q1_ctx32768_top512",
+            (16, 1, 32768, 64, 128, 512),
+            (16, 64, 1, 1, 32768, 512, 512),
+            "DeepSeek-V4-Flash",
+            "derived_official_e2e_test",
+        ),
+        (
+            "realistic_prefill",
+            "deepseek_v4_flash_flashmla_prefill_q4096_ctx32768_top512",
+            (1, 4096, 32768, 64, 128, 512),
+            (1, 64, 1, 4096, 32768, 512, 512),
+            "DeepSeek-V4-Flash",
+            "derived_official_operator_test",
+        ),
+        (
+            "realistic_decode",
+            "glm52_vllm_ascend_decode_b3_q3_ctx131072_top2048",
+            (3, 3, 131072, 32, 128, 2048),
+            (3, 64, 1, 3, 131072, 2048, 256),
+            "GLM-5.2",
+            "official_e2e_test",
+        ),
+        (
+            "realistic_prefill",
+            "glm52_vllm_ascend_prefill_q4096_ctx131072_top2048",
+            (1, 4096, 131072, 32, 128, 2048),
+            (1, 64, 1, 4096, 131072, 2048, 256),
+            "GLM-5.2",
+            "derived_official_e2e_test",
+        ),
+    ),
+)
+def test_real_world_dsa_cases_match_pinned_source_shapes(
+    split, case_id, index_shape, sparse_shape, source_model, source_kind
+):
+    indexer = get_lightning_indexer_case(split, case_id)
+    sparse = get_sparse_attention_case(split, case_id)
+
+    assert (
+        indexer.batch,
+        indexer.query_tokens,
+        indexer.context_tokens,
+        indexer.index_heads,
+        indexer.index_dim,
+        indexer.top_k,
+    ) == index_shape
+    assert (
+        sparse.batch,
+        sparse.query_heads,
+        sparse.kv_heads,
+        sparse.query_tokens,
+        sparse.context_tokens,
+        sparse.selected_tokens,
+        sparse.head_dim,
+    ) == sparse_shape
+    assert indexer.source_model == sparse.source_model == source_model
+    assert indexer.source_kind == sparse.source_kind == source_kind
+    assert indexer.source_file == sparse.source_file
+    assert indexer.source_file.startswith("docs/datasets/dsa-real-sources.md#")
 
 
 def test_materialized_sparse_attention_inputs_are_deterministic_for_same_seed():

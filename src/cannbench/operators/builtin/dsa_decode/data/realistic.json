@@ -2,130 +2,6 @@
   "name": "realistic",
   "cases": [
     {
-      "case_id": "vllm_ascend_a5_decode_b1_ctx512_top512",
-      "workflow": "dsa_decode",
-      "phase": "decode",
-      "family": "decode_workflow",
-      "source_kind": "library_compatible_smoke",
-      "source_project": "vllm-ascend",
-      "source_model": "DeepSeek-V4-compatible",
-      "source_file": "csrc/attention/dsa_fused_workflow",
-      "source_op": "dsa_decode"
-    },
-    {
-      "case_id": "deepseek_a5_decode_b1_ctx512_top512",
-      "workflow": "dsa_decode",
-      "phase": "decode",
-      "family": "decode_workflow"
-    },
-    {
-      "case_id": "deepseek_a5_decode_b1_ctx2048_top512",
-      "workflow": "dsa_decode",
-      "phase": "decode",
-      "family": "decode_workflow"
-    },
-    {
-      "case_id": "deepseek_a5_decode_b1_ctx4096_top512",
-      "workflow": "dsa_decode",
-      "phase": "decode",
-      "family": "decode_workflow"
-    },
-    {
-      "case_id": "deepseek_a5_decode_b1_ctx8192_top512",
-      "workflow": "dsa_decode",
-      "phase": "decode",
-      "family": "decode_workflow"
-    },
-    {
-      "case_id": "deepseek_a5_decode_b1_ctx16384_top1024",
-      "workflow": "dsa_decode",
-      "phase": "decode",
-      "family": "decode_workflow"
-    },
-    {
-      "case_id": "deepseek_a5_decode_b2_ctx4096_top512",
-      "workflow": "dsa_decode",
-      "phase": "decode",
-      "family": "decode_workflow"
-    },
-    {
-      "case_id": "deepseek_a5_decode_b4_ctx4096_top512",
-      "workflow": "dsa_decode",
-      "phase": "decode",
-      "family": "decode_workflow"
-    },
-    {
-      "case_id": "deepseek_a5_decode_b8_ctx2048_top512",
-      "workflow": "dsa_decode",
-      "phase": "decode",
-      "family": "decode_workflow"
-    },
-    {
-      "case_id": "deepseek_a5_mtp3_b64_ctx1024_top1024",
-      "workflow": "dsa_decode",
-      "phase": "decode",
-      "family": "decode_workflow"
-    },
-    {
-      "case_id": "deepseek_a5_mtp3_b64_ctx4096_top1024",
-      "workflow": "dsa_decode",
-      "phase": "decode",
-      "family": "decode_workflow"
-    },
-    {
-      "case_id": "deepseek_a5_mtp3_b64_ctx16384_top1024",
-      "workflow": "dsa_decode",
-      "phase": "decode",
-      "family": "decode_workflow"
-    },
-    {
-      "case_id": "deepseek_a5_mtp3_b64_ctx65536_top1024",
-      "workflow": "dsa_decode",
-      "phase": "decode",
-      "family": "decode_workflow"
-    },
-    {
-      "case_id": "deepseek_a5_mtp3_b16_ctx1024_top1024",
-      "workflow": "dsa_decode",
-      "phase": "decode",
-      "family": "decode_workflow"
-    },
-    {
-      "case_id": "deepseek_a5_mtp3_b16_ctx4096_top1024",
-      "workflow": "dsa_decode",
-      "phase": "decode",
-      "family": "decode_workflow"
-    },
-    {
-      "case_id": "deepseek_a5_mtp3_b16_ctx16384_top1024",
-      "workflow": "dsa_decode",
-      "phase": "decode",
-      "family": "decode_workflow"
-    },
-    {
-      "case_id": "deepseek_a5_mtp3_b16_ctx65536_top1024",
-      "workflow": "dsa_decode",
-      "phase": "decode",
-      "family": "decode_workflow"
-    },
-    {
-      "case_id": "deepseek_a5_mtp3_b16_ctx262144_top1024",
-      "workflow": "dsa_decode",
-      "phase": "decode",
-      "family": "decode_workflow"
-    },
-    {
-      "case_id": "deepseek_a5_mtp3_b64_ctx262144_top1024",
-      "workflow": "dsa_decode",
-      "phase": "decode",
-      "family": "decode_workflow",
-      "source_kind": "serving_stress_shape",
-      "source_project": "cannbench",
-      "source_model": "DeepSeek-A5-compatible",
-      "source_file": "user-provided-decode-buckets",
-      "source_op": "dsa_decode"
-    },
-    {
       "case_id": "deepseek_128k_decode_top2048",
       "workflow": "dsa_decode",
       "phase": "decode",
@@ -134,6 +10,39 @@
       "source_project": "DeepSeek",
       "source_model": "DeepSeek-V3.2",
       "source_file": "arxiv:2512.02556v1",
+      "source_op": "dsa_decode"
+    },
+    {
+      "case_id": "deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048",
+      "workflow": "dsa_decode",
+      "phase": "decode",
+      "family": "decode_workflow",
+      "source_kind": "official_operator_test",
+      "source_project": "DeepSeek-V3.2+FlashMLA",
+      "source_model": "DeepSeek-V3.2",
+      "source_file": "docs/datasets/dsa-real-sources.md#deepseek-v32-flashmla-decode",
+      "source_op": "dsa_decode"
+    },
+    {
+      "case_id": "deepseek_v4_flash_vllm_decode_b16_q1_ctx32768_top512",
+      "workflow": "dsa_decode",
+      "phase": "decode",
+      "family": "decode_workflow",
+      "source_kind": "derived_official_e2e_test",
+      "source_project": "DeepSeek-V4+vllm-ascend",
+      "source_model": "DeepSeek-V4-Flash",
+      "source_file": "docs/datasets/dsa-real-sources.md#deepseek-v4-flash-vllm-decode",
+      "source_op": "dsa_decode"
+    },
+    {
+      "case_id": "glm52_vllm_ascend_decode_b3_q3_ctx131072_top2048",
+      "workflow": "dsa_decode",
+      "phase": "decode",
+      "family": "decode_workflow",
+      "source_kind": "official_e2e_test",
+      "source_project": "GLM-5.2+vllm-ascend",
+      "source_model": "GLM-5.2",
+      "source_file": "docs/datasets/dsa-real-sources.md#glm-52-vllm-ascend-decode",
       "source_op": "dsa_decode"
     }
   ]
