@@ -967,7 +967,7 @@ def test_lightning_indexer_simt_v1_prefers_custom_op_for_prefill_family_64x128(
         implementation_version="v1",
         op="lightning_indexer",
         dtype="float16",
-        dataset="realistic_prefill",
+        dataset="stress",
         case_id="vllm_ascend_a5_prefill_b1_q512_ctx512_top512",
         seed=7,
     )
@@ -1190,7 +1190,7 @@ def test_lightning_indexer_simt_v1_prefers_custom_op_for_decode_family_64x128(
         implementation_version="v1",
         op="lightning_indexer",
         dtype="float16",
-        dataset="realistic_decode",
+        dataset="stress",
         case_id="vllm_ascend_a5_decode_b1_ctx512_top512",
         seed=7,
     )
@@ -1336,7 +1336,7 @@ def test_ascend_backend_prefers_sparse_attention_custom_op_for_decode_family_hd5
         implementation_version="v1",
         op="sparse_attention",
         dtype="float16",
-        dataset="realistic_decode",
+        dataset="stress",
         case_id="vllm_ascend_a5_decode_b1_ctx512_top512",
         seed=7,
     )

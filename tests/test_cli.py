@@ -2481,7 +2481,7 @@ def test_main_runs_dsa_decode_workflow_as_two_local_cases(tmp_path, monkeypatch,
             "--op",
             "dsa_decode",
             "--dataset",
-            "realistic",
+            "stress",
             "--case-id",
             "vllm_ascend_a5_decode_b1_ctx512_top512",
             "--dtype",
@@ -2493,7 +2493,7 @@ def test_main_runs_dsa_decode_workflow_as_two_local_cases(tmp_path, monkeypatch,
         ]
     )
 
-    run_name = "opbench-ascend-950pr-vllm-ascend-dsa_decode-realistic-bfloat16"
+    run_name = "opbench-ascend-950pr-vllm-ascend-dsa_decode-stress-bfloat16"
     layout = build_run_layout(tmp_path, run_name)
     summary = json.loads((layout.meta_dir / "summary.json").read_text())
     captured = capsys.readouterr()
@@ -2518,13 +2518,13 @@ def test_main_runs_dsa_decode_workflow_as_two_local_cases(tmp_path, monkeypatch,
     assert (
         layout.prepared_dir
         / "lightning_indexer"
-        / "realistic_decode"
+        / "stress"
         / "vllm_ascend_a5_decode_b1_ctx512_top512-bfloat16-seed7.json"
     ).exists()
     assert (
         layout.prepared_dir
         / "sparse_attention"
-        / "realistic_decode"
+        / "stress"
         / "vllm_ascend_a5_decode_b1_ctx512_top512-bfloat16-seed7.json"
     ).exists()
     assert "[run] bench started run_name=" in captured.out
@@ -2576,7 +2576,7 @@ def test_main_runs_profiled_dsa_workflow_and_writes_workflow_benchmark_record(
             "--op",
             "dsa_decode",
             "--dataset",
-            "realistic",
+            "stress",
             "--case-id",
             "vllm_ascend_a5_decode_b1_ctx512_top512",
             "--dtype",
@@ -2602,10 +2602,10 @@ def test_main_runs_profiled_dsa_workflow_and_writes_workflow_benchmark_record(
     record = benchmark_records["records"][0]
     assert record["run_id"] == (
         "dsa-decode-profiled/"
-        "dsa_decode-realistic-vllm_ascend_a5_decode_b1_ctx512_top512-bfloat16-seed0"
+        "dsa_decode-stress-vllm_ascend_a5_decode_b1_ctx512_top512-bfloat16-seed0"
     )
     assert record["operator"] == "dsa_decode"
-    assert record["dataset"] == "realistic"
+    assert record["dataset"] == "stress"
     assert record["case_id"] == "vllm_ascend_a5_decode_b1_ctx512_top512"
     assert record["family"] == "decode_workflow"
     assert record["shape"] == [1, 64, 512]
@@ -2696,7 +2696,7 @@ def test_main_defaults_dsa_decode_fused_operator_to_realistic_dataset(
     summary = json.loads((layout.meta_dir / "summary.json").read_text())
 
     assert exit_code == 0
-    assert len(captured_requests) == 40
+    assert len(captured_requests) == 8
     assert {request.dataset for request in captured_requests} == {"realistic_decode"}
     assert [request.op for request in captured_requests[:4]] == [
         "lightning_indexer",
@@ -2705,7 +2705,7 @@ def test_main_defaults_dsa_decode_fused_operator_to_realistic_dataset(
         "sparse_attention",
     ]
     assert summary["metadata"]["run_name"] == run_name
-    assert summary["metadata"]["total_cases"] == 40
+    assert summary["metadata"]["total_cases"] == 8
 
 
 def test_main_defaults_dsa_prefill_fused_operator_to_realistic_dataset(
@@ -2742,7 +2742,7 @@ def test_main_defaults_dsa_prefill_fused_operator_to_realistic_dataset(
     summary = json.loads((layout.meta_dir / "summary.json").read_text())
 
     assert exit_code == 0
-    assert len(captured_requests) == 40
+    assert len(captured_requests) == 18
     assert {request.dataset for request in captured_requests} == {"realistic_prefill"}
     assert [request.op for request in captured_requests[:4]] == [
         "lightning_indexer",
@@ -2751,7 +2751,7 @@ def test_main_defaults_dsa_prefill_fused_operator_to_realistic_dataset(
         "sparse_attention",
     ]
     assert summary["metadata"]["run_name"] == run_name
-    assert summary["metadata"]["total_cases"] == 40
+    assert summary["metadata"]["total_cases"] == 18
 
 
 def test_main_runs_batch_bench_once_per_prepared_case(tmp_path, monkeypatch):

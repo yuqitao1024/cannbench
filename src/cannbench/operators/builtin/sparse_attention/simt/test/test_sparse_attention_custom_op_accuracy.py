@@ -87,8 +87,8 @@ def _assert_matches_reference(case: SparseAttentionCase, query, keys, values, in
     [
         ("smoke", "deepseek_a5_decode_b1_ctx512_top512"),
         ("smoke", "deepseek_a5_decode_b1_ctx16384_top1024"),
-        ("realistic_prefill", "deepseek_a5_prefill_b1_q64_ctx512_top512"),
-        ("realistic_prefill", "deepseek_a5_prefill_b1_q512_ctx1024_top1024"),
+        ("stress", "deepseek_a5_prefill_b1_q64_ctx512_top512"),
+        ("stress", "deepseek_a5_prefill_b1_q512_ctx1024_top1024"),
         ("realistic_decode", "deepseek_128k_decode_top2048"),
         ("smoke", "tiny_hd128_prefill_top8"),
         ("realistic_prefill", "deepseek_v32_prefill_b1_q128_ctx16384_top2048"),
@@ -116,7 +116,7 @@ def test_custom_op_matches_reference_for_existing_sparse_attention_cases(
 def test_custom_op_prefill_matches_reference_for_all_invalid_rows():
     _require_custom_sparse_attention_op()
     case = get_sparse_attention_case(
-        "realistic_prefill",
+        "stress",
         "deepseek_a5_prefill_b1_q64_ctx512_top512",
     )
     query, keys, values, indices = _build_npu_inputs(case, seed=17)
@@ -128,7 +128,7 @@ def test_custom_op_prefill_matches_reference_for_all_invalid_rows():
 def test_custom_op_prefill_lse_uses_negative_infinity_not_nan_for_all_invalid_rows():
     _require_custom_sparse_attention_op()
     case = get_sparse_attention_case(
-        "realistic_prefill",
+        "stress",
         "deepseek_a5_prefill_b1_q64_ctx512_top512",
     )
     query, keys, values, indices = _build_npu_inputs(case, seed=17)
