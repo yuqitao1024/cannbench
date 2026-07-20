@@ -95,16 +95,20 @@ def test_sparse_attention_hd512_bridge_uses_hybrid_score_body():
     assert "sparse_attention_forward_family_hd512_hybrid(" in source
 
 
-def test_sparse_attention_hd512_has_custom_gather_pack_source():
-    source = Path(
+def test_sparse_attention_dead_gather_pack_sources_are_removed():
+    hd128_gather_pack = Path(
+        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+        "aten_dsa_sparse_attention/csrc/simt/"
+        "sparse_attention_keys_gather_pack_hd128.asc"
+    )
+    hd512_gather_pack = Path(
         "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
         "aten_dsa_sparse_attention/csrc/simt/"
         "sparse_attention_keys_gather_pack_hd512.asc"
-    ).read_text(encoding="utf-8")
+    )
 
-    assert "selected_keys" in source
-    assert "indices" in source
-    assert "launch_sparse_attention_keys_gather_pack_hd512_float" in source
+    assert not hd128_gather_pack.exists()
+    assert not hd512_gather_pack.exists()
 
 
 def test_sparse_attention_hd512_score_source_uses_tensor_api():
@@ -287,12 +291,12 @@ def test_sparse_attention_key_gather_reads_full_indices_directly():
     hd128_gather_source = Path(
         "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
         "aten_dsa_sparse_attention/csrc/simt/"
-        "sparse_attention_keys_gather_pack_hd128.asc"
+        "sparse_attention_score_family_hd128.asc"
     ).read_text(encoding="utf-8")
     hd512_gather_source = Path(
         "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
         "aten_dsa_sparse_attention/csrc/simt/"
-        "sparse_attention_keys_gather_pack_hd512.asc"
+        "sparse_attention_score_family_hd512.asc"
     ).read_text(encoding="utf-8")
 
     assert "indices_chunk" not in bridge_source
@@ -652,10 +656,20 @@ def test_sparse_attention_hd512_score_gather_offsets_keys_by_batch_only():
 def test_sparse_attention_score_aic_orders_copy_mmad_and_global_store():
     for head_dim in (128, 512):
         source = _score_source(head_dim)
+        start_marker = (
+            f"__aicore__ inline void sparse_attention_score_family_hd{head_dim}_aic("
+            if head_dim == 128
+            else f"__aicore__ inline void sparse_attention_score_gather_family_hd{head_dim}_aic("
+        )
+        end_marker = (
+            f"__global__ __aicore__ void sparse_attention_score_family_hd{head_dim}_kernel("
+            if head_dim == 128
+            else f"__aicore__ inline void sparse_attention_score_gather_family_hd{head_dim}_aiv("
+        )
         body = _function_body(
             source,
-            f"__aicore__ inline void sparse_attention_score_family_hd{head_dim}_aic(",
-            f"__global__ __aicore__ void sparse_attention_score_family_hd{head_dim}_kernel(",
+            start_marker,
+            end_marker,
         )
 
         assert "Copy(copy_gm_to_l1" in body

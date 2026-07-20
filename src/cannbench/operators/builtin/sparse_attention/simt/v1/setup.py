@@ -118,8 +118,20 @@ class AscendBuildExtension(build_ext):
 
 
 def get_extensions():
-    sources = list(glob.glob(os.path.join(EXTENSIONS_DIR, "*.asc")))
-    sources += list(glob.glob(os.path.join(EXTENSIONS_DIR, "simt", "*.asc")))
+    sources = [
+        os.path.join(EXTENSIONS_DIR, "register.asc"),
+        os.path.join(EXTENSIONS_DIR, "sparse_attention.asc"),
+        os.path.join(
+            EXTENSIONS_DIR, "simt", "sparse_attention_postprocess_family_hd128.asc"
+        ),
+        os.path.join(
+            EXTENSIONS_DIR, "simt", "sparse_attention_postprocess_family_hd512.asc"
+        ),
+        os.path.join(EXTENSIONS_DIR, "simt", "sparse_attention_query_pack_hd128.asc"),
+        os.path.join(EXTENSIONS_DIR, "simt", "sparse_attention_query_pack_hd512.asc"),
+        os.path.join(EXTENSIONS_DIR, "simt", "sparse_attention_score_family_hd128.asc"),
+        os.path.join(EXTENSIONS_DIR, "simt", "sparse_attention_score_family_hd512.asc"),
+    ]
     return [
         Extension(
             name=f"{library_name}._C",
