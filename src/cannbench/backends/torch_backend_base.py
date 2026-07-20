@@ -144,8 +144,9 @@ class TorchOperatorBackend(OperatorBackend):
             dtype=dtype,
         )
 
-        operator()
+        output = operator()
         self._synchronize(torch)
+        del output
         return OperatorBenchmarkResult(
             backend=self.name,
             device_name=self._device_name(torch, device),

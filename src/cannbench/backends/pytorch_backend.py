@@ -94,6 +94,12 @@ class NvidiaBackend(TorchOperatorBackend):
             case_id=request.case_id,
             seed=request.seed,
         )
+        kernel_selection = get_operator_plugin(request.op).profile_kernel_selection(
+            backend="nvidia",
+            implementation=request.implementation,
+            implementation_version=request.implementation_version,
+        )
+        launch_count = kernel_selection.launch_count or 1
         with tempfile.TemporaryDirectory(prefix="cannbench-ncu-") as temp_dir_name:
             temp_dir = Path(temp_dir_name)
             prepared_path = temp_dir / "prepared.json"
@@ -108,7 +114,7 @@ class NvidiaBackend(TorchOperatorBackend):
                 "all",
                 "--force-overwrite",
                 "--launch-count",
-                "1",
+                str(launch_count),
                 "--export",
                 str(profile_dir / "ncu-report"),
                 sys.executable,
@@ -182,11 +188,7 @@ class NvidiaBackend(TorchOperatorBackend):
             summary = read_device_profile(
                 profile_dir,
                 backend="nvidia",
-                kernel_selection=get_operator_plugin(request.op).profile_kernel_selection(
-                    backend="nvidia",
-                    implementation=request.implementation,
-                    implementation_version=request.implementation_version,
-                ),
+                kernel_selection=kernel_selection,
             )
             profile = ProfileArtifacts(
                 device_name=self._device_name(torch, self._device(torch)),

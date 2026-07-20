@@ -40,4 +40,6 @@ testpaths = [
   "tests",
   "src/cannbench/operators/builtin/softmax/simt/test",
   "src/cannbench/operators/builtin/index_add/simt/test",
+  "src/cannbench/operators/builtin/adaptivemaxpool3dgrad/test",
+  "src/cannbench/operators/builtin/adaptivemaxpool3dgrad/simt/test",
 ]

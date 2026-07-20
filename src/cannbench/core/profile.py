@@ -16,6 +16,8 @@ NVIDIA_TIME_DURATION_AVG = "gpu__time_duration.avg"
 @dataclass(frozen=True)
 class ProfileKernelSelection:
     kernel_name_patterns: tuple[str, ...] = ()
+    launch_count: int | None = None
+    aggregate_across_files: bool = False
 
 
 @dataclass(frozen=True)
@@ -226,6 +228,8 @@ def read_device_profile(
                 f"{expected!r}, but observed: {observed}"
             )
         raise ValueError(f"no duration samples found in profiler CSV files under {profile_dir}")
+    if kernel_selection.aggregate_across_files:
+        samples = [sum(samples)]
     summary = summarize_timings_ms(samples)
     return DeviceProfileSummary(
         backend=backend,
