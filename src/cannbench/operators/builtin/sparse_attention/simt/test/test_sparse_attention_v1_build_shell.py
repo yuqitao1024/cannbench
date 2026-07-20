@@ -83,6 +83,82 @@ def test_sparse_attention_hd128_bridge_uses_named_tile_constants():
     assert "constexpr int64_t kFamilyHd128SelectedTile" in source
 
 
+def test_sparse_attention_hd128_prefill_fp16_has_fused_helper():
+    source = Path(
+        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+        "aten_dsa_sparse_attention/csrc/sparse_attention.asc"
+    ).read_text(encoding="utf-8")
+
+    assert "run_sparse_attention_family_hd128_prefill_fused_tile(" in source
+    assert "launch_sparse_attention_hd128_prefill_fused_float(" in source
+
+
+def test_sparse_attention_hd128_prefill_fp16_avoids_gm_scores_and_old_postprocess():
+    source = Path(
+        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+        "aten_dsa_sparse_attention/csrc/sparse_attention.asc"
+    ).read_text(encoding="utf-8")
+    body = _function_body(
+        source,
+        "std::tuple<at::Tensor, at::Tensor> sparse_attention_forward_family_hd128_hybrid(",
+        "std::tuple<at::Tensor, at::Tensor> sparse_attention_forward_family_hd128_decode_fused(",
+    )
+
+    fp16_body = body.split("if (query.scalar_type() == at::ScalarType::Half) {", 1)[1]
+    fp16_body = fp16_body.split("} else {", 1)[0]
+
+    assert "run_sparse_attention_family_hd128_prefill_fused_tile(" in fp16_body
+    assert "auto scores = at::empty(" not in fp16_body
+    assert "run_sparse_attention_score_gather_family_hd128_tile(" not in fp16_body
+    assert "run_sparse_attention_family_hd128_decode_direct_tile(" not in fp16_body
+
+
+def test_sparse_attention_hd128_prefill_fused_score_ready_uses_vector_fixpipe_handshake():
+    source = _score_source(128)
+    body = _function_body(
+        source,
+        "__aicore__ inline void sparse_attention_prefill_fused_family_hd128_aic(",
+        "__global__ __aicore__ void sparse_attention_prefill_fused_family_hd128_kernel(",
+    )
+    aic_body, aiv_body = body.split(
+        "__aicore__ inline void sparse_attention_prefill_fused_family_hd128_aiv(",
+        1,
+    )
+
+    assert (
+        "AscendC::CrossCoreWaitFlag<kCrossCoreSyncMode, PIPE_FIX>(score_ready_flag);"
+        in aic_body
+    )
+    assert (
+        "AscendC::CrossCoreSetFlag<kCrossCoreSyncMode, PIPE_FIX>(score_ready_flag);"
+        in aic_body
+    )
+    assert (
+        "AscendC::CrossCoreSetFlag<kCrossCoreSyncMode, PIPE_V>(score_ready_flag);"
+        in aiv_body
+    )
+    assert (
+        "AscendC::CrossCoreWaitFlag<kCrossCoreSyncMode, PIPE_V>(score_ready_flag);"
+        in aiv_body
+    )
+
+
+def test_sparse_attention_hd128_prefill_fused_postprocess_dispatches_via_asc_vf_call():
+    source = _score_source(128)
+    body = _function_body(
+        source,
+        "__aicore__ inline void sparse_attention_prefill_fused_family_hd128_aic(",
+        "__global__ __aicore__ void sparse_attention_prefill_fused_family_hd128_kernel(",
+    )
+    _, aiv_body = body.split(
+        "__aicore__ inline void sparse_attention_prefill_fused_family_hd128_aiv(",
+        1,
+    )
+
+    assert "asc_vf_call<" in aiv_body
+    assert "__simt_vf__" in source
+
+
 def test_sparse_attention_hd512_bridge_uses_hybrid_score_body():
     source = Path(
         "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
