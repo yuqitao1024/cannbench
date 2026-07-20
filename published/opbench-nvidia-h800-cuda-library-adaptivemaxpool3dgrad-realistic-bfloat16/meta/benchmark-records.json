@@ -1,0 +1,412 @@
+{
+  "records": [
+    {
+      "schema_version": 1,
+      "run_id": "opbench-nvidia-h800-cuda-pytorch-adaptivemaxpool3dgrad-realistic-float16/adaptivemaxpool3dgrad-realistic-ct_resnet_global_",
+      "operator": "adaptivemaxpool3dgrad",
+      "dataset": "realistic",
+      "case_id": "ct_resnet_global_pool_backward",
+      "family": "medical_volume_global_pool_backward",
+      "shape": [
+        1,
+        32,
+        32,
+        64,
+        64
+      ],
+      "dtype": "float16",
+      "backend": "nvidia",
+      "device_class": "H800",
+      "implementation": "cuda-pytorch",
+      "implementation_version": "cuda-pytorch",
+      "source_kind": "realistic_model_shape",
+      "source_project": "cannbench",
+      "source_model": "3DResNet_CT_Classifier",
+      "source_file": "curated_medical_volume_shape",
+      "source_op": "aten::adaptive_max_pool3d_backward",
+      "metrics": {
+        "latency_ms": 0.003712
+      },
+      "accuracy": {
+        "passed": true,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0
+      },
+      "diff_ref": null
+    },
+    {
+      "schema_version": 1,
+      "run_id": "opbench-nvidia-h800-cuda-pytorch-adaptivemaxpool3dgrad-realistic-float16/adaptivemaxpool3dgrad-realistic-deep_feature_large_batch_global_",
+      "operator": "adaptivemaxpool3dgrad",
+      "dataset": "realistic",
+      "case_id": "deep_feature_large_batch_global_pool_backward",
+      "family": "large_batch_global_pool_backward",
+      "shape": [
+        32,
+        1024,
+        4,
+        7,
+        7
+      ],
+      "dtype": "float16",
+      "backend": "nvidia",
+      "device_class": "H800",
+      "implementation": "cuda-pytorch",
+      "implementation_version": "cuda-pytorch",
+      "source_kind": "realistic_model_shape",
+      "source_project": "cannbench",
+      "source_model": "Deep3DClassifier",
+      "source_file": "curated_large_batch_deep_feature_shape",
+      "source_op": "aten::adaptive_max_pool3d_backward",
+      "metrics": {
+        "latency_ms": 0.02624
+      },
+      "accuracy": {
+        "passed": true,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0
+      },
+      "diff_ref": null
+    },
+    {
+      "schema_version": 1,
+      "run_id": "opbench-nvidia-h800-cuda-pytorch-adaptivemaxpool3dgrad-realistic-float16/adaptivemaxpool3dgrad-realistic-medical_anisotropic_grid_",
+      "operator": "adaptivemaxpool3dgrad",
+      "dataset": "realistic",
+      "case_id": "medical_anisotropic_grid_pool_backward",
+      "family": "medical_anisotropic_pool_backward",
+      "shape": [
+        1,
+        64,
+        24,
+        64,
+        64
+      ],
+      "dtype": "float16",
+      "backend": "nvidia",
+      "device_class": "H800",
+      "implementation": "cuda-pytorch",
+      "implementation_version": "cuda-pytorch",
+      "source_kind": "realistic_model_shape",
+      "source_project": "cannbench",
+      "source_model": "3DUNet_AnisotropicContextHead",
+      "source_file": "curated_anisotropic_medical_shape",
+      "source_op": "aten::adaptive_max_pool3d_backward",
+      "metrics": {
+        "latency_ms": 0.0041600000000000005
+      },
+      "accuracy": {
+        "passed": true,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0
+      },
+      "diff_ref": null
+    },
+    {
+      "schema_version": 1,
+      "run_id": "opbench-nvidia-h800-cuda-pytorch-adaptivemaxpool3dgrad-realistic-float16/adaptivemaxpool3dgrad-realistic-medical_large_volume_grid_",
+      "operator": "adaptivemaxpool3dgrad",
+      "dataset": "realistic",
+      "case_id": "medical_large_volume_grid_pool_backward",
+      "family": "medical_large_volume_pool_backward",
+      "shape": [
+        1,
+        32,
+        96,
+        96,
+        96
+      ],
+      "dtype": "float16",
+      "backend": "nvidia",
+      "device_class": "H800",
+      "implementation": "cuda-pytorch",
+      "implementation_version": "cuda-pytorch",
+      "source_kind": "realistic_model_shape",
+      "source_project": "monai",
+      "source_model": "3DUNet_MedicalVolume",
+      "source_file": "monai_spleen_segmentation_96_cube",
+      "source_op": "aten::adaptive_max_pool3d_backward",
+      "metrics": {
+        "latency_ms": 0.004064
+      },
+      "accuracy": {
+        "passed": true,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0
+      },
+      "diff_ref": null
+    },
+    {
+      "schema_version": 1,
+      "run_id": "opbench-nvidia-h800-cuda-pytorch-adaptivemaxpool3dgrad-realistic-float16/adaptivemaxpool3dgrad-realistic-pointpillar_voxel_global_",
+      "operator": "adaptivemaxpool3dgrad",
+      "dataset": "realistic",
+      "case_id": "pointpillar_voxel_global_pool_backward",
+      "family": "voxel_feature_global_pool_backward",
+      "shape": [
+        1,
+        128,
+        10,
+        20,
+        20
+      ],
+      "dtype": "float16",
+      "backend": "nvidia",
+      "device_class": "H800",
+      "implementation": "cuda-pytorch",
+      "implementation_version": "cuda-pytorch",
+      "source_kind": "realistic_model_shape",
+      "source_project": "cannbench",
+      "source_model": "VoxelBackbone_PointCloud",
+      "source_file": "curated_voxel_feature_shape",
+      "source_op": "aten::adaptive_max_pool3d_backward",
+      "metrics": {
+        "latency_ms": 0.0038079999999999998
+      },
+      "accuracy": {
+        "passed": true,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0
+      },
+      "diff_ref": null
+    },
+    {
+      "schema_version": 1,
+      "run_id": "opbench-nvidia-h800-cuda-pytorch-adaptivemaxpool3dgrad-realistic-float16/adaptivemaxpool3dgrad-realistic-r3d18_deep_feature_global_",
+      "operator": "adaptivemaxpool3dgrad",
+      "dataset": "realistic",
+      "case_id": "r3d18_deep_feature_global_pool_backward",
+      "family": "video_clip_global_pool_backward",
+      "shape": [
+        8,
+        512,
+        2,
+        7,
+        7
+      ],
+      "dtype": "float16",
+      "backend": "nvidia",
+      "device_class": "H800",
+      "implementation": "cuda-pytorch",
+      "implementation_version": "cuda-pytorch",
+      "source_kind": "realistic_model_shape",
+      "source_project": "torchvision",
+      "source_model": "R3D_18",
+      "source_file": "torchvision_models_video_resnet",
+      "source_op": "aten::adaptive_max_pool3d_backward",
+      "metrics": {
+        "latency_ms": 0.00736
+      },
+      "accuracy": {
+        "passed": true,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0
+      },
+      "diff_ref": null
+    },
+    {
+      "schema_version": 1,
+      "run_id": "opbench-nvidia-h800-cuda-pytorch-adaptivemaxpool3dgrad-realistic-float16/adaptivemaxpool3dgrad-realistic-single_sample_reference_grid_",
+      "operator": "adaptivemaxpool3dgrad",
+      "dataset": "realistic",
+      "case_id": "single_sample_reference_grid_pool_backward",
+      "family": "single_sample_reference_pool_backward",
+      "shape": [
+        1,
+        64,
+        8,
+        9,
+        10
+      ],
+      "dtype": "float16",
+      "backend": "nvidia",
+      "device_class": "H800",
+      "implementation": "cuda-pytorch",
+      "implementation_version": "cuda-pytorch",
+      "source_kind": "realistic_model_shape",
+      "source_project": "pytorch",
+      "source_model": "AdaptiveMaxPool3d_DocumentationExample",
+      "source_file": "torch_nn_adaptive_max_pool3d_docs",
+      "source_op": "aten::adaptive_max_pool3d_backward",
+      "metrics": {
+        "latency_ms": 0.007584
+      },
+      "accuracy": {
+        "passed": true,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0
+      },
+      "diff_ref": null
+    },
+    {
+      "schema_version": 1,
+      "run_id": "opbench-nvidia-h800-cuda-pytorch-adaptivemaxpool3dgrad-realistic-float16/adaptivemaxpool3dgrad-realistic-spatiotemporal_mid_feature_",
+      "operator": "adaptivemaxpool3dgrad",
+      "dataset": "realistic",
+      "case_id": "spatiotemporal_mid_feature_pool_backward",
+      "family": "spatiotemporal_feature_pool_backward",
+      "shape": [
+        1,
+        64,
+        8,
+        14,
+        14
+      ],
+      "dtype": "float16",
+      "backend": "nvidia",
+      "device_class": "H800",
+      "implementation": "cuda-pytorch",
+      "implementation_version": "cuda-pytorch",
+      "source_kind": "realistic_model_shape",
+      "source_project": "cannbench",
+      "source_model": "SlowFast_MidFeature",
+      "source_file": "curated_spatiotemporal_feature_shape",
+      "source_op": "aten::adaptive_max_pool3d_backward",
+      "metrics": {
+        "latency_ms": 0.0037440000000000004
+      },
+      "accuracy": {
+        "passed": true,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0
+      },
+      "diff_ref": null
+    },
+    {
+      "schema_version": 1,
+      "run_id": "opbench-nvidia-h800-cuda-pytorch-adaptivemaxpool3dgrad-realistic-float16/adaptivemaxpool3dgrad-realistic-video_resnet_clip_global_",
+      "operator": "adaptivemaxpool3dgrad",
+      "dataset": "realistic",
+      "case_id": "video_resnet_clip_global_pool_backward",
+      "family": "video_clip_global_pool_backward",
+      "shape": [
+        2,
+        32,
+        16,
+        14,
+        14
+      ],
+      "dtype": "float16",
+      "backend": "nvidia",
+      "device_class": "H800",
+      "implementation": "cuda-pytorch",
+      "implementation_version": "cuda-pytorch",
+      "source_kind": "realistic_model_shape",
+      "source_project": "cannbench",
+      "source_model": "VideoResNet_ActionRecognition",
+      "source_file": "curated_video_clip_shape",
+      "source_op": "aten::adaptive_max_pool3d_backward",
+      "metrics": {
+        "latency_ms": 0.0038079999999999998
+      },
+      "accuracy": {
+        "passed": true,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0
+      },
+      "diff_ref": null
+    },
+    {
+      "schema_version": 1,
+      "run_id": "opbench-nvidia-h800-cuda-pytorch-adaptivemaxpool3dgrad-realistic-float16/adaptivemaxpool3dgrad-realistic-volumetric_nondivisible_grid_",
+      "operator": "adaptivemaxpool3dgrad",
+      "dataset": "realistic",
+      "case_id": "volumetric_nondivisible_grid_pool_backward",
+      "family": "nondivisible_volumetric_pool_backward",
+      "shape": [
+        2,
+        128,
+        12,
+        17,
+        21
+      ],
+      "dtype": "float16",
+      "backend": "nvidia",
+      "device_class": "H800",
+      "implementation": "cuda-pytorch",
+      "implementation_version": "cuda-pytorch",
+      "source_kind": "realistic_model_shape",
+      "source_project": "cannbench",
+      "source_model": "3DUNet_IrregularFeature",
+      "source_file": "curated_nondivisible_volumetric_shape",
+      "source_op": "aten::adaptive_max_pool3d_backward",
+      "metrics": {
+        "latency_ms": 0.005535999999999999
+      },
+      "accuracy": {
+        "passed": true,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0
+      },
+      "diff_ref": null
+    },
+    {
+      "schema_version": 1,
+      "run_id": "opbench-nvidia-h800-cuda-pytorch-adaptivemaxpool3dgrad-realistic-float16/adaptivemaxpool3dgrad-realistic-volumetric_regular_grid_",
+      "operator": "adaptivemaxpool3dgrad",
+      "dataset": "realistic",
+      "case_id": "volumetric_regular_grid_pool_backward",
+      "family": "segmentation_context_pool_backward",
+      "shape": [
+        2,
+        128,
+        16,
+        16,
+        16
+      ],
+      "dtype": "float16",
+      "backend": "nvidia",
+      "device_class": "H800",
+      "implementation": "cuda-pytorch",
+      "implementation_version": "cuda-pytorch",
+      "source_kind": "realistic_model_shape",
+      "source_project": "cannbench",
+      "source_model": "3DUNet_ContextHead",
+      "source_file": "curated_regular_volumetric_shape",
+      "source_op": "aten::adaptive_max_pool3d_backward",
+      "metrics": {
+        "latency_ms": 0.00432
+      },
+      "accuracy": {
+        "passed": true,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0
+      },
+      "diff_ref": null
+    },
+    {
+      "schema_version": 1,
+      "run_id": "opbench-nvidia-h800-cuda-pytorch-adaptivemaxpool3dgrad-realistic-float16/adaptivemaxpool3dgrad-realistic-volumetric_segmentation_head_",
+      "operator": "adaptivemaxpool3dgrad",
+      "dataset": "realistic",
+      "case_id": "volumetric_segmentation_head_pool_backward",
+      "family": "segmentation_context_pool_backward",
+      "shape": [
+        2,
+        64,
+        16,
+        32,
+        32
+      ],
+      "dtype": "float16",
+      "backend": "nvidia",
+      "device_class": "H800",
+      "implementation": "cuda-pytorch",
+      "implementation_version": "cuda-pytorch",
+      "source_kind": "realistic_model_shape",
+      "source_project": "cannbench",
+      "source_model": "3DUNet_ContextHead",
+      "source_file": "curated_volumetric_segmentation_shape",
+      "source_op": "aten::adaptive_max_pool3d_backward",
+      "metrics": {
+        "latency_ms": 0.004032
+      },
+      "accuracy": {
+        "passed": true,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0
+      },
+      "diff_ref": null
+    }
+  ]
+}
