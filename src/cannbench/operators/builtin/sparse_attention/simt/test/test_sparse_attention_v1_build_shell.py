@@ -117,8 +117,9 @@ def test_sparse_attention_hd512_score_source_uses_tensor_api():
     assert "tensor_api/tensor.h" in source
     assert "MakeMmad(" in source
     assert "__global__ __aicore__" in source
-    assert "KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_1)" in source
+    assert "KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_2)" in source
     assert "ASCEND_IS_AIC" in source
+    assert "kernel_operator.h" in source
     assert "TPipe" not in source
     assert "matmul_intf.h" not in source
 
@@ -143,19 +144,29 @@ def test_sparse_attention_score_sources_do_not_use_basic_api_or_crosscore_flags(
             for line in source.splitlines()
             if line.strip().startswith('#include "basic_api/')
         ]
-        assert basic_api_includes == ['#include "basic_api/kernel_common.h"']
-        assert "basic_api/kernel_basic_intf.h" not in source
-        assert "basic_api/kernel_operator_block_sync_intf.h" not in source
-        assert "kernel_operator.h" not in source
-        assert "AscendC::LocalTensor" not in source
-        assert "SetFlag" not in source
-        assert "WaitFlag" not in source
-        assert "PipeBarrier" not in source
-        assert "CrossCoreSetFlag" not in source
-        assert "CrossCoreWaitFlag" not in source
+        if source == sources[0]:
+            assert basic_api_includes == [
+                '#include "basic_api/kernel_basic_intf.h"',
+                '#include "basic_api/kernel_operator_block_sync_intf.h"',
+            ]
+            assert '#include "kernel_common.h"' not in source
+            assert "kernel_operator.h" in source
+        else:
+            assert basic_api_includes == [
+                '#include "basic_api/kernel_basic_intf.h"',
+                '#include "basic_api/kernel_operator_block_sync_intf.h"',
+            ]
+            assert '#include "kernel_common.h"' not in source
+            assert "kernel_operator.h" in source
+        assert "AscendC::LocalTensor<half>" in source
+        assert "AscendC::SetFlag<" in source
+        assert "AscendC::WaitFlag<" in source
+        assert "CrossCoreSetFlag" in source
+        assert "CrossCoreWaitFlag" in source
+        assert "PipeBarrier" in source
 
 
-def test_sparse_attention_hd128_score_source_uses_tensor_and_simt_api():
+def test_sparse_attention_hd128_score_source_uses_tensor_and_mixed_kernel_api():
     source = Path(
         "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
         "aten_dsa_sparse_attention/csrc/simt/"
@@ -163,9 +174,32 @@ def test_sparse_attention_hd128_score_source_uses_tensor_and_simt_api():
     ).read_text(encoding="utf-8")
 
     assert "tensor_api/tensor.h" in source
-    assert "simt_api/asc_simt.h" in source
+    assert "kernel_operator.h" in source
     assert "MakeMmad(" in source
     assert "__global__ __aicore__" in source
+
+
+def test_sparse_attention_hd128_score_source_uses_cross_core_sync_flags():
+    source = _score_source(128)
+
+    assert "AscendC::InitSocState();" in source
+    assert "CrossCoreSetFlag<" in source
+    assert "CrossCoreWaitFlag" in source
+
+
+def test_sparse_attention_hd128_score_source_restores_mixed_aic_aiv_handshake():
+    source = _score_source(128)
+
+    assert "constexpr uint32_t kGatherKeysL1Offset = 64 * 1024;" in source
+    assert "constexpr uint8_t kGatherKeysReadyFlag = 9;" in source
+    assert "constexpr uint8_t kCrossCoreSyncMode = 4;" in source
+    assert "KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_2);" in source
+    assert "if (n_loop > 1) {" in source
+    assert "AscendC::CrossCoreSetFlag<kCrossCoreSyncMode, PIPE_MTE1>(kGatherKeysReadyFlag);" in source
+    assert "AscendC::CrossCoreWaitFlag<kCrossCoreSyncMode, PIPE_MTE1>(" in source
+    assert "AscendC::CrossCoreWaitFlag<kCrossCoreSyncMode, PIPE_MTE3>(" in source
+    assert "AscendC::CrossCoreSetFlag<kCrossCoreSyncMode, PIPE_MTE3>(" in source
+    assert "if (AscendC::GetSubBlockIdx() != 0) {" in source
 
 
 def test_sparse_attention_score_helper_avoids_reshape_bmm_path():
@@ -530,8 +564,9 @@ def test_sparse_attention_hd128_decode_score_fuses_key_gather_but_not_postproces
 
     assert "launch_sparse_attention_score_hd128_decode_direct_float" not in score_source
     assert "launch_sparse_attention_score_gather_hd128_float" in score_source
-    assert "sparse_attention_gather_pack_family_hd128_vf" in score_source
-    assert "asc_copy_ub2l1_sync(" in score_source
+    assert "sparse_attention_score_gather_family_hd128_aiv(" in score_source
+    assert "CopyUB2L1{}" in score_source
+    assert "AscendC::CrossCoreSetFlag<kCrossCoreSyncMode, PIPE_MTE3>(" in score_source
     assert "launch_sparse_attention_hd128_postprocess_decode_direct_float" in postprocess_source
 
 
@@ -540,16 +575,15 @@ def test_sparse_attention_hd128_score_gather_keeps_gather_on_aiv_side():
     aic_source = _function_body(
         source,
         "__aicore__ inline void sparse_attention_score_family_hd128_aic(",
-        "__simt_vf__ __launch_bounds__(256) inline void sparse_attention_gather_pack_family_hd128_vf(",
+        "__aicore__ inline void sparse_attention_score_gather_family_hd128_aiv(",
     )
     gather_source = _function_body(
         source,
-        "__simt_vf__ __launch_bounds__(256) inline void sparse_attention_gather_pack_family_hd128_vf(",
-        "__global__ __aicore__ __vector__ void sparse_attention_score_family_hd128_kernel(",
+        "__aicore__ inline void sparse_attention_score_gather_family_hd128_aiv(",
+        "__global__ __aicore__ void sparse_attention_score_family_hd128_kernel(",
     )
 
-    assert "AscendC::Mutex::Lock<" in source
-    assert "AscendC::Mutex::Unlock<" in source
+    assert "AscendC::LocalTensor<half>" in source
     assert "keys[" in gather_source
     assert "indices[" in gather_source
     assert "keys[" not in aic_source
@@ -560,17 +594,18 @@ def test_sparse_attention_hd512_score_gather_keeps_gather_on_aiv_side():
     source = _score_source(512)
     aic_source = _function_body(
         source,
-        "__aicore__ inline void sparse_attention_score_family_hd512_aic(",
-        "__simt_vf__ __launch_bounds__(256) inline void sparse_attention_gather_pack_family_hd512_vf(",
+        "__aicore__ inline void sparse_attention_score_gather_family_hd512_aic(",
+        "__aicore__ inline void sparse_attention_score_gather_family_hd512_aiv(",
     )
     gather_source = _function_body(
         source,
-        "__simt_vf__ __launch_bounds__(256) inline void sparse_attention_gather_pack_family_hd512_vf(",
-        "__global__ __aicore__ __vector__ void sparse_attention_score_family_hd512_kernel(",
+        "__aicore__ inline void sparse_attention_score_gather_family_hd512_aiv(",
+        "__global__ __aicore__ void sparse_attention_score_gather_family_hd512_kernel(",
     )
 
-    assert "AscendC::Mutex::Lock<" in source
-    assert "AscendC::Mutex::Unlock<" in source
+    assert "AscendC::LocalTensor<half>" in source
+    assert "CrossCoreSetFlag<" in source
+    assert "CrossCoreWaitFlag<" in source
     assert "keys[" in gather_source
     assert "indices[" in gather_source
     assert "keys[" not in aic_source
@@ -585,8 +620,15 @@ def test_sparse_attention_score_gather_uses_single_mixed_kernel_launch():
             1,
         )[1]
         score_launch = (
-            f"sparse_attention_score_family_hd{head_dim}_kernel"
-            "<<<shape.used_core_num, 0, stream>>>"
+            (
+                f"sparse_attention_score_gather_family_hd{head_dim}_kernel"
+                "<<<shape.used_core_num, 0, stream>>>"
+            )
+            if head_dim == 512
+            else (
+                f"sparse_attention_score_family_hd{head_dim}_kernel"
+                "<<<shape.used_core_num, 0, stream>>>"
+            )
         )
 
         assert score_launch in launcher_source
@@ -646,8 +688,9 @@ def test_sparse_attention_hd512_decode_score_fuses_key_gather_but_not_postproces
 
     assert "launch_sparse_attention_score_hd512_decode_direct_float" not in score_source
     assert "launch_sparse_attention_score_gather_hd512_float" in score_source
-    assert "sparse_attention_gather_pack_family_hd512_vf" in score_source
-    assert "asc_copy_ub2l1_sync(" in score_source
+    assert "sparse_attention_score_gather_family_hd512_aiv" in score_source
+    assert "sparse_attention_score_gather_family_hd512_kernel" in score_source
+    assert "CrossCoreSetFlag<2, PIPE_MTE3>(kGatherKeysReadyFlag);" in score_source
     assert "launch_sparse_attention_hd512_postprocess_decode_direct_float" in postprocess_source
 
 
