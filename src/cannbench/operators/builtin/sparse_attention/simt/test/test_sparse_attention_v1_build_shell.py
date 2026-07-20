@@ -195,15 +195,19 @@ def test_sparse_attention_hd128_score_source_restores_mixed_aic_aiv_handshake():
     source = _score_source(128)
 
     assert "constexpr uint32_t kGatherKeysL1Offset = 64 * 1024;" in source
-    assert "constexpr uint8_t kGatherKeysReadyFlag = 9;" in source
+    assert "constexpr int32_t kMaxUsedCoreNum = 11;" in source
+    assert "constexpr uint8_t kGatherKeysReadyFlagBase = 0;" in source
     assert "constexpr uint8_t kCrossCoreSyncMode = 4;" in source
     assert "KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_2);" in source
     assert "if (n_loop > 1) {" in source
-    assert "AscendC::CrossCoreSetFlag<kCrossCoreSyncMode, PIPE_MTE1>(kGatherKeysReadyFlag);" in source
-    assert "AscendC::CrossCoreWaitFlag<kCrossCoreSyncMode, PIPE_MTE1>(" in source
-    assert "AscendC::CrossCoreWaitFlag<kCrossCoreSyncMode, PIPE_MTE3>(" in source
-    assert "AscendC::CrossCoreSetFlag<kCrossCoreSyncMode, PIPE_MTE3>(" in source
+    assert "const uint16_t ready_flag =" in source
+    assert "AscendC::CrossCoreSetFlag<kCrossCoreSyncMode, PIPE_MTE1>(ready_flag);" in source
+    assert "AscendC::CrossCoreWaitFlag<kCrossCoreSyncMode, PIPE_MTE1>(ready_flag);" in source
+    assert "AscendC::CrossCoreWaitFlag<kCrossCoreSyncMode, PIPE_MTE3>(ready_flag);" in source
+    assert "AscendC::CrossCoreSetFlag<kCrossCoreSyncMode, PIPE_MTE3>(ready_flag);" in source
     assert "if (AscendC::GetSubBlockIdx() != 0) {" in source
+    assert "AscendC::GetBlockIdx() / AscendC::GetTaskRatio()" in source
+    assert "if (block_idx >= static_cast<uint32_t>(shape.used_core_num)) {" in source
 
 
 def test_sparse_attention_score_helper_avoids_reshape_bmm_path():
@@ -644,13 +648,13 @@ def test_sparse_attention_score_gather_uses_single_mixed_kernel_launch():
 
 def test_sparse_attention_hd512_score_gather_offsets_keys_by_batch_only():
     source = _score_source(512)
-    launcher_source = source.split(
-        'extern "C" void launch_sparse_attention_score_gather_hd512_float(',
+    gather_source = source.split(
+        "__aicore__ inline void sparse_attention_score_gather_family_hd512_aiv(",
         1,
     )[1]
 
-    assert "const int64_t head_index = head_row % query_heads;" not in launcher_source
-    assert "batch_index * context_tokens * kHeadDim" in launcher_source
+    assert "const int64_t head_index = head_row % query_heads;" not in gather_source
+    assert "batch_index * context_tokens * kHeadDim" in gather_source
 
 
 def test_sparse_attention_score_aic_orders_copy_mmad_and_global_store():
@@ -704,7 +708,11 @@ def test_sparse_attention_hd512_decode_score_fuses_key_gather_but_not_postproces
     assert "launch_sparse_attention_score_gather_hd512_float" in score_source
     assert "sparse_attention_score_gather_family_hd512_aiv" in score_source
     assert "sparse_attention_score_gather_family_hd512_kernel" in score_source
-    assert "CrossCoreSetFlag<2, PIPE_MTE3>(kGatherKeysReadyFlag);" in score_source
+    assert "constexpr int32_t kMaxUsedCoreNum = 11;" in score_source
+    assert "constexpr uint8_t kCrossCoreSyncMode = 4;" in score_source
+    assert "if (AscendC::GetSubBlockIdx() != 0) {" in score_source
+    assert "AscendC::GetBlockIdx() / AscendC::GetTaskRatio()" in score_source
+    assert "CrossCoreSetFlag<kCrossCoreSyncMode, PIPE_MTE3>(ready_flag);" in score_source
     assert "launch_sparse_attention_hd512_postprocess_decode_direct_float" in postprocess_source
 
 
