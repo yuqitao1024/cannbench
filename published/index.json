@@ -12,6 +12,9 @@
     "opbench-ascend-950pr-simt-v1-index_add-realistic-float16",
     "opbench-ascend-950pr-cannops-index_add-realistic-float16",
     "opbench-nvidia-h800-cuda-pytorch-index_add-realistic-float16",
-    "opbench-ascend-950pr-simt-v2-index_add-realistic-float16"
+    "opbench-ascend-950pr-simt-v2-index_add-realistic-float16",
+    "opbench-ascend-950pr-simt-v3-adaptivemaxpool3dgrad-realistic-float16",
+    "opbench-ascend-950pr-cannops-adaptivemaxpool3dgrad-realistic-float16",
+    "opbench-nvidia-h800-cuda-pytorch-adaptivemaxpool3dgrad-realistic-float16"
   ]
 }

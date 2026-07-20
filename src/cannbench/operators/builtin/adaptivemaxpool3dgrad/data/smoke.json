@@ -1,0 +1,27 @@
+{
+  "name": "smoke",
+  "cases": [
+    {
+      "case_id": "tiny_global_pool_backward",
+      "family": "global_pool_backward",
+      "input_shape": [1, 2, 2, 2, 2],
+      "output_size": [1, 1, 1],
+      "source_kind": "synthetic_smoke",
+      "source_project": "cannbench",
+      "source_model": "adaptive_max_pool3d_grad_smoke",
+      "source_file": "built-in",
+      "source_op": "aten::adaptive_max_pool3d_backward"
+    },
+    {
+      "case_id": "tiny_partial_pool_backward",
+      "family": "partial_pool_backward",
+      "input_shape": [1, 4, 4, 4, 4],
+      "output_size": [2, 2, 2],
+      "source_kind": "synthetic_smoke",
+      "source_project": "cannbench",
+      "source_model": "adaptive_max_pool3d_grad_smoke",
+      "source_file": "built-in",
+      "source_op": "aten::adaptive_max_pool3d_backward"
+    }
+  ]
+}

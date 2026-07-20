@@ -1,0 +1,38 @@
+{
+  "name": "stress",
+  "cases": [
+    {
+      "case_id": "large_ct_volume_global_pool_backward",
+      "family": "large_medical_volume_global_pool_backward",
+      "input_shape": [1, 64, 64, 96, 96],
+      "output_size": [1, 1, 1],
+      "source_kind": "synthetic_boundary",
+      "source_project": "cannbench",
+      "source_model": "Large3DResNet_CT_Boundary",
+      "source_file": "generated",
+      "source_op": "aten::adaptive_max_pool3d_backward"
+    },
+    {
+      "case_id": "long_video_feature_pool_backward",
+      "family": "long_video_feature_pool_backward",
+      "input_shape": [2, 128, 32, 28, 28],
+      "output_size": [4, 4, 4],
+      "source_kind": "synthetic_boundary",
+      "source_project": "cannbench",
+      "source_model": "LongVideoBackbone_Boundary",
+      "source_file": "generated",
+      "source_op": "aten::adaptive_max_pool3d_backward"
+    },
+    {
+      "case_id": "wide_channel_volume_pool_backward",
+      "family": "wide_channel_volume_pool_backward",
+      "input_shape": [2, 256, 16, 16, 16],
+      "output_size": [2, 2, 2],
+      "source_kind": "synthetic_boundary",
+      "source_project": "cannbench",
+      "source_model": "Wide3DBackbone_Boundary",
+      "source_file": "generated",
+      "source_op": "aten::adaptive_max_pool3d_backward"
+    }
+  ]
+}
