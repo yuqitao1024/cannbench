@@ -70,7 +70,8 @@ def test_sparse_attention_hd128_bridge_uses_hybrid_score_body():
     ).read_text(encoding="utf-8")
 
     assert "launch_sparse_attention_score_" in source
-    assert "launch_sparse_attention_hd128_postprocess_float" in source
+    assert "launch_sparse_attention_hd128_postprocess_decode_direct_float" in source
+    assert "launch_sparse_attention_hd128_postprocess_float" not in source
 
 
 def test_sparse_attention_hd128_bridge_uses_named_tile_constants():
@@ -187,7 +188,8 @@ def test_sparse_attention_hd512_bridge_uses_hybrid_score_body():
 
     assert "launch_sparse_attention_score_gather_hd512_float" in source
     assert "launch_sparse_attention_keys_gather_pack_hd512_float" not in source
-    assert "launch_sparse_attention_hd512_postprocess_float" in source
+    assert "launch_sparse_attention_hd512_postprocess_decode_direct_float" in source
+    assert "launch_sparse_attention_hd512_postprocess_float" not in source
     assert "sparse_attention_forward_family_hd512_hybrid(" in source
 
 
@@ -640,7 +642,8 @@ def test_sparse_attention_hd512_bridge_extracts_tile_helper():
         "aten_dsa_sparse_attention/csrc/sparse_attention.asc"
     ).read_text(encoding="utf-8")
 
-    assert "run_sparse_attention_family_hd512_tile(" in source
+    assert "run_sparse_attention_family_hd512_tile(" not in source
+    assert "run_sparse_attention_family_hd512_fused_tile(" in source
     assert "run_sparse_attention_score_gather_family_hd512_tile(" in source
 
 
@@ -650,7 +653,8 @@ def test_sparse_attention_hd128_bridge_extracts_tile_helper():
         "aten_dsa_sparse_attention/csrc/sparse_attention.asc"
     ).read_text(encoding="utf-8")
 
-    assert "run_sparse_attention_family_hd128_tile(" in source
+    assert "run_sparse_attention_family_hd128_tile(" not in source
+    assert "run_sparse_attention_family_hd128_prefill_fused_tile(" in source
     assert "run_sparse_attention_score_gather_family_hd128_tile(" in source
     assert "run_sparse_attention_family_hd128_decode_direct_tile(" in source
 
@@ -737,7 +741,8 @@ def test_sparse_attention_hd128_postprocess_source_uses_postprocess_symbol_names
         "sparse_attention_postprocess_family_hd128.asc"
     ).read_text(encoding="utf-8")
 
-    assert "sparse_attention_postprocess_family_hd128_kernel" in source
+    assert "sparse_attention_postprocess_family_hd128_decode_direct_kernel" in source
+    assert "sparse_attention_postprocess_family_hd128_kernel" not in source
 
 
 def test_sparse_attention_hd512_postprocess_source_uses_postprocess_symbol_names():
@@ -747,7 +752,8 @@ def test_sparse_attention_hd512_postprocess_source_uses_postprocess_symbol_names
         "sparse_attention_postprocess_family_hd512.asc"
     ).read_text(encoding="utf-8")
 
-    assert "sparse_attention_postprocess_family_hd512_kernel" in source
+    assert "sparse_attention_postprocess_family_hd512_decode_direct_kernel" in source
+    assert "sparse_attention_postprocess_family_hd512_kernel" not in source
 
 
 def test_sparse_attention_hd128_decode_score_fuses_key_gather_but_not_postprocess():
