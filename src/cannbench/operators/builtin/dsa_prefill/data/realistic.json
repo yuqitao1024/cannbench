@@ -90,6 +90,17 @@
       "source_op": "dsa_prefill"
     },
     {
+      "case_id": "deepseek_v4_pro_vllm_prefill_q4096_ctx131072_top1024",
+      "workflow": "dsa_prefill",
+      "phase": "prefill",
+      "family": "prefill_workflow",
+      "source_kind": "derived_official_e2e_test",
+      "source_project": "DeepSeek-V4-Pro+vllm-ascend",
+      "source_model": "DeepSeek-V4-Pro",
+      "source_file": "docs/datasets/dsa-real-sources.md#deepseek-v4-pro-vllm-prefill",
+      "source_op": "dsa_prefill"
+    },
+    {
       "case_id": "glm52_vllm_ascend_prefill_q4096_ctx131072_top2048",
       "workflow": "dsa_prefill",
       "phase": "prefill",

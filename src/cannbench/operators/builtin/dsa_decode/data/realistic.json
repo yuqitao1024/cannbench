@@ -35,6 +35,17 @@
       "source_op": "dsa_decode"
     },
     {
+      "case_id": "deepseek_v4_pro_vllm_decode_b60_q1_ctx131072_top1024",
+      "workflow": "dsa_decode",
+      "phase": "decode",
+      "family": "decode_workflow",
+      "source_kind": "derived_official_e2e_test",
+      "source_project": "DeepSeek-V4-Pro+vllm-ascend",
+      "source_model": "DeepSeek-V4-Pro",
+      "source_file": "docs/datasets/dsa-real-sources.md#deepseek-v4-pro-vllm-decode",
+      "source_op": "dsa_decode"
+    },
+    {
       "case_id": "glm52_vllm_ascend_decode_b3_q3_ctx131072_top2048",
       "workflow": "dsa_decode",
       "phase": "decode",

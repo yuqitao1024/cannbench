@@ -146,6 +146,24 @@
       "source_op": "sparse_attention"
     },
     {
+      "case_id": "deepseek_v4_pro_vllm_prefill_q4096_ctx131072_top1024",
+      "family": "prefill_sparse_attention",
+      "batch": 1,
+      "query_heads": 128,
+      "kv_heads": 1,
+      "query_tokens": 4096,
+      "context_tokens": 131072,
+      "selected_tokens": 1024,
+      "head_dim": 512,
+      "causal": true,
+      "phase": "prefill",
+      "source_kind": "derived_official_e2e_test",
+      "source_project": "DeepSeek-V4-Pro+vllm-ascend",
+      "source_model": "DeepSeek-V4-Pro",
+      "source_file": "docs/datasets/dsa-real-sources.md#deepseek-v4-pro-vllm-prefill",
+      "source_op": "sparse_attention"
+    },
+    {
       "case_id": "glm52_vllm_ascend_prefill_q4096_ctx131072_top2048",
       "family": "prefill_sparse_attention",
       "batch": 1,

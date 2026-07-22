@@ -354,7 +354,7 @@ def test_lightning_indexer_realistic_splits_cover_declared_dsa_families():
     for split in ("realistic_decode", "realistic_prefill"):
         dataset = get_lightning_indexer_dataset(split)
 
-        assert len(dataset.cases) == (4 if split == "realistic_decode" else 9)
+        assert len(dataset.cases) == (5 if split == "realistic_decode" else 10)
         if split == "realistic_decode":
             assert {case.source_kind for case in dataset.cases} == {
                 "paper_shape",
@@ -366,11 +366,13 @@ def test_lightning_indexer_realistic_splits_cover_declared_dsa_families():
                 "DeepSeek",
                 "DeepSeek-V3.2+FlashMLA",
                 "DeepSeek-V4+vllm-ascend",
+                "DeepSeek-V4-Pro+vllm-ascend",
                 "GLM-5.2+vllm-ascend",
             }
             assert {case.source_model for case in dataset.cases} == {
                 "DeepSeek-V3.2",
                 "DeepSeek-V4-Flash",
+                "DeepSeek-V4-Pro",
                 "GLM-5.2",
             }
         else:
@@ -384,11 +386,13 @@ def test_lightning_indexer_realistic_splits_cover_declared_dsa_families():
                 "DeepSeek",
                 "DeepSeek-V3.2+FlashMLA",
                 "DeepSeek-V4+FlashMLA",
+                "DeepSeek-V4-Pro+vllm-ascend",
                 "GLM-5.2+vllm-ascend",
             }
             assert {case.source_model for case in dataset.cases} == {
                 "DeepSeek-V3.2",
                 "DeepSeek-V4-Flash",
+                "DeepSeek-V4-Pro",
                 "GLM-5.2",
             }
         assert {case.source_op for case in dataset.cases} == {"lightning_indexer"}
@@ -523,7 +527,7 @@ def test_sparse_attention_realistic_splits_cover_declared_dsa_families():
     ):
         dataset = get_sparse_attention_dataset(split)
 
-        assert len(dataset.cases) == (4 if split == "realistic_decode" else 9)
+        assert len(dataset.cases) == (5 if split == "realistic_decode" else 10)
         if split == "realistic_decode":
             assert {case.source_kind for case in dataset.cases} == {
                 "paper_shape",
@@ -535,11 +539,13 @@ def test_sparse_attention_realistic_splits_cover_declared_dsa_families():
                 "DeepSeek",
                 "DeepSeek-V3.2+FlashMLA",
                 "DeepSeek-V4+vllm-ascend",
+                "DeepSeek-V4-Pro+vllm-ascend",
                 "GLM-5.2+vllm-ascend",
             }
             assert {case.source_model for case in dataset.cases} == {
                 "DeepSeek-V3.2",
                 "DeepSeek-V4-Flash",
+                "DeepSeek-V4-Pro",
                 "GLM-5.2",
             }
         else:
@@ -553,11 +559,13 @@ def test_sparse_attention_realistic_splits_cover_declared_dsa_families():
                 "DeepSeek",
                 "DeepSeek-V3.2+FlashMLA",
                 "DeepSeek-V4+FlashMLA",
+                "DeepSeek-V4-Pro+vllm-ascend",
                 "GLM-5.2+vllm-ascend",
             }
             assert {case.source_model for case in dataset.cases} == {
                 "DeepSeek-V3.2",
                 "DeepSeek-V4-Flash",
+                "DeepSeek-V4-Pro",
                 "GLM-5.2",
             }
         assert {case.source_op for case in dataset.cases} == {"sparse_attention"}
@@ -625,6 +633,22 @@ def test_sparse_attention_v4pro_moves_to_stress_but_v32_paper_stays_realistic():
             (1, 64, 1, 4096, 32768, 512, 512),
             "DeepSeek-V4-Flash",
             "derived_official_operator_test",
+        ),
+        (
+            "realistic_decode",
+            "deepseek_v4_pro_vllm_decode_b60_q1_ctx131072_top1024",
+            (60, 1, 131072, 64, 128, 1024),
+            (60, 128, 1, 1, 131072, 1024, 512),
+            "DeepSeek-V4-Pro",
+            "derived_official_e2e_test",
+        ),
+        (
+            "realistic_prefill",
+            "deepseek_v4_pro_vllm_prefill_q4096_ctx131072_top1024",
+            (1, 4096, 131072, 64, 128, 1024),
+            (1, 128, 1, 4096, 131072, 1024, 512),
+            "DeepSeek-V4-Pro",
+            "derived_official_e2e_test",
         ),
         (
             "realistic_decode",

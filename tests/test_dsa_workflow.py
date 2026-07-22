@@ -94,6 +94,7 @@ def test_list_dsa_workflows_filters_to_cases_with_matching_component_cases():
         "deepseek_128k_decode_top2048",
         "deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048",
         "deepseek_v4_flash_vllm_decode_b16_q1_ctx32768_top512",
+        "deepseek_v4_pro_vllm_decode_b60_q1_ctx131072_top1024",
         "glm52_vllm_ascend_decode_b3_q3_ctx131072_top2048",
     ]
     assert [workflow.case_id for workflow in prefill_workflows] == [
@@ -111,6 +112,7 @@ def test_dsa_fused_operator_datasets_are_phase_specific_case_selection_sources()
         "deepseek_128k_decode_top2048",
         "deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048",
         "deepseek_v4_flash_vllm_decode_b16_q1_ctx32768_top512",
+        "deepseek_v4_pro_vllm_decode_b60_q1_ctx131072_top1024",
         "glm52_vllm_ascend_decode_b3_q3_ctx131072_top2048",
     ]
     assert [case.case_id for case in prefill_dataset.cases] == [
@@ -127,12 +129,13 @@ def test_realistic_workflow_datasets_are_split_by_fused_operator():
     decode_case_ids = [workflow.case_id for workflow in decode_workflows]
     prefill_case_ids = [workflow.case_id for workflow in prefill_workflows]
 
-    assert len(decode_case_ids) == 4
-    assert len(prefill_case_ids) == 9
+    assert len(decode_case_ids) == 5
+    assert len(prefill_case_ids) == 10
     assert decode_case_ids == [
         "deepseek_128k_decode_top2048",
         "deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048",
         "deepseek_v4_flash_vllm_decode_b16_q1_ctx32768_top512",
+        "deepseek_v4_pro_vllm_decode_b60_q1_ctx131072_top1024",
         "glm52_vllm_ascend_decode_b3_q3_ctx131072_top2048",
     ]
     assert prefill_case_ids == [
@@ -144,6 +147,7 @@ def test_realistic_workflow_datasets_are_split_by_fused_operator():
         "deepseek_128k_prefill_microbatch_top2048",
         "deepseek_v32_flashmla_prefill_q4096_ctx32768_top2048",
         "deepseek_v4_flash_flashmla_prefill_q4096_ctx32768_top512",
+        "deepseek_v4_pro_vllm_prefill_q4096_ctx131072_top1024",
         "glm52_vllm_ascend_prefill_q4096_ctx131072_top2048",
     ]
     assert all(workflow.phase == "decode" for workflow in decode_workflows)
