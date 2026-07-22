@@ -27,22 +27,22 @@ def _require_custom_sparse_attention_op():
 
 
 def _build_npu_inputs(case: SparseAttentionCase, *, seed: int = 7):
-    payload = materialize_sparse_attention_inputs(case, dtype="float16", seed=seed)
+    payload = materialize_sparse_attention_inputs(case, dtype="bfloat16", seed=seed)
     device = ops.torch.device("npu")
     query = ops.torch.tensor(
         materialized_values_to_buffer(payload["query"]),
         device=device,
-        dtype=ops.torch.float16,
+        dtype=ops.torch.bfloat16,
     ).reshape(payload["query_shape"])
     keys = ops.torch.tensor(
         materialized_values_to_buffer(payload["keys"]),
         device=device,
-        dtype=ops.torch.float16,
+        dtype=ops.torch.bfloat16,
     ).reshape(payload["key_shape"])
     values = ops.torch.tensor(
         materialized_values_to_buffer(payload["values"]),
         device=device,
-        dtype=ops.torch.float16,
+        dtype=ops.torch.bfloat16,
     ).reshape(payload["value_shape"])
     indices = ops.torch.tensor(
         payload["indices"],

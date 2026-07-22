@@ -106,7 +106,7 @@ def test_sparse_attention_hd128_prefill_fp16_has_fused_helper():
     assert "launch_sparse_attention_hd128_prefill_fused_float(" in source
 
 
-def test_sparse_attention_hd128_prefill_fp16_avoids_gm_scores_and_old_postprocess():
+def test_sparse_attention_hd128_prefill_bf16_avoids_gm_scores_and_old_postprocess():
     source = Path(
         "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
         "aten_dsa_sparse_attention/csrc/sparse_attention.asc"
@@ -117,13 +117,13 @@ def test_sparse_attention_hd128_prefill_fp16_avoids_gm_scores_and_old_postproces
         "std::tuple<at::Tensor, at::Tensor> sparse_attention_forward_family_hd128_decode_fused(",
     )
 
-    fp16_body = body.split("if (query.scalar_type() == at::ScalarType::Half) {", 1)[1]
-    fp16_body = fp16_body.split("} else {", 1)[0]
+    bf16_body = body.split("if (query.scalar_type() == at::ScalarType::BFloat16) {", 1)[1]
+    bf16_body = bf16_body.split("} else {", 1)[0]
 
-    assert "run_sparse_attention_family_hd128_prefill_fused_tile(" in fp16_body
-    assert "auto scores = at::empty(" not in fp16_body
-    assert "run_sparse_attention_score_gather_family_hd128_tile(" not in fp16_body
-    assert "run_sparse_attention_family_hd128_decode_direct_tile(" not in fp16_body
+    assert "run_sparse_attention_family_hd128_prefill_fused_tile(" in bf16_body
+    assert "auto scores = at::empty(" not in bf16_body
+    assert "run_sparse_attention_score_gather_family_hd128_tile(" not in bf16_body
+    assert "run_sparse_attention_family_hd128_decode_direct_tile(" not in bf16_body
 
 
 def test_sparse_attention_hd128_prefill_fused_score_ready_uses_vector_fixpipe_handshake():
@@ -172,7 +172,7 @@ def test_sparse_attention_hd128_prefill_fused_postprocess_dispatches_via_asc_vf_
     assert "__simt_vf__" in source
 
 
-def test_sparse_attention_hd128_decode_fp16_reuses_fused_helper():
+def test_sparse_attention_hd128_decode_bf16_reuses_fused_helper():
     source = Path(
         "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
         "aten_dsa_sparse_attention/csrc/sparse_attention.asc"
@@ -183,13 +183,13 @@ def test_sparse_attention_hd128_decode_fp16_reuses_fused_helper():
         "std::tuple<at::Tensor, at::Tensor> sparse_attention_forward(",
     )
 
-    fp16_body = body.split("if (query.scalar_type() == at::ScalarType::Half) {", 1)[1]
-    fp16_body = fp16_body.split("} else {", 1)[0]
+    bf16_body = body.split("if (query.scalar_type() == at::ScalarType::BFloat16) {", 1)[1]
+    bf16_body = bf16_body.split("} else {", 1)[0]
 
-    assert "run_sparse_attention_family_hd128_prefill_fused_tile(" in fp16_body
-    assert "auto scores = at::empty(" not in fp16_body
-    assert "run_sparse_attention_score_gather_family_hd128_tile(" not in fp16_body
-    assert "run_sparse_attention_family_hd128_decode_direct_tile(" not in fp16_body
+    assert "run_sparse_attention_family_hd128_prefill_fused_tile(" in bf16_body
+    assert "auto scores = at::empty(" not in bf16_body
+    assert "run_sparse_attention_score_gather_family_hd128_tile(" not in bf16_body
+    assert "run_sparse_attention_family_hd128_decode_direct_tile(" not in bf16_body
 
 
 def test_sparse_attention_hd512_bridge_uses_hybrid_score_body():
@@ -215,7 +215,7 @@ def test_sparse_attention_hd512_fp16_has_fused_helper():
     assert "launch_sparse_attention_hd512_fused_float(" in source
 
 
-def test_sparse_attention_hd512_prefill_fp16_avoids_gm_scores_and_old_postprocess():
+def test_sparse_attention_hd512_prefill_bf16_avoids_gm_scores_and_old_postprocess():
     source = Path(
         "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
         "aten_dsa_sparse_attention/csrc/sparse_attention.asc"
@@ -226,16 +226,16 @@ def test_sparse_attention_hd512_prefill_fp16_avoids_gm_scores_and_old_postproces
         "std::tuple<at::Tensor, at::Tensor> sparse_attention_forward_family_hd128_hybrid(",
     )
 
-    fp16_body = body.split("if (query.scalar_type() == at::ScalarType::Half) {", 1)[1]
-    fp16_body = fp16_body.split("} else {", 1)[0]
+    bf16_body = body.split("if (query.scalar_type() == at::ScalarType::BFloat16) {", 1)[1]
+    bf16_body = bf16_body.split("} else {", 1)[0]
 
-    assert "run_sparse_attention_family_hd512_fused_tile(" in fp16_body
-    assert "auto scores = at::empty(" not in fp16_body
-    assert "run_sparse_attention_score_gather_family_hd512_tile(" not in fp16_body
-    assert "run_sparse_attention_family_hd512_decode_direct_tile(" not in fp16_body
+    assert "run_sparse_attention_family_hd512_fused_tile(" in bf16_body
+    assert "auto scores = at::empty(" not in bf16_body
+    assert "run_sparse_attention_score_gather_family_hd512_tile(" not in bf16_body
+    assert "run_sparse_attention_family_hd512_decode_direct_tile(" not in bf16_body
 
 
-def test_sparse_attention_hd512_decode_fp16_uses_fused_helper():
+def test_sparse_attention_hd512_decode_bf16_uses_fused_helper():
     source = Path(
         "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
         "aten_dsa_sparse_attention/csrc/sparse_attention.asc"
@@ -246,13 +246,13 @@ def test_sparse_attention_hd512_decode_fp16_uses_fused_helper():
         "std::tuple<at::Tensor, at::Tensor> sparse_attention_forward_family_hd128_hybrid(",
     )
 
-    fp16_body = body.split("if (query.scalar_type() == at::ScalarType::Half) {", 1)[1]
-    fp16_body = fp16_body.split("} else {", 1)[0]
+    bf16_body = body.split("if (query.scalar_type() == at::ScalarType::BFloat16) {", 1)[1]
+    bf16_body = bf16_body.split("} else {", 1)[0]
 
-    assert "run_sparse_attention_family_hd512_fused_tile(" in fp16_body
-    assert "auto scores = at::empty(" not in fp16_body
-    assert "run_sparse_attention_score_gather_family_hd512_tile(" not in fp16_body
-    assert "run_sparse_attention_family_hd512_decode_direct_tile(" not in fp16_body
+    assert "run_sparse_attention_family_hd512_fused_tile(" in bf16_body
+    assert "auto scores = at::empty(" not in bf16_body
+    assert "run_sparse_attention_score_gather_family_hd512_tile(" not in bf16_body
+    assert "run_sparse_attention_family_hd512_decode_direct_tile(" not in bf16_body
 
 
 def test_sparse_attention_hd512_fused_score_ready_uses_vector_fixpipe_handshake():
@@ -368,7 +368,7 @@ def test_sparse_attention_score_sources_do_not_use_basic_api_or_crosscore_flags(
             ]
             assert '#include "kernel_common.h"' not in source
             assert "kernel_operator.h" in source
-        assert "AscendC::LocalTensor<half>" in source
+        assert "AscendC::LocalTensor<bfloat16_t>" in source
         assert "AscendC::SetFlag<" in source
         assert "AscendC::WaitFlag<" in source
         assert "CrossCoreSetFlag" in source
@@ -588,6 +588,7 @@ def test_sparse_attention_query_pack_replaces_aten_query_tile_materialization():
     assert "query.narrow(2, query_start, current_query)" not in bridge_source
     assert ".mul(scale)" not in bridge_source
     assert ".to(at::kHalf)" not in bridge_source
+    assert ".to(at::kBFloat16)" not in bridge_source
     assert "run_sparse_attention_query_pack_hd512_tile(" in bridge_source
     assert "run_sparse_attention_query_pack_hd128_tile(" in bridge_source
     assert "query_query_stride" in bridge_source
@@ -605,16 +606,16 @@ def test_sparse_attention_query_pack_replaces_aten_query_tile_materialization():
     assert "score_scale" in hd512_postprocess_source
 
 
-def test_sparse_attention_half_query_fast_path_skips_query_pack():
+def test_sparse_attention_bfloat16_query_fast_path_skips_query_pack():
     bridge_source = Path(
         "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
         "aten_dsa_sparse_attention/csrc/sparse_attention.asc"
     ).read_text(encoding="utf-8")
 
-    assert "query_half" in bridge_source
-    assert "query.scalar_type() == at::ScalarType::Half" in bridge_source
-    assert "query_is_half" in bridge_source
-    assert bridge_source.count("query_half,") == 4
+    assert "query_bfloat" in bridge_source
+    assert "query.scalar_type() == at::ScalarType::BFloat16" in bridge_source
+    assert "query.to(c10::kBFloat16).contiguous()" in bridge_source
+    assert bridge_source.count("query_bfloat,") >= 4
     assert "sparse_attention_forward_family_hd512_decode_fused(" in bridge_source
     assert "sparse_attention_forward_family_hd512_hybrid(" in bridge_source
     assert "sparse_attention_forward_family_hd128_decode_fused(" in bridge_source
@@ -623,6 +624,32 @@ def test_sparse_attention_half_query_fast_path_skips_query_pack():
     assert "score_query_stride = current_query" in bridge_source
     assert "run_sparse_attention_query_pack_hd512_tile(" in bridge_source
     assert "run_sparse_attention_query_pack_hd128_tile(" in bridge_source
+
+
+def test_sparse_attention_bridge_uses_bfloat16_query_tiles():
+    source = Path(
+        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+        "aten_dsa_sparse_attention/csrc/sparse_attention.asc"
+    ).read_text(encoding="utf-8")
+
+    assert "const at::BFloat16* query" in source
+    assert "at::BFloat16* query_tile" in source
+    assert "const_data_ptr<at::BFloat16>()" in source
+    assert "mutable_data_ptr<at::BFloat16>()" in source
+    assert "dtype(c10::kBFloat16)" in source
+
+
+def test_sparse_attention_query_pack_sources_use_bfloat16_storage():
+    for head_dim in (128, 512):
+        source = Path(
+            "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+            "aten_dsa_sparse_attention/csrc/simt/"
+            f"sparse_attention_query_pack_hd{head_dim}.asc"
+        ).read_text(encoding="utf-8")
+
+        assert '#include "simt_api/asc_bf16.h"' in source
+        assert "__gm__ bfloat16_t* query_tile" in source
+        assert "static_cast<bfloat16_t>(query[source_offset])" in source
 
 
 def test_sparse_attention_bridge_does_not_use_aten_gather_path():
@@ -801,7 +828,7 @@ def test_sparse_attention_hd128_score_gather_keeps_gather_on_aiv_side():
         "__global__ __aicore__ void sparse_attention_score_family_hd128_kernel(",
     )
 
-    assert "AscendC::LocalTensor<half>" in source
+    assert "AscendC::LocalTensor<bfloat16_t>" in source
     assert "keys[" in gather_source
     assert "indices[" in gather_source
     assert "keys[" not in aic_source
@@ -821,7 +848,7 @@ def test_sparse_attention_hd512_score_gather_keeps_gather_on_aiv_side():
         "__global__ __aicore__ void sparse_attention_score_gather_family_hd512_kernel(",
     )
 
-    assert "AscendC::LocalTensor<half>" in source
+    assert "AscendC::LocalTensor<bfloat16_t>" in source
     assert "CrossCoreSetFlag<" in source
     assert "CrossCoreWaitFlag<" in source
     assert "keys[" in gather_source
