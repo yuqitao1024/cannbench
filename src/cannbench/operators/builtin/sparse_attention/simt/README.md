@@ -25,6 +25,26 @@ For the current case set in this repository, that means:
 - `57` cases are covered by the implemented `family_hd512` / `family_hd128` paths
 - `11` cases fall back and are not implemented by the current SIMT custom op
 
+## Realistic Case Classification
+
+For the current realistic case sets in this repository:
+
+- `realistic`: `0 / 4` supported
+- `realistic_decode`: `2 / 4` supported
+- `realistic_prefill`: `7 / 9` supported
+
+Supported realistic-family cases:
+
+- `realistic_decode::deepseek_128k_decode_top2048` via `family_hd128`
+- `realistic_decode::deepseek_v4_flash_vllm_decode_b16_q1_ctx32768_top512` via `family_hd512`
+- `realistic_prefill::deepseek_v32_prefill_b1_q128_ctx16384_top2048` via `family_hd128`
+- `realistic_prefill::deepseek_v32_prefill_b1_q128_ctx32768_top2048` via `family_hd128`
+- `realistic_prefill::deepseek_v32_prefill_b1_q128_ctx65536_top2048` via `family_hd128`
+- `realistic_prefill::deepseek_v32_prefill_b1_q128_ctx131072_top2048` via `family_hd128`
+- `realistic_prefill::deepseek_v32_prefill_b2_q128_ctx65536_top2048` via `family_hd128`
+- `realistic_prefill::deepseek_128k_prefill_microbatch_top2048` via `family_hd128`
+- `realistic_prefill::deepseek_v4_flash_flashmla_prefill_q4096_ctx32768_top512` via `family_hd512`
+
 ## Unimplemented Shape Families
 
 The following case groups do not match the current `family_hd512` / `family_hd128`
