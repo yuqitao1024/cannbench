@@ -269,9 +269,9 @@ def test_custom_op_prefill_family_4x64_matches_reference_when_registered(monkeyp
         pytest.skip("torch.npu with an available PrivateUse1 device is required")
 
     device = ops.torch.device("npu")
-    query = ops.torch.randn(1, 2, 4, 64, device=device, dtype=ops.torch.float16)
-    keys = ops.torch.randn(1, 32, 64, device=device, dtype=ops.torch.float16)
-    weights = ops.torch.rand(1, 2, 4, device=device, dtype=ops.torch.float16)
+    query = ops.torch.randn(1, 2, 4, 64, device=device, dtype=ops.torch.bfloat16)
+    keys = ops.torch.randn(1, 32, 64, device=device, dtype=ops.torch.bfloat16)
+    weights = ops.torch.rand(1, 2, 4, device=device, dtype=ops.torch.bfloat16)
 
     reference = ops._prefill_reference(query, keys, weights, top_k=8)
 
@@ -301,9 +301,9 @@ def test_custom_op_prefill_family_64x128_matches_reference_when_registered():
         pytest.skip("torch.npu with an available PrivateUse1 device is required")
 
     device = ops.torch.device("npu")
-    query = ops.torch.randn(1, 2, 64, 128, device=device, dtype=ops.torch.float16)
-    keys = ops.torch.randn(1, 64, 128, device=device, dtype=ops.torch.float16)
-    weights = ops.torch.rand(1, 2, 64, device=device, dtype=ops.torch.float16)
+    query = ops.torch.randn(1, 2, 64, 128, device=device, dtype=ops.torch.bfloat16)
+    keys = ops.torch.randn(1, 64, 128, device=device, dtype=ops.torch.bfloat16)
+    weights = ops.torch.rand(1, 2, 64, device=device, dtype=ops.torch.bfloat16)
 
     reference = ops._prefill_reference(query, keys, weights, top_k=16)
 

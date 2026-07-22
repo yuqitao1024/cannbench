@@ -143,9 +143,9 @@ def test_custom_op_decode_family_64x128_matches_reference_when_registered():
 
     ops.torch.manual_seed(5)
     device = ops.torch.device("npu")
-    query = ops.torch.randn(1, 1, 64, 128, device=device, dtype=ops.torch.float16)
-    keys = ops.torch.randn(1, 64, 128, device=device, dtype=ops.torch.float16)
-    weights = ops.torch.rand(1, 1, 64, device=device, dtype=ops.torch.float16)
+    query = ops.torch.randn(1, 1, 64, 128, device=device, dtype=ops.torch.bfloat16)
+    keys = ops.torch.randn(1, 64, 128, device=device, dtype=ops.torch.bfloat16)
+    weights = ops.torch.rand(1, 1, 64, device=device, dtype=ops.torch.bfloat16)
 
     scores = ops.torch.einsum("bqhd,bcd->bqhc", query, keys)
     scores = ops.torch.relu(scores)
@@ -182,9 +182,9 @@ def test_custom_op_decode_family_4x64_matches_reference_when_registered():
         pytest.skip("torch.npu with an available PrivateUse1 device is required")
 
     device = ops.torch.device("npu")
-    query = ops.torch.randn(1, 1, 4, 64, device=device, dtype=ops.torch.float16)
-    keys = ops.torch.randn(1, 64, 64, device=device, dtype=ops.torch.float16)
-    weights = ops.torch.rand(1, 1, 4, device=device, dtype=ops.torch.float16)
+    query = ops.torch.randn(1, 1, 4, 64, device=device, dtype=ops.torch.bfloat16)
+    keys = ops.torch.randn(1, 64, 64, device=device, dtype=ops.torch.bfloat16)
+    weights = ops.torch.rand(1, 1, 4, device=device, dtype=ops.torch.bfloat16)
 
     reference = ops._decode_reference(query, keys, weights, top_k=16)
 
