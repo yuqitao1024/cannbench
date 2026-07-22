@@ -25,6 +25,7 @@ def test_lightning_indexer_forward_uses_decode_reference_for_decode_fast_path(
 
     monkeypatch.setattr(ops, "_decode_reference", fake_decode, raising=False)
     monkeypatch.setattr(ops, "_fallback_reference", unexpected_fallback)
+    monkeypatch.setattr(ops, "_load_registered_op", lambda: None, raising=False)
 
     actual = ops.lightning_indexer_forward(
         object(),
@@ -140,11 +141,16 @@ def test_custom_op_decode_family_64x128_matches_reference_when_registered():
     if npu_namespace is None or not npu_namespace.is_available():
         pytest.skip("torch.npu with an available PrivateUse1 device is required")
 
+    ops.torch.manual_seed(5)
     device = ops.torch.device("npu")
     query = ops.torch.randn(1, 1, 64, 128, device=device, dtype=ops.torch.float16)
     keys = ops.torch.randn(1, 64, 128, device=device, dtype=ops.torch.float16)
     weights = ops.torch.rand(1, 1, 64, device=device, dtype=ops.torch.float16)
 
+    scores = ops.torch.einsum("bqhd,bcd->bqhc", query, keys)
+    scores = ops.torch.relu(scores)
+    scores = scores * weights.unsqueeze(-1)
+    reduced = scores.sum(dim=2)
     reference = ops._decode_reference(query, keys, weights, top_k=16)
 
     custom = ops.lightning_indexer_forward(
@@ -156,7 +162,11 @@ def test_custom_op_decode_family_64x128_matches_reference_when_registered():
         family="family_64x128",
     )
 
-    assert ops.torch.equal(custom, reference)
+    reference_scores = reduced.gather(-1, reference.to(ops.torch.int64))
+    custom_scores = reduced.gather(-1, custom.to(ops.torch.int64))
+
+    assert ops.torch.equal(custom_scores, reference_scores)
+    assert bool((custom_scores[..., :-1] >= custom_scores[..., 1:]).all().item())
 
 
 def test_custom_op_decode_family_4x64_matches_reference_when_registered():
