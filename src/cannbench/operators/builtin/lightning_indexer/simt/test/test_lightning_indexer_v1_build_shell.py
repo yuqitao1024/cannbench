@@ -33,15 +33,20 @@ def test_lightning_indexer_package_imports_torch_before_loading_cpp_extension():
     )
 
 
-def test_lightning_indexer_prefill_family_4x64_bridge_uses_tensor_api_score_body():
+def test_lightning_indexer_bridge_uses_fused_family_launchers():
     source = Path(
         "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
         "aten_dsa_lightning_indexer/csrc/lightning_indexer.asc"
     ).read_text(encoding="utf-8")
 
-    assert "launch_lightning_indexer_score_4x64_float" in source
+    assert "launch_lightning_indexer_fused_family_4x64_float" in source
+    assert "launch_lightning_indexer_fused_family_64x128_float" in source
+    assert "launch_lightning_indexer_score_4x64_float" not in source
+    assert "launch_lightning_indexer_score_64x128_float" not in source
+    assert "launch_lightning_indexer_prefill_family_4x64_postprocess_float" not in source
     assert (
-        "launch_lightning_indexer_prefill_family_4x64_postprocess_float" in source
+        "launch_lightning_indexer_prefill_family_64x128_postprocess_float"
+        not in source
     )
 
 
@@ -96,31 +101,14 @@ def test_lightning_indexer_prefill_family_4x64_bridge_extracts_tile_postprocess_
     assert "run_lightning_indexer_family_4x64_tile(" in source
 
 
-def test_lightning_indexer_prefill_family_4x64_kernel_is_postprocess_only():
-    source = Path(
+def test_lightning_indexer_split_family_4x64_sources_are_removed():
+    base = Path(
         "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
-        "aten_dsa_lightning_indexer/csrc/simt/"
-        "lightning_indexer_prefill_family_4x64.asc"
-    ).read_text(encoding="utf-8")
-
-    assert (
-        "for (int32_t dim_index = 0; dim_index < kFamily4x64HeadDim; ++dim_index)"
-        not in source
+        "aten_dsa_lightning_indexer/csrc/simt"
     )
-    assert "__simt_vf__" in source
-    assert "asc_vf_call<" in source
 
-
-def test_lightning_indexer_prefill_family_4x64_kernel_updates_existing_topk_state():
-    source = Path(
-        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
-        "aten_dsa_lightning_indexer/csrc/simt/"
-        "lightning_indexer_prefill_family_4x64.asc"
-    ).read_text(encoding="utf-8")
-
-    assert "best_scores" not in source
-    assert "best_indices" not in source
-    assert "context_start" in source
+    assert not (base / "lightning_indexer_score_family_4x64.asc").exists()
+    assert not (base / "lightning_indexer_prefill_family_4x64.asc").exists()
 
 
 def test_lightning_indexer_prefill_family_64x128_bridge_uses_named_tile_constants():
@@ -142,13 +130,14 @@ def test_lightning_indexer_prefill_family_64x128_bridge_extracts_tile_helper():
     assert "run_lightning_indexer_family_64x128_tile(" in source
 
 
-def test_lightning_indexer_prefill_family_64x128_uses_postprocess_kernel():
+def test_lightning_indexer_prefill_family_64x128_uses_decode_fused_path():
     source = Path(
         "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
         "aten_dsa_lightning_indexer/csrc/lightning_indexer.asc"
     ).read_text(encoding="utf-8")
 
-    assert "launch_lightning_indexer_prefill_family_64x128_postprocess_float" in source
+    assert "launch_lightning_indexer_fused_family_64x128_float" in source
+    assert "launch_lightning_indexer_prefill_family_64x128_postprocess_float" not in source
 
 
 def test_lightning_indexer_prefill_family_64x128_fp16_avoids_split_score_then_postprocess():
@@ -187,145 +176,34 @@ def test_lightning_indexer_decode_family_64x128_reuses_fused_helper():
     assert "record_tensor_on_stream(best_indices_tile, npu_stream);" in body
 
 
-def test_lightning_indexer_family_64x128_postprocess_dispatches_via_asc_vf_call():
-    source = Path(
-        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
-        "aten_dsa_lightning_indexer/csrc/simt/"
-        "lightning_indexer_postprocess_family_64x128.asc"
-    ).read_text(encoding="utf-8")
-
-    assert "__simt_vf__" in source
-    assert "asc_vf_call<" in source
-    assert "launch_lightning_indexer_prefill_family_64x128_postprocess_float" in source
-
-
-def test_lightning_indexer_bridge_declares_postprocess_launchers_with_c_linkage():
+def test_lightning_indexer_bridge_declares_only_fused_launchers_with_c_linkage():
     source = Path(
         "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
         "aten_dsa_lightning_indexer/csrc/lightning_indexer.asc"
     ).read_text(encoding="utf-8")
 
+    assert 'extern "C" void launch_lightning_indexer_fused_family_4x64_float' in source
+    assert 'extern "C" void launch_lightning_indexer_fused_family_64x128_float' in source
     assert (
         'extern "C" void launch_lightning_indexer_prefill_family_4x64_postprocess_float'
-        in source
+        not in source
     )
     assert (
         'extern "C" void launch_lightning_indexer_prefill_family_64x128_postprocess_float'
-        in source
-    )
-
-
-def test_lightning_indexer_family_64x128_kernel_is_postprocess_only():
-    source = Path(
-        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
-        "aten_dsa_lightning_indexer/csrc/simt/"
-        "lightning_indexer_postprocess_family_64x128.asc"
-    ).read_text(encoding="utf-8")
-
-    assert (
-        "for (int32_t dim_index = 0; dim_index < kFamily64x128HeadDim; ++dim_index)"
         not in source
     )
-    assert "__simt_vf__" in source
-    assert "asc_vf_call<" in source
+    assert 'extern "C" void launch_lightning_indexer_score_4x64_float' not in source
+    assert 'extern "C" void launch_lightning_indexer_score_64x128_float' not in source
 
 
-def test_lightning_indexer_family_64x128_postprocess_kernel_has_dedicated_filename():
-    source_path = Path(
-        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/setup.py"
+def test_lightning_indexer_split_family_64x128_sources_are_removed():
+    base = Path(
+        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
+        "aten_dsa_lightning_indexer/csrc/simt"
     )
 
-    assert source_path.exists()
-    assert Path(
-        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
-        "aten_dsa_lightning_indexer/csrc/simt/"
-        "lightning_indexer_postprocess_family_64x128.asc"
-    ).exists()
-
-
-def test_lightning_indexer_family_64x128_postprocess_source_uses_postprocess_symbol_names():
-    source = Path(
-        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
-        "aten_dsa_lightning_indexer/csrc/simt/"
-        "lightning_indexer_postprocess_family_64x128.asc"
-    ).read_text(encoding="utf-8")
-
-    assert "lightning_indexer_postprocess_family_64x128_kernel" in source
-
-
-def test_lightning_indexer_score_sources_use_tensor_api():
-    source_4x64 = Path(
-        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
-        "aten_dsa_lightning_indexer/csrc/simt/"
-        "lightning_indexer_score_family_4x64.asc"
-    ).read_text(encoding="utf-8")
-    source_64x128 = Path(
-        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
-        "aten_dsa_lightning_indexer/csrc/simt/"
-        "lightning_indexer_score_family_64x128.asc"
-    ).read_text(encoding="utf-8")
-
-    for source in (source_4x64, source_64x128):
-        assert "tensor_api/tensor.h" in source
-        assert "MakeMmad(" in source
-        assert "__global__ __cube__" in source
-
-
-def test_lightning_indexer_family_64x128_fixpipe_uses_msize_aligned_src_stride():
-    source_64x128 = Path(
-        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
-        "aten_dsa_lightning_indexer/csrc/simt/"
-        "lightning_indexer_score_family_64x128.asc"
-    ).read_text(encoding="utf-8")
-
-    assert "FixpipeParamsC310<AscendC::CO2Layout::ROW_MAJOR> fixpipe_params;" in source_64x128
-    assert "fixpipe_params.mSize = static_cast<uint16_t>(shape.m);" in source_64x128
-    assert "fixpipe_params.srcStride = align_u16(fixpipe_params.mSize, 16);" in source_64x128
-
-
-def test_lightning_indexer_score_sources_record_current_basic_api_usage():
-    source_4x64 = Path(
-        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
-        "aten_dsa_lightning_indexer/csrc/simt/"
-        "lightning_indexer_score_family_4x64.asc"
-    ).read_text(encoding="utf-8")
-    source_64x128 = Path(
-        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
-        "aten_dsa_lightning_indexer/csrc/simt/"
-        "lightning_indexer_score_family_64x128.asc"
-    ).read_text(encoding="utf-8")
-
-    assert '#include "basic_api/kernel_basic_intf.h"' in source_4x64
-    assert '#include "basic_api/kernel_operator_block_sync_intf.h"' in source_4x64
-    assert "AscendC::SetFlag<AscendC::HardEvent::MTE2_MTE1>" in source_4x64
-    assert "AscendC::WaitFlag<AscendC::HardEvent::M_FIX>" in source_4x64
-
-    assert '#include "basic_api/kernel_basic_intf.h"' in source_64x128
-    assert '#include "basic_api/kernel_operator_fixpipe_intf.h"' in source_64x128
-    assert "AscendC::SetFlag<AscendC::HardEvent::MTE2_MTE1>" in source_64x128
-    assert "AscendC::WaitFlag<AscendC::HardEvent::FIX_M>" in source_64x128
-
-
-def test_lightning_indexer_family_4x64_score_uses_per_head_fallback_launch():
-    source = Path(
-        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
-        "aten_dsa_lightning_indexer/csrc/simt/"
-        "lightning_indexer_score_family_4x64.asc"
-    ).read_text(encoding="utf-8")
-
-    assert "for (int64_t head_index = 0; head_index < kHeadCount; ++head_index)" in source
-    assert "TODO: Restore the original m=4 score launch" in source
-
-
-def test_lightning_indexer_family_64x128_score_uses_per_head_fallback_launch():
-    source = Path(
-        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
-        "aten_dsa_lightning_indexer/csrc/simt/"
-        "lightning_indexer_score_family_64x128.asc"
-    ).read_text(encoding="utf-8")
-
-    assert "for (int64_t head_index = 0; head_index < kHeadCount; ++head_index)" in source
-    assert "TODO: Restore the original m=64 score launch" in source
+    assert not (base / "lightning_indexer_score_family_64x128.asc").exists()
+    assert not (base / "lightning_indexer_postprocess_family_64x128.asc").exists()
 
 
 def test_lightning_indexer_family_4x64_fp16_fused_path_does_not_materialize_score_tile():
