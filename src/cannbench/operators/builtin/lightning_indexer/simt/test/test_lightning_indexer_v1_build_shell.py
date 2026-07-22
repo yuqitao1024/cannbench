@@ -326,3 +326,35 @@ def test_lightning_indexer_family_64x128_score_uses_per_head_fallback_launch():
 
     assert "for (int64_t head_index = 0; head_index < kHeadCount; ++head_index)" in source
     assert "TODO: Restore the original m=64 score launch" in source
+
+
+def test_lightning_indexer_family_4x64_fp16_fused_path_does_not_materialize_score_tile():
+    source = Path(
+        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
+        "aten_dsa_lightning_indexer/csrc/lightning_indexer.asc"
+    ).read_text(encoding="utf-8")
+    body = source.split(
+        "at::Tensor lightning_indexer_forward_family_4x64_score_tiled_float(",
+        1,
+    )[1].split(
+        "at::Tensor lightning_indexer_forward_prefill_family_4x64_float(",
+        1,
+    )[0]
+
+    assert "auto score_tile = at::empty(" not in body
+
+
+def test_lightning_indexer_family_64x128_fp16_fused_path_does_not_materialize_score_tile():
+    source = Path(
+        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
+        "aten_dsa_lightning_indexer/csrc/lightning_indexer.asc"
+    ).read_text(encoding="utf-8")
+    body = source.split(
+        "at::Tensor lightning_indexer_forward_decode_family_64x128_float(",
+        1,
+    )[1].split(
+        "at::Tensor lightning_indexer_forward_prefill_family_64x128_float(",
+        1,
+    )[0]
+
+    assert "auto score_tile = at::empty(" not in body
