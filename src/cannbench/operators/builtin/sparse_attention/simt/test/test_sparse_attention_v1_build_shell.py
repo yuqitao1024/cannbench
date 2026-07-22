@@ -63,6 +63,18 @@ def test_sparse_attention_simt_v1_register_has_python_module_entry():
     assert "PyModuleDef_HEAD_INIT" in source
 
 
+def test_sparse_attention_package_imports_torch_before_loading_cpp_extension():
+    source = Path(
+        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+        "aten_dsa_sparse_attention/__init__.py"
+    ).read_text(encoding="utf-8")
+
+    assert 'import_module("torch")' in source
+    assert source.index('import_module("torch")') < source.index(
+        'import_module(f"{__name__}._C")'
+    )
+
+
 def test_sparse_attention_hd128_bridge_uses_hybrid_score_body():
     source = Path(
         "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
