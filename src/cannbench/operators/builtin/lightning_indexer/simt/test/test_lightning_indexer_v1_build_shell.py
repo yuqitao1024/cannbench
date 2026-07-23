@@ -57,8 +57,8 @@ def test_lightning_indexer_prefill_family_4x64_bridge_tiles_context_scores():
     ).read_text(encoding="utf-8")
 
     assert "for (int64_t context_start = 0; context_start < context_count;" in source
-    assert "best_scores = at::full(" in source
-    assert "best_indices = at::zeros(" in source
+    assert "best_scores_tile = at::full(" in source
+    assert "best_indices_tile = at::zeros(" in source
     assert "at::matmul(" not in source
     assert "at::bmm(" not in source
 
@@ -80,6 +80,35 @@ def test_lightning_indexer_prefill_family_4x64_bridge_tiles_queries_too():
 
     assert "for (int64_t query_start = 0; query_start < query_count;" in source
     assert "query.narrow(1, query_start, current_query)" in source
+
+
+def test_lightning_indexer_bridge_flushes_torch_npu_tasks_before_raw_launches():
+    source = Path(
+        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
+        "aten_dsa_lightning_indexer/csrc/lightning_indexer.asc"
+    ).read_text(encoding="utf-8")
+
+    for family in ("4x64", "64x128"):
+        body = source.split(
+            f"void run_lightning_indexer_family_{family}_tile(", 1
+        )[1].split("\n}\n", 1)[0]
+        assert body.index("npu_stream.stream(true)") < body.index(
+            f"launch_lightning_indexer_fused_family_{family}_float("
+        )
+
+
+def test_lightning_indexer_bridge_uses_base_storage_for_query_tiles():
+    source = Path(
+        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
+        "aten_dsa_lightning_indexer/csrc/lightning_indexer.asc"
+    ).read_text(encoding="utf-8")
+
+    assert "query.narrow(1, query_start, current_query).contiguous()" in source
+    assert "keys.narrow(1, context_start, current_context).contiguous()" in source
+    assert "{batch_size, current_query, top_k}" in source
+    assert "query.narrow(0, batch_index, 1)" not in source
+    assert "best_index_tiles.push_back(best_indices_tile);" in source
+    assert "at::cat(best_index_tiles, 1)" in source
 
 
 def test_lightning_indexer_prefill_family_4x64_bridge_uses_named_tile_constants():

@@ -11,32 +11,34 @@ Unsupported shapes use plugin-local fallback.
 
 ## Realistic bf16 validation snapshot
 
-Status below reflects the current custom-op-supported realistic cases validated on Atlas 350 on July 22, 2026.
+Status below reflects the current custom-op-supported realistic cases validated on Atlas 350 on July 23, 2026.
 
 Supported realistic cases are limited to:
 
 - `family_4x64` with `top_k <= 2048`
 - `family_64x128` with `top_k <= 1024`
 
-Current supported realistic case set: `9` cases.
+Current supported realistic case set: `11` cases.
 
 | Dataset | Case ID | Family | Status | Notes |
 | --- | --- | --- | --- | --- |
-| `realistic_prefill` | `deepseek_v32_prefill_b1_q128_ctx16384_top2048` | `family_4x64` | Failed | Top-k tail ordering / merge mismatch. |
-| `realistic_prefill` | `deepseek_v32_prefill_b1_q128_ctx32768_top2048` | `family_4x64` | Passed |  |
-| `realistic_prefill` | `deepseek_v32_prefill_b1_q128_ctx65536_top2048` | `family_4x64` | Passed |  |
-| `realistic_prefill` | `deepseek_v32_prefill_b1_q128_ctx131072_top2048` | `family_4x64` | Failed | Top-k tail ordering / merge mismatch. |
-| `realistic_prefill` | `deepseek_v32_prefill_b2_q128_ctx65536_top2048` | `family_4x64` | Failed | Top-k tail ordering / merge mismatch. |
-| `realistic_prefill` | `deepseek_128k_prefill_microbatch_top2048` | `family_4x64` | Failed | Top-k tail ordering / merge mismatch. |
-| `realistic_prefill` | `deepseek_v4_flash_flashmla_prefill_q4096_ctx32768_top512` | `family_64x128` | Not completed | Re-run was stopped after more than 15 minutes; custom op remained in-flight. |
-| `realistic_decode` | `deepseek_128k_decode_top2048` | `family_4x64` | Passed |  |
-| `realistic_decode` | `deepseek_v4_flash_vllm_decode_b16_q1_ctx32768_top512` | `family_64x128` | Failed | Large mismatch from rank 0 on batch-16 decode. |
+| `realistic_prefill` | `deepseek_v32_prefill_b1_q128_ctx16384_top2048` | `family_4x64` | Passed | Top-k score set and workflow output/LSE pass; 32 equal-score indices differ. |
+| `realistic_prefill` | `deepseek_v32_prefill_b1_q128_ctx32768_top2048` | `family_4x64` | Passed | Top-k score set and workflow output/LSE pass; 15 equal-score indices differ. |
+| `realistic_prefill` | `deepseek_v32_prefill_b1_q128_ctx65536_top2048` | `family_4x64` | Passed | Top-k score set and workflow output/LSE pass; 61 equal-score indices differ. |
+| `realistic_prefill` | `deepseek_v32_prefill_b1_q128_ctx131072_top2048` | `family_4x64` | Passed | Top-k score set and workflow output/LSE pass; 49 equal-score indices differ. |
+| `realistic_prefill` | `deepseek_v32_prefill_b2_q128_ctx65536_top2048` | `family_4x64` | Passed | Top-k score set and workflow output/LSE pass; 61 equal-score indices differ. |
+| `realistic_prefill` | `deepseek_128k_prefill_microbatch_top2048` | `family_4x64` | Passed | Top-k score set and workflow output/LSE pass; 49 equal-score indices differ. |
+| `realistic_prefill` | `deepseek_v4_flash_flashmla_prefill_q4096_ctx32768_top512` | `family_64x128` | Not completed | Full-shape case was not rerun after the task-queue accuracy fix. |
+| `realistic_prefill` | `deepseek_v4_pro_vllm_prefill_q4096_ctx131072_top1024` | `family_64x128` | Not completed | Full-shape run was stopped before completion and was not restarted. |
+| `realistic_decode` | `deepseek_128k_decode_top2048` | `family_4x64` | Passed | Exact indices and workflow output/LSE pass. |
+| `realistic_decode` | `deepseek_v4_flash_vllm_decode_b16_q1_ctx32768_top512` | `family_64x128` | Passed | Exact indices and workflow output/LSE pass. |
+| `realistic_decode` | `deepseek_v4_pro_vllm_decode_b60_q1_ctx131072_top1024` | `family_64x128` | Passed | Exact indices and workflow output/LSE pass. |
 
 At this snapshot:
 
-- Passed: `3 / 9`
-- Failed: `5 / 9`
-- Not completed: `1 / 9`
+- Passed: `9 / 11`
+- Failed: `0 / 11`
+- Not completed: `2 / 11`
 
 ## Unsupported realistic cases
 
