@@ -163,6 +163,30 @@ def test_lightning_indexer_split_family_4x64_sources_are_removed():
     assert not (base / "lightning_indexer_prefill_family_4x64.asc").exists()
 
 
+def test_lightning_indexer_fused_families_use_cube_scores_in_shared_ub():
+    base = Path(
+        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
+        "aten_dsa_lightning_indexer/csrc/simt"
+    )
+
+    for family in ("4x64", "64x128"):
+        source = (base / f"lightning_indexer_fused_family_{family}.asc").read_text(
+            encoding="utf-8"
+        )
+
+        assert '#include "tensor_api/tensor.h"' in source
+        assert "__global__ __aicore__" in source
+        assert "KERNEL_TYPE_MIX_AIC_1_2" in source
+        assert "MakeMmad(" in source
+        assert "Fixpipe<float, float" in source
+        assert "TPosition::LCM" in source
+        assert "kCrossCoreSyncMode = 4" in source
+        assert "CrossCoreSetFlag<kCrossCoreSyncMode" in source
+        assert "CrossCoreWaitFlag<kCrossCoreSyncMode" in source
+        assert "for (int32_t row_start = 0; row_start < total_rows;" in source
+        assert "linear_index += used_core_num" not in source
+
+
 def test_lightning_indexer_prefill_family_64x128_bridge_uses_named_tile_constants():
     source = Path(
         "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
@@ -314,14 +338,15 @@ def test_lightning_indexer_fused_family_4x64_kernel_uses_bfloat16_storage():
 
     assert '#include "simt_api/asc_bf16.h"' in source
     assert "__simt_vf__" in source
-    assert "__gm__ const bfloat16_t* query" in source
-    assert "__gm__ const bfloat16_t* keys" in source
+    assert "__cbuf__ bfloat16_t" in source
+    assert "__ca__ bfloat16_t" in source
+    assert "__cb__ bfloat16_t" in source
     assert "__gm__ const bfloat16_t* weights" in source
-    assert "__global__ __vector__ void lightning_indexer_fused_family_4x64_kernel(" in source
+    assert "__global__ __aicore__ void lightning_indexer_fused_family_4x64_kernel(" in source
     assert "__gm__ const uint16_t* query" in source
     assert "__gm__ const uint16_t* keys" in source
     assert "__gm__ const uint16_t* weights" in source
-    assert "reinterpret_cast<__gm__ const bfloat16_t*>(query)" in source
+    assert "reinterpret_cast<__gm__ bfloat16_t*>(" in source
     assert "reinterpret_cast<const uint16_t*>(query)" in source
     assert "static_cast<float>(static_cast<bfloat16_t>(reduced_score))" in source
     assert "half" not in source
@@ -336,14 +361,15 @@ def test_lightning_indexer_fused_family_64x128_kernel_uses_bfloat16_storage():
 
     assert '#include "simt_api/asc_bf16.h"' in source
     assert "__simt_vf__" in source
-    assert "__gm__ const bfloat16_t* query" in source
-    assert "__gm__ const bfloat16_t* keys" in source
+    assert "__cbuf__ bfloat16_t" in source
+    assert "__ca__ bfloat16_t" in source
+    assert "__cb__ bfloat16_t" in source
     assert "__gm__ const bfloat16_t* weights" in source
-    assert "__global__ __vector__ void lightning_indexer_fused_family_64x128_kernel(" in source
+    assert "__global__ __aicore__ void lightning_indexer_fused_family_64x128_kernel(" in source
     assert "__gm__ const uint16_t* query" in source
     assert "__gm__ const uint16_t* keys" in source
     assert "__gm__ const uint16_t* weights" in source
-    assert "reinterpret_cast<__gm__ const bfloat16_t*>(query)" in source
+    assert "reinterpret_cast<__gm__ bfloat16_t*>(" in source
     assert "reinterpret_cast<const uint16_t*>(query)" in source
     assert "static_cast<float>(static_cast<bfloat16_t>(reduced_score))" in source
     assert "half" not in source
