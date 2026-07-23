@@ -111,6 +111,29 @@ def test_lightning_indexer_bridge_uses_base_storage_for_query_tiles():
     assert "at::cat(best_index_tiles, 1)" in source
 
 
+def test_lightning_indexer_records_query_tile_storage_once_per_query_tile():
+    source = Path(
+        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
+        "aten_dsa_lightning_indexer/csrc/lightning_indexer.asc"
+    ).read_text(encoding="utf-8")
+
+    for family, next_function in (
+        ("4x64", "void run_lightning_indexer_family_64x128_tile("),
+        ("64x128", "at::Tensor lightning_indexer_forward_family_4x64_score_tiled_float("),
+    ):
+        body = source.split(
+            f"void run_lightning_indexer_family_{family}_tile(", 1
+        )[1].split(next_function, 1)[0]
+        assert "record_tensor_on_stream(key_tile, npu_stream);" in body
+        assert "record_tensor_on_stream(query_tile, npu_stream);" not in body
+        assert "record_tensor_on_stream(weights_tile, npu_stream);" not in body
+        assert "record_tensor_on_stream(best_scores_tile, npu_stream);" not in body
+        assert "record_tensor_on_stream(best_indices_tile, npu_stream);" not in body
+
+    assert source.count("record_tensor_on_stream(query_tile, npu_stream);") == 2
+    assert source.count("record_tensor_on_stream(weights_tile, npu_stream);") == 2
+
+
 def test_lightning_indexer_prefill_family_4x64_bridge_uses_named_tile_constants():
     source = Path(
         "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"

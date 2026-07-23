@@ -74,6 +74,7 @@ def test_index_add_simt_v2_defines_shape_specialized_fast_paths():
     assert "TORCH_LIBRARY_IMPL(aten, PrivateUse1" not in cpp_source
     assert "[=, &output]" not in cpp_source
     assert "output_tensor = output" in cpp_source
+    assert "int64_t outer_size;" not in cpp_source
 
     assert "launch_index_add_1d_dim0_half" in cpp_source
     assert "launch_index_add_2d_dim0_half" in cpp_source

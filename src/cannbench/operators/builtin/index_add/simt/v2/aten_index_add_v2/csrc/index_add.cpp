@@ -112,7 +112,6 @@ struct IndexAddShape {
   int64_t self_dim_size;
   int64_t index_size;
   int64_t inner_stride;
-  int64_t outer_size;
   int64_t total_length;
 };
 
@@ -136,7 +135,6 @@ IndexAddShape build_shape(
       self.size(wrapped_dim),
       index_size,
       inner_stride,
-      outer_size,
       outer_size * index_size * inner_stride,
   };
 }
