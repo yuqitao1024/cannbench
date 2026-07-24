@@ -373,3 +373,36 @@ def test_lightning_indexer_fused_family_64x128_kernel_uses_bfloat16_storage():
     assert "reinterpret_cast<const uint16_t*>(query)" in source
     assert "static_cast<float>(static_cast<bfloat16_t>(reduced_score))" in source
     assert "half" not in source
+
+
+def test_lightning_indexer_x128_kernel_supports_runtime_32_or_64_heads():
+    source = Path(
+        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
+        "aten_dsa_lightning_indexer/csrc/simt/"
+        "lightning_indexer_fused_family_64x128.asc"
+    ).read_text(encoding="utf-8")
+
+    assert "constexpr int32_t kFamilyX128MaxHeadCount = 64;" in source
+    assert "int32_t head_count" in source
+    assert "params.m = static_cast<uint16_t>(head_count);" in source
+    assert "fixpipe_params.mSize = static_cast<uint32_t>(head_count);" in source
+    assert "head_index < head_count" in source
+
+
+def test_lightning_indexer_x128_bridge_accepts_top2048_for_both_head_counts():
+    source = Path(
+        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
+        "aten_dsa_lightning_indexer/csrc/lightning_indexer.asc"
+    ).read_text(encoding="utf-8")
+
+    assert "family_32x128 custom op requires top_k <= 2048" in source
+    assert "family_64x128 custom op requires top_k <= 2048" in source
+
+
+def test_lightning_indexer_topk_ub_capacity_covers_top2048_plus_context_tile():
+    source = Path(
+        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
+        "aten_dsa_lightning_indexer/csrc/simt/lightning_indexer_topk_ub.h"
+    ).read_text(encoding="utf-8")
+
+    assert "kFusedTopkSortCapacity = 4096" in source
