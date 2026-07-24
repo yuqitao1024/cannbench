@@ -74,10 +74,12 @@ def _require_custom_sparse_attention_op():
 @pytest.mark.parametrize(
     ("family", "query_shape", "kv_shape", "indices_shape"),
     [
+        ("family_hd256", (1, 64, 3, 256), (1, 1, 32, 256), (1, 3, 16)),
         ("family_hd512", (1, 64, 1, 512), (1, 1, 32, 512), (1, 1, 16)),
+        ("family_hd576", (1, 128, 2, 576), (1, 1, 32, 576), (1, 2, 16)),
         ("family_hd128", (1, 128, 1, 128), (1, 1, 64, 128), (1, 1, 16)),
     ],
-    ids=["decode_hd512", "decode_hd128"],
+    ids=["decode_hd256", "decode_hd512", "decode_hd576", "decode_hd128"],
 )
 def test_custom_op_decode_matches_reference_when_registered(
     family,
@@ -88,9 +90,9 @@ def test_custom_op_decode_matches_reference_when_registered(
     _require_custom_sparse_attention_op()
 
     device = ops.torch.device("npu")
-    query = ops.torch.randn(*query_shape, device=device, dtype=ops.torch.float16)
-    keys = ops.torch.randn(*kv_shape, device=device, dtype=ops.torch.float16)
-    values = ops.torch.randn(*kv_shape, device=device, dtype=ops.torch.float16)
+    query = ops.torch.randn(*query_shape, device=device, dtype=ops.torch.bfloat16)
+    keys = ops.torch.randn(*kv_shape, device=device, dtype=ops.torch.bfloat16)
+    values = ops.torch.randn(*kv_shape, device=device, dtype=ops.torch.bfloat16)
     indices = ops.torch.randint(
         0,
         kv_shape[2],

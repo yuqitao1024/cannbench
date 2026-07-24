@@ -301,6 +301,34 @@ def test_sparse_attention_hd512_fused_postprocess_dispatches_via_asc_vf_call():
     assert "__simt_vf__" in source
 
 
+def test_sparse_attention_wide_fused_kernel_uses_runtime_head_dim():
+    source = _score_source(512)
+    fused = _function_body(
+        source,
+        "sparse_attention_fused_family_hd512_postprocess_vf(",
+        'extern "C" void launch_sparse_attention_score_gather_hd512_float(',
+    )
+
+    assert "const int32_t head_dim = shape.k;" in fused
+    assert "int32_t head_dim" in fused
+    assert "dim_index < head_dim" in fused
+    assert "kHeadDim" not in fused
+
+
+def test_sparse_attention_bridge_routes_all_wide_bf16_families_through_fused_helper():
+    source = Path(
+        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+        "aten_dsa_sparse_attention/csrc/sparse_attention.asc"
+    ).read_text(encoding="utf-8")
+
+    assert 'family == "family_hd256"' in source
+    assert 'family == "family_hd512"' in source
+    assert 'family == "family_hd576"' in source
+    assert "run_sparse_attention_family_hd512_fused_tile(" in source
+    assert "indices.size(2) <= 2048" in source
+    assert "wide-head custom op requires selected_tokens <= 2048" in source
+
+
 def test_sparse_attention_dead_gather_pack_sources_are_removed():
     hd128_gather_pack = Path(
         "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
