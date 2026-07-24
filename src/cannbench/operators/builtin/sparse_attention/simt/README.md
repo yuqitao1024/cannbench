@@ -4,17 +4,21 @@ This directory contains Ascend SIMT integration for `sparse_attention`.
 
 Fast-path families:
 
+- `family_hd256`
 - `family_hd512`
+- `family_hd576`
 - `family_hd128`
 
 Unsupported shapes are rejected by the SIMT plugin path.
 
 ## Current Coverage
 
-The current custom-op fast path covers only these two shape families:
+The current custom-op fast path covers these shape families:
 
-- `family_hd512`: `D = 512`, `KV_H = 1`, `selected_tokens <= 1024`
 - `family_hd128`: `H = 128`, `KV_H = 1`, `D = 128`, `selected_tokens <= 2048`
+- `family_hd256`: `D = 256`, `KV_H = 1`, `selected_tokens <= 2048`
+- `family_hd512`: `D = 512`, `KV_H = 1`, `selected_tokens <= 2048`
+- `family_hd576`: `D = 576`, `KV_H = 1`, `selected_tokens <= 2048`
 
 Additional `family_hd128` decode restriction:
 
@@ -22,28 +26,37 @@ Additional `family_hd128` decode restriction:
 
 For the current case set in this repository, that means:
 
-- `57` cases are covered by the implemented `family_hd512` / `family_hd128` paths
-- `11` cases fall back and are not implemented by the current SIMT custom op
+- `61` cases are covered by the implemented fast paths
+- `7` cases are not implemented by the current SIMT custom op
 
 ## Realistic Case Classification
 
 For the current realistic case sets in this repository:
 
 - `realistic`: `0 / 4` supported
-- `realistic_decode`: `2 / 4` supported
-- `realistic_prefill`: `7 / 9` supported
+- `realistic_decode`: `5 / 5` DSA workflow cases supported
+- `realistic_prefill`: `10 / 10` DSA workflow cases supported
+
+All `15 / 15` current DSA workflow realistic cases route through a sparse-attention
+custom-op fast path. The four HD256/HD576 cases require Atlas 350 validation.
 
 Supported realistic-family cases:
 
 - `realistic_decode::deepseek_128k_decode_top2048` via `family_hd128`
+- `realistic_decode::deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048` via `family_hd576`
 - `realistic_decode::deepseek_v4_flash_vllm_decode_b16_q1_ctx32768_top512` via `family_hd512`
+- `realistic_decode::deepseek_v4_pro_vllm_decode_b60_q1_ctx131072_top1024` via `family_hd512`
+- `realistic_decode::glm52_vllm_ascend_decode_b3_q3_ctx131072_top2048` via `family_hd256`
 - `realistic_prefill::deepseek_v32_prefill_b1_q128_ctx16384_top2048` via `family_hd128`
 - `realistic_prefill::deepseek_v32_prefill_b1_q128_ctx32768_top2048` via `family_hd128`
 - `realistic_prefill::deepseek_v32_prefill_b1_q128_ctx65536_top2048` via `family_hd128`
 - `realistic_prefill::deepseek_v32_prefill_b1_q128_ctx131072_top2048` via `family_hd128`
 - `realistic_prefill::deepseek_v32_prefill_b2_q128_ctx65536_top2048` via `family_hd128`
 - `realistic_prefill::deepseek_128k_prefill_microbatch_top2048` via `family_hd128`
+- `realistic_prefill::deepseek_v32_flashmla_prefill_q4096_ctx32768_top2048` via `family_hd576`
 - `realistic_prefill::deepseek_v4_flash_flashmla_prefill_q4096_ctx32768_top512` via `family_hd512`
+- `realistic_prefill::deepseek_v4_pro_vllm_prefill_q4096_ctx131072_top1024` via `family_hd512`
+- `realistic_prefill::glm52_vllm_ascend_prefill_q4096_ctx131072_top2048` via `family_hd256`
 
 ## Unimplemented Shape Families
 
@@ -71,16 +84,6 @@ This case has `D = 128` and `KV_H = 1`, but `H = 5`, so it does not match the
 current `family_hd128` requirement `H = 128`.
 
 - `realistic::llama4_decode_32760_top2048`
-
-### 4. GLM-style `D = 256` family
-
-- Decode: `realistic_decode::glm52_vllm_ascend_decode_b3_q3_ctx131072_top2048`
-- Prefill: `realistic_prefill::glm52_vllm_ascend_prefill_q4096_ctx131072_top2048`
-
-### 5. FlashMLA-style `D = 576` family
-
-- Decode: `realistic_decode::deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048`
-- Prefill: `realistic_prefill::deepseek_v32_flashmla_prefill_q4096_ctx32768_top2048`
 
 ## Tensor Shapes
 
