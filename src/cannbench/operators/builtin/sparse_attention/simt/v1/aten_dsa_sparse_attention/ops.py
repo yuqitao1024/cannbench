@@ -18,7 +18,12 @@ __all__ = [
 def sparse_attention_forward(query, keys, values, indices, *, phase: str, family: str, causal: bool):
     if phase not in {"prefill", "decode"}:
         raise RuntimeError(f"unsupported sparse_attention phase for custom op wrapper: {phase}")
-    if family not in {"family_hd512", "family_hd128"}:
+    if family not in {
+        "family_hd128",
+        "family_hd256",
+        "family_hd512",
+        "family_hd576",
+    }:
         raise RuntimeError(f"unsupported sparse_attention family for custom op wrapper: {family}")
     custom_op = _load_registered_op()
     if custom_op is None:

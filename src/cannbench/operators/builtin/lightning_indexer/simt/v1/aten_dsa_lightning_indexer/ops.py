@@ -27,9 +27,13 @@ def lightning_indexer_forward(
     if custom_op is not None:
         if phase == "prefill" and family == "family_64x128":
             return custom_op(query, keys, weights, top_k, phase, family)
+        if phase == "prefill" and family == "family_32x128":
+            return custom_op(query, keys, weights, top_k, phase, family)
         if phase == "prefill" and family == "family_4x64":
             return custom_op(query, keys, weights, top_k, phase, family)
         if phase == "decode" and family == "family_64x128":
+            return custom_op(query, keys, weights, top_k, phase, family)
+        if phase == "decode" and family == "family_32x128":
             return custom_op(query, keys, weights, top_k, phase, family)
         if phase == "decode" and family == "family_4x64":
             return custom_op(query, keys, weights, top_k, phase, family)

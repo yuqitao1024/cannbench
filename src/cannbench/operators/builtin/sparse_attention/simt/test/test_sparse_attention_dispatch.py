@@ -36,6 +36,28 @@ def test_select_simt_family_prefers_hd128():
     assert _select_simt_family(payload) == "family_hd128"
 
 
+@pytest.mark.parametrize(
+    ("head_dim", "query_heads", "expected"),
+    [
+        (256, 64, "family_hd256"),
+        (576, 128, "family_hd576"),
+    ],
+)
+def test_select_simt_family_prefers_new_wide_head_families(
+    head_dim,
+    query_heads,
+    expected,
+):
+    payload = {
+        "head_dim": head_dim,
+        "kv_heads": 1,
+        "query_heads": query_heads,
+        "selected_tokens": 2048,
+    }
+
+    assert _select_simt_family(payload) == expected
+
+
 def test_select_simt_family_falls_back_for_unknown_shape():
     payload = {
         "head_dim": 64,

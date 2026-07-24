@@ -85,6 +85,10 @@ def _simt_module_name(version: str | None) -> str | None:
 def _select_simt_family(payload: dict[str, object]) -> str:
     if payload["head_dim"] == 512 and payload["kv_heads"] == 1:
         return "family_hd512"
+    if payload["head_dim"] == 576 and payload["kv_heads"] == 1:
+        return "family_hd576"
+    if payload["head_dim"] == 256 and payload["kv_heads"] == 1:
+        return "family_hd256"
     if (
         payload["head_dim"] == 128
         and payload["kv_heads"] == 1

@@ -59,6 +59,8 @@ def _simt_module_name(version: str | None) -> str | None:
 def _select_simt_family(payload: dict[str, object]) -> str:
     if payload["index_heads"] == 64 and payload["index_dim"] == 128:
         return "family_64x128"
+    if payload["index_heads"] == 32 and payload["index_dim"] == 128:
+        return "family_32x128"
     if payload["index_heads"] == 4 and payload["index_dim"] == 64:
         return "family_4x64"
     return "fallback"

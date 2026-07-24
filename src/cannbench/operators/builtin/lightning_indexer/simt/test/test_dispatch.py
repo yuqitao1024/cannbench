@@ -25,6 +25,17 @@ def test_select_simt_family_prefers_64x128_family():
     assert _select_simt_family(payload) == "family_64x128"
 
 
+def test_select_simt_family_prefers_32x128_family():
+    payload = {
+        "index_heads": 32,
+        "index_dim": 128,
+        "phase": "prefill",
+        "top_k": 2048,
+    }
+
+    assert _select_simt_family(payload) == "family_32x128"
+
+
 def test_select_simt_family_prefers_4x64_family():
     payload = {
         "index_heads": 4,

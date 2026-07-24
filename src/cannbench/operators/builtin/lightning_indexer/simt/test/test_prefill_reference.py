@@ -256,6 +256,33 @@ def test_lightning_indexer_forward_prefers_registered_custom_op_for_prefill_fami
     assert captured == {"top_k": 512, "phase": "prefill", "family": "family_64x128"}
 
 
+def test_lightning_indexer_forward_prefers_registered_custom_op_for_prefill_family_32x128(
+    monkeypatch,
+):
+    captured = {}
+
+    def fake_custom_op(query, keys, weights, top_k, phase, family):
+        del query, keys, weights
+        captured["top_k"] = top_k
+        captured["phase"] = phase
+        captured["family"] = family
+        return "custom"
+
+    monkeypatch.setattr(ops, "_load_registered_op", lambda: fake_custom_op, raising=False)
+
+    actual = ops.lightning_indexer_forward(
+        object(),
+        object(),
+        object(),
+        top_k=2048,
+        phase="prefill",
+        family="family_32x128",
+    )
+
+    assert actual == "custom"
+    assert captured == {"top_k": 2048, "phase": "prefill", "family": "family_32x128"}
+
+
 def test_custom_op_prefill_family_4x64_matches_reference_when_registered(monkeypatch):
     if ops.torch is None:
         pytest.skip("torch is required for exact custom-op correctness coverage")
