@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import cannbench.operators.builtin.sparse_attention as sparse_attention
 from cannbench.core.config import OperatorBenchmarkRequest
 from cannbench.operators.builtin.sparse_attention import (
     _build_simt_callable,
@@ -169,6 +170,69 @@ def test_build_simt_callable_passes_family_to_operator():
     assert captured["indices_shape"] == (1, 1, 2048)
     assert captured["phase"] == "decode"
     assert captured["family"] == "family_hd128"
+    assert captured["causal"] is True
+
+
+def test_build_simt_callable_allocates_large_inputs_directly_on_device(monkeypatch):
+    captured: dict[str, object] = {"allocations": []}
+
+    class FakeTensor:
+        pass
+
+    class FakeTorch:
+        bfloat16 = "bfloat16"
+        long = "long"
+
+        @staticmethod
+        def zeros(shape, *, device, dtype):
+            captured["allocations"].append((shape, device, dtype))
+            return FakeTensor()
+
+    def fake_forward(query, keys, values, indices, *, phase, family, causal):
+        del query, keys, values, indices
+        captured.update(phase=phase, family=family, causal=causal)
+        return "ok"
+
+    monkeypatch.setattr(
+        sparse_attention,
+        "materialize_sparse_attention_inputs",
+        lambda *args, **kwargs: pytest.fail("large inputs must not use host materialization"),
+    )
+    request = OperatorBenchmarkRequest(
+        backend="ascend",
+        op="sparse_attention",
+        dtype="bfloat16",
+        dataset="realistic_decode",
+        case_id="deepseek_v4_pro_vllm_decode_b60_q1_ctx131072_top1024",
+        seed=7,
+        implementation="simt",
+    )
+    ctx = TorchOperatorContext(
+        backend=SimpleNamespace(),
+        torch=FakeTorch(),
+        request=request,
+        case=get_sparse_attention_case(
+            "realistic_decode",
+            "deepseek_v4_pro_vllm_decode_b60_q1_ctx131072_top1024",
+        ),
+        device="npu",
+        dtype="bfloat16",
+        implementation_module=SimpleNamespace(
+            ops=SimpleNamespace(sparse_attention_forward=fake_forward)
+        ),
+    )
+
+    operator = _build_simt_callable(ctx)
+
+    assert operator() == "ok"
+    assert captured["allocations"] == [
+        ((60, 128, 1, 512), "npu", "bfloat16"),
+        ((60, 1, 131072, 512), "npu", "bfloat16"),
+        ((60, 1, 131072, 512), "npu", "bfloat16"),
+        ((60, 1, 1024), "npu", "long"),
+    ]
+    assert captured["phase"] == "decode"
+    assert captured["family"] == "family_hd512"
     assert captured["causal"] is True
 
 

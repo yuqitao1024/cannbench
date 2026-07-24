@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import cannbench.operators.builtin.lightning_indexer as lightning_indexer
 from cannbench.core.config import OperatorBenchmarkRequest
 from cannbench.operators.builtin.lightning_indexer import (
     _build_simt_callable,
@@ -157,6 +158,67 @@ def test_build_simt_callable_passes_family_to_operator():
     assert captured["top_k"] == 2048
     assert captured["phase"] == "decode"
     assert captured["family"] == "family_4x64"
+
+
+def test_build_simt_callable_allocates_large_inputs_directly_on_device(monkeypatch):
+    captured: dict[str, object] = {"allocations": []}
+
+    class FakeTensor:
+        pass
+
+    class FakeTorch:
+        bfloat16 = "bfloat16"
+
+        @staticmethod
+        def zeros(shape, *, device, dtype):
+            captured["allocations"].append((shape, device, dtype))
+            return FakeTensor()
+
+    def fake_forward(query, keys, weights, *, top_k, phase, family):
+        del query, keys, weights
+        captured.update(top_k=top_k, phase=phase, family=family)
+        return "ok"
+
+    monkeypatch.setattr(
+        lightning_indexer,
+        "materialize_lightning_indexer_inputs",
+        lambda *args, **kwargs: pytest.fail("large inputs must not use host materialization"),
+    )
+    request = OperatorBenchmarkRequest(
+        backend="ascend",
+        op="lightning_indexer",
+        dtype="bfloat16",
+        dataset="realistic_decode",
+        case_id="deepseek_v4_pro_vllm_decode_b60_q1_ctx131072_top1024",
+        seed=7,
+        implementation="simt",
+    )
+    ctx = TorchOperatorContext(
+        backend=SimpleNamespace(),
+        torch=FakeTorch(),
+        request=request,
+        case=get_lightning_indexer_case(
+            "realistic_decode",
+            "deepseek_v4_pro_vllm_decode_b60_q1_ctx131072_top1024",
+        ),
+        device="npu",
+        dtype="bfloat16",
+        implementation_module=SimpleNamespace(
+            ops=SimpleNamespace(lightning_indexer_forward=fake_forward)
+        ),
+    )
+
+    operator = _build_simt_callable(ctx)
+
+    assert operator() == "ok"
+    assert captured["allocations"] == [
+        ((60, 1, 64, 128), "npu", "bfloat16"),
+        ((60, 131072, 128), "npu", "bfloat16"),
+        ((60, 1, 64), "npu", "bfloat16"),
+    ]
+    assert captured["top_k"] == 1024
+    assert captured["phase"] == "decode"
+    assert captured["family"] == "family_64x128"
 
 
 def test_plugin_exposes_supported_prefill_and_decode_simt_cases():

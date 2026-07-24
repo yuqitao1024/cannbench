@@ -13,6 +13,8 @@ from cannbench.operators.plugin import OperatorPlugin, ProfileKernelSelectionCon
 from cannbench.operators.spec import OperatorSpec
 from .external import build_cuda_library_callable, build_vllm_ascend_callable
 
+_MAX_HOST_MATERIALIZED_ELEMENTS = 64 * 1024 * 1024
+
 
 def _build_torch_callable(ctx):
     payload = materialize_sparse_attention_inputs(
@@ -101,40 +103,89 @@ def _select_simt_family(payload: dict[str, object]) -> str:
 def _build_simt_callable(ctx):
     if ctx.implementation_module is None:
         raise RuntimeError("sparse_attention SIMT implementation module is not loaded")
-    payload = materialize_sparse_attention_inputs(
-        ctx.case,
-        dtype=ctx.request.dtype,
-        seed=ctx.request.seed,
-    )
+    direct_device_inputs = _requires_direct_device_inputs(ctx.case)
+    if direct_device_inputs:
+        payload = {
+            "query_shape": (
+                ctx.case.batch,
+                ctx.case.query_heads,
+                ctx.case.query_tokens,
+                ctx.case.head_dim,
+            ),
+            "key_shape": (
+                ctx.case.batch,
+                ctx.case.kv_heads,
+                ctx.case.context_tokens,
+                ctx.case.head_dim,
+            ),
+            "value_shape": (
+                ctx.case.batch,
+                ctx.case.kv_heads,
+                ctx.case.context_tokens,
+                ctx.case.head_dim,
+            ),
+            "indices_shape": (
+                ctx.case.batch,
+                ctx.case.query_tokens,
+                ctx.case.selected_tokens,
+            ),
+            "query_heads": ctx.case.query_heads,
+            "kv_heads": ctx.case.kv_heads,
+            "selected_tokens": ctx.case.selected_tokens,
+            "head_dim": ctx.case.head_dim,
+            "causal": ctx.case.causal,
+            "phase": ctx.case.phase,
+        }
+    else:
+        payload = materialize_sparse_attention_inputs(
+            ctx.case,
+            dtype=ctx.request.dtype,
+            seed=ctx.request.seed,
+        )
     family = _select_simt_family(payload)
     if family == "fallback":
         raise RuntimeError(
             "sparse_attention SIMT custom op does not support this shape family"
         )
-    query = ctx.backend._tensor(
-        ctx.torch,
-        materialized_values_to_buffer(payload["query"]),
-        device=ctx.device,
-        dtype=ctx.dtype,
-    ).reshape(payload["query_shape"])
-    keys = ctx.backend._tensor(
-        ctx.torch,
-        materialized_values_to_buffer(payload["keys"]),
-        device=ctx.device,
-        dtype=ctx.dtype,
-    ).reshape(payload["key_shape"])
-    values = ctx.backend._tensor(
-        ctx.torch,
-        materialized_values_to_buffer(payload["values"]),
-        device=ctx.device,
-        dtype=ctx.dtype,
-    ).reshape(payload["value_shape"])
-    indices = ctx.backend._tensor(
-        ctx.torch,
-        payload["indices"],
-        device=ctx.device,
-        dtype=ctx.torch.long,
-    ).reshape(payload["indices_shape"])
+
+    if direct_device_inputs:
+        query = ctx.torch.zeros(
+            payload["query_shape"], device=ctx.device, dtype=ctx.dtype
+        )
+        keys = ctx.torch.zeros(
+            payload["key_shape"], device=ctx.device, dtype=ctx.dtype
+        )
+        values = ctx.torch.zeros(
+            payload["value_shape"], device=ctx.device, dtype=ctx.dtype
+        )
+        indices = ctx.torch.zeros(
+            payload["indices_shape"], device=ctx.device, dtype=ctx.torch.long
+        )
+    else:
+        query = ctx.backend._tensor(
+            ctx.torch,
+            materialized_values_to_buffer(payload["query"]),
+            device=ctx.device,
+            dtype=ctx.dtype,
+        ).reshape(payload["query_shape"])
+        keys = ctx.backend._tensor(
+            ctx.torch,
+            materialized_values_to_buffer(payload["keys"]),
+            device=ctx.device,
+            dtype=ctx.dtype,
+        ).reshape(payload["key_shape"])
+        values = ctx.backend._tensor(
+            ctx.torch,
+            materialized_values_to_buffer(payload["values"]),
+            device=ctx.device,
+            dtype=ctx.dtype,
+        ).reshape(payload["value_shape"])
+        indices = ctx.backend._tensor(
+            ctx.torch,
+            payload["indices"],
+            device=ctx.device,
+            dtype=ctx.torch.long,
+        ).reshape(payload["indices_shape"])
     return lambda: ctx.implementation_module.ops.sparse_attention_forward(
         query,
         keys,
@@ -144,6 +195,15 @@ def _build_simt_callable(ctx):
         family=family,
         causal=bool(payload["causal"]),
     )
+
+
+def _requires_direct_device_inputs(case) -> bool:
+    query_size = (
+        case.batch * case.query_heads * case.query_tokens * case.head_dim
+    )
+    kv_size = case.batch * case.kv_heads * case.context_tokens * case.head_dim
+    indices_size = case.batch * case.query_tokens * case.selected_tokens
+    return max(query_size, kv_size, indices_size) > _MAX_HOST_MATERIALIZED_ELEMENTS
 
 
 def _build_profile_kernel_selection(ctx: ProfileKernelSelectionContext):

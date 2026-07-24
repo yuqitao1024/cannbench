@@ -11,6 +11,8 @@ from cannbench.operators.plugin import OperatorPlugin, ProfileKernelSelectionCon
 from cannbench.operators.spec import OperatorSpec
 from .external import build_cuda_library_callable, build_vllm_ascend_callable
 
+_MAX_HOST_MATERIALIZED_ELEMENTS = 64 * 1024 * 1024
+
 
 def _build_torch_callable(ctx):
     payload = materialize_lightning_indexer_inputs(
@@ -69,30 +71,63 @@ def _select_simt_family(payload: dict[str, object]) -> str:
 def _build_simt_callable(ctx):
     if ctx.implementation_module is None:
         raise RuntimeError("lightning_indexer SIMT implementation module is not loaded")
-    payload = materialize_lightning_indexer_inputs(
-        ctx.case,
-        dtype=ctx.request.dtype,
-        seed=ctx.request.seed,
-    )
+    if _requires_direct_device_inputs(ctx.case):
+        payload = {
+            "query_shape": (
+                ctx.case.batch,
+                ctx.case.query_tokens,
+                ctx.case.index_heads,
+                ctx.case.index_dim,
+            ),
+            "key_shape": (
+                ctx.case.batch,
+                ctx.case.context_tokens,
+                ctx.case.index_dim,
+            ),
+            "weight_shape": (
+                ctx.case.batch,
+                ctx.case.query_tokens,
+                ctx.case.index_heads,
+            ),
+            "index_heads": ctx.case.index_heads,
+            "index_dim": ctx.case.index_dim,
+            "top_k": ctx.case.top_k,
+            "phase": ctx.case.phase,
+        }
+        query = ctx.torch.zeros(
+            payload["query_shape"], device=ctx.device, dtype=ctx.dtype
+        )
+        keys = ctx.torch.zeros(
+            payload["key_shape"], device=ctx.device, dtype=ctx.dtype
+        )
+        weights = ctx.torch.zeros(
+            payload["weight_shape"], device=ctx.device, dtype=ctx.dtype
+        )
+    else:
+        payload = materialize_lightning_indexer_inputs(
+            ctx.case,
+            dtype=ctx.request.dtype,
+            seed=ctx.request.seed,
+        )
+        query = ctx.backend._tensor(
+            ctx.torch,
+            materialized_values_to_buffer(payload["query"]),
+            device=ctx.device,
+            dtype=ctx.dtype,
+        ).reshape(payload["query_shape"])
+        keys = ctx.backend._tensor(
+            ctx.torch,
+            materialized_values_to_buffer(payload["keys"]),
+            device=ctx.device,
+            dtype=ctx.dtype,
+        ).reshape(payload["key_shape"])
+        weights = ctx.backend._tensor(
+            ctx.torch,
+            materialized_values_to_buffer(payload["weights"]),
+            device=ctx.device,
+            dtype=ctx.dtype,
+        ).reshape(payload["weight_shape"])
     family = _select_simt_family(payload)
-    query = ctx.backend._tensor(
-        ctx.torch,
-        materialized_values_to_buffer(payload["query"]),
-        device=ctx.device,
-        dtype=ctx.dtype,
-    ).reshape(payload["query_shape"])
-    keys = ctx.backend._tensor(
-        ctx.torch,
-        materialized_values_to_buffer(payload["keys"]),
-        device=ctx.device,
-        dtype=ctx.dtype,
-    ).reshape(payload["key_shape"])
-    weights = ctx.backend._tensor(
-        ctx.torch,
-        materialized_values_to_buffer(payload["weights"]),
-        device=ctx.device,
-        dtype=ctx.dtype,
-    ).reshape(payload["weight_shape"])
     return lambda: ctx.implementation_module.ops.lightning_indexer_forward(
         query,
         keys,
@@ -101,6 +136,15 @@ def _build_simt_callable(ctx):
         phase=str(payload["phase"]),
         family=family,
     )
+
+
+def _requires_direct_device_inputs(case) -> bool:
+    sizes = (
+        case.batch * case.query_tokens * case.index_heads * case.index_dim,
+        case.batch * case.context_tokens * case.index_dim,
+        case.batch * case.query_tokens * case.index_heads,
+    )
+    return max(sizes) > _MAX_HOST_MATERIALIZED_ELEMENTS
 
 
 def _build_profile_kernel_selection(ctx: ProfileKernelSelectionContext):
