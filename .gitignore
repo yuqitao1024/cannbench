@@ -6,6 +6,7 @@ runs/
 uploads/
 docs/superpowers/
 .superpowers/
+.worktrees/
 web/node_modules/
 web/dist/
 web/coverage/
