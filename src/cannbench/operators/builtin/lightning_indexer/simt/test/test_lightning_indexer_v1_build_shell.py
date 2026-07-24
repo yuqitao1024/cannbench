@@ -50,17 +50,26 @@ def test_lightning_indexer_bridge_uses_fused_family_launchers():
     )
 
 
-def test_lightning_indexer_prefill_family_4x64_bridge_tiles_context_scores():
+def test_lightning_indexer_family_4x64_bridge_submits_one_full_shape_launch():
     source = Path(
         "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
         "aten_dsa_lightning_indexer/csrc/lightning_indexer.asc"
     ).read_text(encoding="utf-8")
+    body = source.split(
+        "at::Tensor lightning_indexer_forward_family_4x64_score_tiled_float(",
+        1,
+    )[1].split(
+        "at::Tensor lightning_indexer_forward_prefill_family_4x64_float(",
+        1,
+    )[0]
 
-    assert "for (int64_t context_start = 0; context_start < context_count;" in source
-    assert "best_scores_tile = at::full(" in source
-    assert "best_indices_tile = at::zeros(" in source
-    assert "at::matmul(" not in source
-    assert "at::bmm(" not in source
+    assert body.count("run_lightning_indexer_family_4x64_tile(") == 1
+    assert "for (int64_t query_start" not in body
+    assert "for (int64_t context_start" not in body
+    assert ".narrow(" not in body
+    assert "at::cat(" not in body
+    assert "auto best_scores = at::full(" in body
+    assert "auto best_indices = at::zeros(" in body
 
 
 def test_lightning_indexer_prefill_family_4x64_bridge_avoids_key_repeat():
@@ -72,14 +81,14 @@ def test_lightning_indexer_prefill_family_4x64_bridge_avoids_key_repeat():
     assert ".repeat({query_count, 1, 1})" not in source
 
 
-def test_lightning_indexer_prefill_family_4x64_bridge_tiles_queries_too():
+def test_lightning_indexer_prefill_family_4x64_bridge_has_no_host_tiling():
     source = Path(
         "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
         "aten_dsa_lightning_indexer/csrc/lightning_indexer.asc"
     ).read_text(encoding="utf-8")
 
-    assert "for (int64_t query_start = 0; query_start < query_count;" in source
-    assert "query.narrow(1, query_start, current_query)" in source
+    assert "for (int64_t query_start = 0; query_start < query_count;" not in source
+    assert "for (int64_t context_start = 0; context_start < context_count;" not in source
 
 
 def test_lightning_indexer_bridge_flushes_torch_npu_tasks_before_raw_launches():
@@ -97,51 +106,49 @@ def test_lightning_indexer_bridge_flushes_torch_npu_tasks_before_raw_launches():
         )
 
 
-def test_lightning_indexer_bridge_uses_base_storage_for_query_tiles():
+def test_lightning_indexer_bridge_uses_full_input_storage():
     source = Path(
         "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
         "aten_dsa_lightning_indexer/csrc/lightning_indexer.asc"
     ).read_text(encoding="utf-8")
 
-    assert "query.narrow(1, query_start, current_query).contiguous()" in source
-    assert "keys.narrow(1, context_start, current_context).contiguous()" in source
-    assert "{batch_size, current_query, top_k}" in source
-    assert "query.narrow(0, batch_index, 1)" not in source
-    assert "best_index_tiles.push_back(best_indices_tile);" in source
-    assert "at::cat(best_index_tiles, 1)" in source
+    assert ".narrow(" not in source
+    assert "{batch_size, query_count, top_k}" in source
+    assert "best_index_tiles" not in source
+    assert "at::cat(" not in source
 
 
-def test_lightning_indexer_records_query_tile_storage_once_per_query_tile():
+def test_lightning_indexer_records_full_shape_storage_for_raw_launches():
     source = Path(
         "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
         "aten_dsa_lightning_indexer/csrc/lightning_indexer.asc"
     ).read_text(encoding="utf-8")
 
-    for family, next_function in (
-        ("4x64", "void run_lightning_indexer_family_64x128_tile("),
-        ("64x128", "at::Tensor lightning_indexer_forward_family_4x64_score_tiled_float("),
-    ):
-        body = source.split(
-            f"void run_lightning_indexer_family_{family}_tile(", 1
-        )[1].split(next_function, 1)[0]
-        assert "record_tensor_on_stream(key_tile, npu_stream);" in body
-        assert "record_tensor_on_stream(query_tile, npu_stream);" not in body
-        assert "record_tensor_on_stream(weights_tile, npu_stream);" not in body
-        assert "record_tensor_on_stream(best_scores_tile, npu_stream);" not in body
-        assert "record_tensor_on_stream(best_indices_tile, npu_stream);" not in body
+    family_4x64 = source.split(
+        "void run_lightning_indexer_family_4x64_tile(", 1
+    )[1].split("void run_lightning_indexer_family_64x128_tile(", 1)[0]
+    for tensor in ("query", "keys", "weights", "best_scores", "best_indices"):
+        assert f"record_tensor_on_stream({tensor}, npu_stream);" in family_4x64
 
-    assert source.count("record_tensor_on_stream(query_tile, npu_stream);") == 2
-    assert source.count("record_tensor_on_stream(weights_tile, npu_stream);") == 2
+    family_64x128 = source.split(
+        "void run_lightning_indexer_family_64x128_tile(", 1
+    )[1].split(
+        "at::Tensor lightning_indexer_forward_family_4x64_score_tiled_float(", 1
+    )[0]
+    for tensor in ("query", "keys", "weights", "best_scores", "best_indices"):
+        assert f"record_tensor_on_stream({tensor}, npu_stream);" in family_64x128
 
 
-def test_lightning_indexer_prefill_family_4x64_bridge_uses_named_tile_constants():
+def test_lightning_indexer_bridge_has_no_stale_host_tile_constants():
     source = Path(
         "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
         "aten_dsa_lightning_indexer/csrc/lightning_indexer.asc"
     ).read_text(encoding="utf-8")
 
-    assert "constexpr int64_t kFamily4x64QueryTile" in source
-    assert "constexpr int64_t kFamily4x64ContextTile" in source
+    assert "constexpr int64_t kFamily4x64QueryTile" not in source
+    assert "constexpr int64_t kFamily4x64ContextTile" not in source
+    assert "constexpr int64_t kFamily64x128QueryTile" not in source
+    assert "constexpr int64_t kFamily64x128ContextTile" not in source
 
 
 def test_lightning_indexer_prefill_family_4x64_bridge_extracts_tile_postprocess_helper():
@@ -183,18 +190,8 @@ def test_lightning_indexer_fused_families_use_cube_scores_in_shared_ub():
         assert "kCrossCoreSyncMode = 4" in source
         assert "CrossCoreSetFlag<kCrossCoreSyncMode" in source
         assert "CrossCoreWaitFlag<kCrossCoreSyncMode" in source
-        assert "for (int32_t row_start = 0; row_start < total_rows;" in source
-        assert "linear_index += used_core_num" not in source
-
-
-def test_lightning_indexer_prefill_family_64x128_bridge_uses_named_tile_constants():
-    source = Path(
-        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
-        "aten_dsa_lightning_indexer/csrc/lightning_indexer.asc"
-    ).read_text(encoding="utf-8")
-
-    assert "constexpr int64_t kFamily64x128QueryTile" in source
-    assert "constexpr int64_t kFamily64x128ContextTile = 128;" in source
+        assert "for (int32_t row_start = 0; row_start < total_rows;" not in source
+        assert "linear_index += used_core_num" in source
 
 
 def test_lightning_indexer_prefill_family_64x128_bridge_extracts_tile_helper():
@@ -248,8 +245,103 @@ def test_lightning_indexer_decode_family_64x128_reuses_fused_helper():
     )[0]
 
     assert "run_lightning_indexer_family_64x128_tile(" in body
-    assert "record_tensor_on_stream(best_scores_tile, npu_stream);" in body
-    assert "record_tensor_on_stream(best_indices_tile, npu_stream);" in body
+    assert "auto best_scores = at::full(" in body
+    assert "auto best_indices = at::zeros(" in body
+    assert "return best_indices;" in body
+
+
+def test_lightning_indexer_family_64x128_bridge_submits_one_full_shape_launch():
+    source = Path(
+        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
+        "aten_dsa_lightning_indexer/csrc/lightning_indexer.asc"
+    ).read_text(encoding="utf-8")
+    body = source.split(
+        "at::Tensor lightning_indexer_forward_decode_family_64x128_float(",
+        1,
+    )[1].split(
+        "at::Tensor lightning_indexer_forward_prefill_family_64x128_float(",
+        1,
+    )[0]
+
+    assert body.count("run_lightning_indexer_family_64x128_tile(") == 1
+    assert "for (int64_t query_start" not in body
+    assert "for (int64_t context_start" not in body
+    assert "query.narrow(" not in body
+    assert "keys.narrow(" not in body
+
+
+def test_lightning_indexer_family_64x128_kernel_owns_row_and_context_loops():
+    source = Path(
+        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
+        "aten_dsa_lightning_indexer/csrc/simt/"
+        "lightning_indexer_fused_family_64x128.asc"
+    ).read_text(encoding="utf-8")
+    launcher = source.split(
+        'extern "C" void launch_lightning_indexer_fused_family_64x128_float(',
+        1,
+    )[1]
+
+    assert "linear_index += used_core_num" in source
+    assert "context_start += kContextTileCapacity" in source
+    assert launcher.count("lightning_indexer_fused_family_64x128_kernel") == 1
+    assert "for (int32_t row_start" not in launcher
+
+
+def test_lightning_indexer_family_64x128_serializes_l0_reuse_between_rows():
+    source = Path(
+        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
+        "aten_dsa_lightning_indexer/csrc/simt/"
+        "lightning_indexer_fused_family_64x128.asc"
+    ).read_text(encoding="utf-8")
+    aic = source.split(
+        "__aicore__ inline void lightning_indexer_fused_family_64x128_aic(",
+        1,
+    )[1].split(
+        "__aicore__ inline void lightning_indexer_fused_family_64x128_aiv(",
+        1,
+    )[0]
+
+    reverse_event = "AscendC::HardEvent::M_MTE1>(EVENT_ID0)"
+    assert aic.count(f"SetFlag<{reverse_event}") == 2
+    assert aic.count(f"WaitFlag<{reverse_event}") == 3
+
+
+def test_lightning_indexer_family_64x128_serializes_l1_reuse_between_tiles():
+    source = Path(
+        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
+        "aten_dsa_lightning_indexer/csrc/simt/"
+        "lightning_indexer_fused_family_64x128.asc"
+    ).read_text(encoding="utf-8")
+    aic = source.split(
+        "__aicore__ inline void lightning_indexer_fused_family_64x128_aic(",
+        1,
+    )[1].split(
+        "__aicore__ inline void lightning_indexer_fused_family_64x128_aiv(",
+        1,
+    )[0]
+
+    reverse_event = "AscendC::HardEvent::MTE1_MTE2>(EVENT_ID0)"
+    assert aic.count(f"SetFlag<{reverse_event}") == 3
+    assert aic.count(f"WaitFlag<{reverse_event}") == 3
+
+
+def test_lightning_indexer_family_64x128_serializes_l0c_reuse_between_tiles():
+    source = Path(
+        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
+        "aten_dsa_lightning_indexer/csrc/simt/"
+        "lightning_indexer_fused_family_64x128.asc"
+    ).read_text(encoding="utf-8")
+    aic = source.split(
+        "__aicore__ inline void lightning_indexer_fused_family_64x128_aic(",
+        1,
+    )[1].split(
+        "__aicore__ inline void lightning_indexer_fused_family_64x128_aiv(",
+        1,
+    )[0]
+
+    reverse_event = "AscendC::HardEvent::FIX_M>(EVENT_ID0)"
+    assert aic.count(f"SetFlag<{reverse_event}") == 2
+    assert aic.count(f"WaitFlag<{reverse_event}") == 2
 
 
 def test_lightning_indexer_bridge_declares_only_fused_launchers_with_c_linkage():

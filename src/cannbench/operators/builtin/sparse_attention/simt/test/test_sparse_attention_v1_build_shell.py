@@ -118,7 +118,7 @@ def test_sparse_attention_hd128_prefill_bf16_avoids_gm_scores_and_old_postproces
     )
 
     bf16_body = body.split("if (query.scalar_type() == at::ScalarType::BFloat16) {", 1)[1]
-    bf16_body = bf16_body.split("} else {", 1)[0]
+    bf16_body = bf16_body.split("}\n\n  for (int64_t query_start", 1)[0]
 
     assert "run_sparse_attention_family_hd128_prefill_fused_tile(" in bf16_body
     assert "auto scores = at::empty(" not in bf16_body
@@ -184,7 +184,7 @@ def test_sparse_attention_hd128_decode_bf16_reuses_fused_helper():
     )
 
     bf16_body = body.split("if (query.scalar_type() == at::ScalarType::BFloat16) {", 1)[1]
-    bf16_body = bf16_body.split("} else {", 1)[0]
+    bf16_body = bf16_body.split("}\n\n  for (int64_t query_start", 1)[0]
 
     assert "run_sparse_attention_family_hd128_prefill_fused_tile(" in bf16_body
     assert "auto scores = at::empty(" not in bf16_body
@@ -227,7 +227,7 @@ def test_sparse_attention_hd512_prefill_bf16_avoids_gm_scores_and_old_postproces
     )
 
     bf16_body = body.split("if (query.scalar_type() == at::ScalarType::BFloat16) {", 1)[1]
-    bf16_body = bf16_body.split("} else {", 1)[0]
+    bf16_body = bf16_body.split("}\n\n  for (int64_t query_start", 1)[0]
 
     assert "run_sparse_attention_family_hd512_fused_tile(" in bf16_body
     assert "auto scores = at::empty(" not in bf16_body
@@ -247,12 +247,67 @@ def test_sparse_attention_hd512_decode_bf16_uses_fused_helper():
     )
 
     bf16_body = body.split("if (query.scalar_type() == at::ScalarType::BFloat16) {", 1)[1]
-    bf16_body = bf16_body.split("} else {", 1)[0]
+    bf16_body = bf16_body.split("}\n\n  for (int64_t query_start", 1)[0]
 
     assert "run_sparse_attention_family_hd512_fused_tile(" in bf16_body
     assert "auto scores = at::empty(" not in bf16_body
     assert "run_sparse_attention_score_gather_family_hd512_tile(" not in bf16_body
     assert "run_sparse_attention_family_hd512_decode_direct_tile(" not in bf16_body
+
+
+def test_sparse_attention_bf16_fused_paths_submit_before_host_query_loop():
+    source = Path(
+        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+        "aten_dsa_sparse_attention/csrc/sparse_attention.asc"
+    ).read_text(encoding="utf-8")
+    functions = (
+        "sparse_attention_forward_family_hd512_hybrid",
+        "sparse_attention_forward_family_hd512_decode_fused",
+        "sparse_attention_forward_family_hd128_hybrid",
+        "sparse_attention_forward_family_hd128_decode_fused",
+    )
+
+    for index, function in enumerate(functions):
+        end_marker = (
+            f"std::tuple<at::Tensor, at::Tensor> {functions[index + 1]}("
+            if index + 1 < len(functions)
+            else "std::tuple<at::Tensor, at::Tensor> sparse_attention_forward("
+        )
+        body = _function_body(
+            source,
+            f"std::tuple<at::Tensor, at::Tensor> {function}(",
+            end_marker,
+        )
+        bf16_branch = body.split(
+            "if (query.scalar_type() == at::ScalarType::BFloat16) {",
+            1,
+        )[1].split("for (int64_t query_start", 1)[0]
+
+        assert "return {output, lse};" in bf16_branch
+        assert body.index("if (query.scalar_type() == at::ScalarType::BFloat16)") < body.index(
+            "for (int64_t query_start"
+        )
+
+
+def test_sparse_attention_fused_launchers_submit_one_persistent_kernel():
+    for head_dim, launcher_name, kernel_name in (
+        (
+            128,
+            "launch_sparse_attention_hd128_prefill_fused_float",
+            "sparse_attention_prefill_fused_family_hd128_kernel",
+        ),
+        (
+            512,
+            "launch_sparse_attention_hd512_fused_float",
+            "sparse_attention_fused_family_hd512_kernel",
+        ),
+    ):
+        source = _score_source(head_dim)
+        launcher = source.split(f'extern "C" void {launcher_name}(', 1)[1]
+
+        assert launcher.count(f"{kernel_name}<<<") == 1
+        assert "for (int64_t row_start" not in launcher
+        assert "row_index += shape.used_core_num" in source
 
 
 def test_sparse_attention_hd512_fused_score_ready_uses_vector_fixpipe_handshake():
@@ -648,7 +703,6 @@ def test_sparse_attention_bfloat16_query_fast_path_skips_query_pack():
     assert "sparse_attention_forward_family_hd512_hybrid(" in bridge_source
     assert "sparse_attention_forward_family_hd128_decode_fused(" in bridge_source
     assert "sparse_attention_forward_family_hd128_hybrid(" in bridge_source
-    assert "score_query_stride = query_tokens" in bridge_source
     assert "score_query_stride = current_query" in bridge_source
     assert "run_sparse_attention_query_pack_hd512_tile(" in bridge_source
     assert "run_sparse_attention_query_pack_hd128_tile(" in bridge_source
