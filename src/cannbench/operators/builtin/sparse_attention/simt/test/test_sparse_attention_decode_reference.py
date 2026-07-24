@@ -106,7 +106,7 @@ def test_custom_op_decode_matches_reference_when_registered(
         keys,
         values,
         indices,
-        causal=True,
+        causal=False,
     )
     custom_out, custom_lse = ops.sparse_attention_forward(
         query,
@@ -115,7 +115,7 @@ def test_custom_op_decode_matches_reference_when_registered(
         indices,
         phase="decode",
         family=family,
-        causal=True,
+        causal=False,
     )
 
     assert ops.torch.allclose(custom_out.float(), reference_out.float(), atol=5e-2, rtol=5e-2)

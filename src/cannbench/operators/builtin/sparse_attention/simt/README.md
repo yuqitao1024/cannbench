@@ -38,7 +38,16 @@ For the current realistic case sets in this repository:
 - `realistic_prefill`: `10 / 10` DSA workflow cases supported
 
 All `15 / 15` current DSA workflow realistic cases route through a sparse-attention
-custom-op fast path. The four HD256/HD576 cases require Atlas 350 validation.
+custom-op fast path.
+
+Atlas 350 validation for the four newly routed workflows:
+
+| Phase | Case ID | Family | Status | Accuracy / runtime |
+| --- | --- | --- | --- | --- |
+| Decode | `deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048` | `family_hd576` | Passed | Full custom-op output completed in 1.883s; sampled output max abs `0.000977`, LSE `0.000280`. |
+| Decode | `glm52_vllm_ascend_decode_b3_q3_ctx131072_top2048` | `family_hd256` | Passed | Full custom-op output completed in 0.967s; sampled output max abs `0.000977`, LSE `0.000354`. |
+| Prefill | `glm52_vllm_ascend_prefill_q4096_ctx131072_top2048` | `family_hd256` | Sampled pass | Full custom-op output completed in 412.221s; sampled output max abs `0.004883`, LSE `0.000896`. |
+| Prefill | `deepseek_v32_flashmla_prefill_q4096_ctx32768_top2048` | `family_hd576` | Full run not completed | Full-shape run was stopped because current 5-core row batching projects to about 30 minutes. H128/D576/S2048 causal prefill passed at reduced Q with output max abs `0.015625`, LSE `0.004222`. |
 
 Supported realistic-family cases:
 
