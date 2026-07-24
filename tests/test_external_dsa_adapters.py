@@ -103,12 +103,14 @@ def test_ascend_vllm_adapter_calls_torch_npu_lightning_indexer(monkeypatch):
     assert result.backend == "ascend"
     assert calls
     assert calls[0]["layout_query"] == "TND"
-    assert calls[0]["layout_key"] == "BSND"
+    assert calls[0]["layout_key"] == "TND"
+    assert calls[0]["key"].shape == (64, 1, 16)
+    assert calls[0]["weights"].shape == (2, 2)
     assert calls[0]["sparse_count"] == 4
     assert calls[0]["sparse_mode"] == 3
 
 
-def test_ascend_vllm_adapter_prefers_a5_quant_lightning_indexer(monkeypatch):
+def test_ascend_vllm_adapter_ignores_quant_lightning_indexer(monkeypatch):
     calls: dict[str, dict[str, object]] = {}
 
     class FakeTensor:
@@ -132,6 +134,7 @@ def test_ascend_vllm_adapter_prefers_a5_quant_lightning_indexer(monkeypatch):
             )
             self.device = lambda kind: kind
             self.float16 = "float16"
+            self.bfloat16 = "bfloat16"
             self.int8 = "int8"
             self.int32 = "int32"
             self.long = "long"
@@ -144,15 +147,21 @@ def test_ascend_vllm_adapter_prefers_a5_quant_lightning_indexer(monkeypatch):
             )
 
         def _metadata(self, **kwargs):
-            calls["metadata"] = kwargs
-            return FakeTensor("metadata", (1024,))
+            raise AssertionError("quant lightning indexer metadata must not be used")
 
         def _indexer(self, **kwargs):
-            calls["indexer"] = kwargs
-            return FakeTensor("indices"), FakeTensor("values")
+            raise AssertionError("quant lightning indexer must not be used")
+
+    def fake_lightning_indexer(**kwargs):
+        calls["indexer"] = kwargs
+        return FakeTensor("indices"), FakeTensor("scores")
 
     monkeypatch.setitem(sys.modules, "torch", FakeTorch())
-    monkeypatch.setitem(sys.modules, "torch_npu", SimpleNamespace())
+    monkeypatch.setitem(
+        sys.modules,
+        "torch_npu",
+        SimpleNamespace(npu_lightning_indexer=fake_lightning_indexer),
+    )
 
     from cannbench.backends.pytorch_backend import AscendBackend
 
@@ -160,7 +169,7 @@ def test_ascend_vllm_adapter_prefers_a5_quant_lightning_indexer(monkeypatch):
         backend="ascend",
         implementation="vllm_ascend",
         op="lightning_indexer",
-        dtype="float16",
+        dtype="bfloat16",
         dataset="smoke",
         case_id="tiny_decode_top4",
     )
@@ -168,14 +177,11 @@ def test_ascend_vllm_adapter_prefers_a5_quant_lightning_indexer(monkeypatch):
     result = AscendBackend().run_operator(request)
 
     assert result.backend == "ascend"
-    assert calls["metadata"]["layout_query"] == "TND"
-    assert calls["metadata"]["layout_key"] == "PA_BSND"
-    assert calls["metadata"]["sparse_count"] == 4
-    assert calls["indexer"]["metadata"].name == "metadata"
-    assert calls["indexer"]["query_quant_mode"] == 0
-    assert calls["indexer"]["key_quant_mode"] == 0
-    assert calls["indexer"]["cmp_ratio"] == 4
-    assert calls["indexer"]["return_value"] is False
+    assert calls["indexer"]["layout_query"] == "TND"
+    assert calls["indexer"]["layout_key"] == "TND"
+    assert calls["indexer"]["key"].shape == (64, 1, 16)
+    assert calls["indexer"]["weights"].shape == (2, 2)
+    assert calls["indexer"]["sparse_count"] == 4
 
 
 def test_ascend_vllm_custom_op_loader_bootstraps_vendor_env(monkeypatch):
@@ -281,7 +287,7 @@ def test_ascend_vllm_sparse_attention_calls_sharedkv_metadata_and_op(monkeypatch
     assert calls["attention"]["cmp_sparse_indices"].shape == (2, 2, 4)
 
 
-def test_ascend_vllm_sparse_attention_prefers_a5_quant_sharedkv_ops(monkeypatch):
+def test_ascend_vllm_sparse_attention_ignores_quant_sharedkv_ops(monkeypatch):
     calls: dict[str, dict[str, object]] = {}
 
     class FakeTensor:
@@ -309,6 +315,7 @@ def test_ascend_vllm_sparse_attention_prefers_a5_quant_sharedkv_ops(monkeypatch)
             )
             self.device = lambda kind: kind
             self.float16 = "float16"
+            self.bfloat16 = "bfloat16"
             self.float32 = "float32"
             self.float8_e4m3fn = "float8_e4m3fn"
             self.int32 = "int32"
@@ -316,10 +323,18 @@ def test_ascend_vllm_sparse_attention_prefers_a5_quant_sharedkv_ops(monkeypatch)
             self.tensor = lambda *args, **kwargs: FakeTensor()
             self.ops = SimpleNamespace(
                 _C_ascend=SimpleNamespace(
-                    npu_kv_quant_sparse_attn_sharedkv_metadata=self._metadata,
-                    npu_kv_quant_sparse_attn_sharedkv=self._attention,
+                    npu_kv_quant_sparse_attn_sharedkv_metadata=self._quant_metadata,
+                    npu_kv_quant_sparse_attn_sharedkv=self._quant_attention,
+                    npu_sparse_attn_sharedkv_metadata=self._metadata,
+                    npu_sparse_attn_sharedkv=self._attention,
                 )
             )
+
+        def _quant_metadata(self, **kwargs):
+            raise AssertionError("quant sparse attention metadata must not be used")
+
+        def _quant_attention(self, q, **kwargs):
+            raise AssertionError("quant sparse attention must not be used")
 
         def _metadata(self, **kwargs):
             calls["metadata"] = kwargs
@@ -338,7 +353,7 @@ def test_ascend_vllm_sparse_attention_prefers_a5_quant_sharedkv_ops(monkeypatch)
         backend="ascend",
         implementation="vllm_ascend",
         op="sparse_attention",
-        dtype="float16",
+        dtype="bfloat16",
         dataset="smoke",
         case_id="tiny_decode_top4",
     )
@@ -346,19 +361,15 @@ def test_ascend_vllm_sparse_attention_prefers_a5_quant_sharedkv_ops(monkeypatch)
     result = AscendBackend().run_operator(request)
 
     assert result.backend == "ascend"
-    assert calls["metadata"]["kv_quant_mode"] == 1
-    assert calls["metadata"]["tile_size"] == 64
-    assert calls["metadata"]["rope_head_dim"] == 64
     assert calls["metadata"]["layout_q"] == "TND"
     assert calls["metadata"]["layout_kv"] == "PA_ND"
+    assert calls["metadata"]["cmp_ratio"] == 1
     assert calls["attention"]["metadata"].name == "metadata"
-    assert calls["attention"]["kv_quant_mode"] == 1
-    assert calls["attention"]["tile_size"] == 64
-    assert calls["attention"]["rope_head_dim"] == 64
+    assert calls["attention"]["cmp_ratio"] == 1
     assert calls["attention"]["cmp_sparse_indices"].shape == (2, 2, 4)
 
 
-def test_ascend_vllm_sparse_attention_uses_a5_kv_physical_dim(monkeypatch):
+def test_ascend_vllm_sparse_attention_uses_bf16_wide_head_layout(monkeypatch):
     calls: dict[str, dict[str, object]] = {}
 
     class FakeTensor:
@@ -381,13 +392,12 @@ def test_ascend_vllm_sparse_attention_uses_a5_kv_physical_dim(monkeypatch):
         def __init__(self) -> None:
             self.float16 = "float16"
             self.bfloat16 = "bfloat16"
-            self.float8_e4m3fn = "float8_e4m3fn"
             self.int32 = "int32"
             self.tensor = lambda *args, **kwargs: FakeTensor()
             self.ops = SimpleNamespace(
                 _C_ascend=SimpleNamespace(
-                    npu_kv_quant_sparse_attn_sharedkv_metadata=self._metadata,
-                    npu_kv_quant_sparse_attn_sharedkv=self._attention,
+                    npu_sparse_attn_sharedkv_metadata=self._metadata,
+                    npu_sparse_attn_sharedkv=self._attention,
                 )
             )
 
@@ -434,21 +444,21 @@ def test_ascend_vllm_sparse_attention_uses_a5_kv_physical_dim(monkeypatch):
     operator()
 
     assert calls["metadata"]["head_dim"] == 512
-    assert calls["metadata"]["cmp_ratio"] == 4
-    assert calls["metadata"]["has_ori_kv"] is True
+    assert calls["metadata"]["cmp_ratio"] == 1
+    assert calls["metadata"]["has_ori_kv"] is False
     assert calls["metadata"]["has_cmp_kv"] is True
     assert calls["attention"]["q"].shape == (1, 64, 512)
-    assert calls["attention"]["ori_kv"].shape == (4, 128, 1, 640)
-    assert calls["attention"]["cmp_kv"].shape == (1, 128, 1, 640)
-    assert calls["attention"]["ori_block_table"].shape == (1, 4)
-    assert calls["attention"]["cmp_block_table"].shape == (1, 1)
+    assert calls["attention"]["ori_kv"] is None
+    assert calls["attention"]["cmp_kv"].shape == (4, 128, 1, 512)
+    assert calls["attention"]["ori_block_table"] is None
+    assert calls["attention"]["cmp_block_table"].shape == (1, 4)
     assert calls["attention"]["cu_seqlens_ori_kv"] is None
     assert calls["attention"]["cu_seqlens_cmp_kv"] is None
-    assert calls["attention"]["sinks"].shape == (64,)
-    assert calls["attention"]["cmp_ratio"] == 4
+    assert calls["attention"]["sinks"] is None
+    assert calls["attention"]["cmp_ratio"] == 1
 
 
-def test_ascend_vllm_sparse_attention_a5_setup_avoids_device_permute(monkeypatch):
+def test_ascend_vllm_sparse_attention_bf16_setup_avoids_device_permute(monkeypatch):
     calls: dict[str, dict[str, object]] = {}
 
     class FakeTensor:
@@ -470,13 +480,12 @@ def test_ascend_vllm_sparse_attention_a5_setup_avoids_device_permute(monkeypatch
         def __init__(self) -> None:
             self.float16 = "float16"
             self.bfloat16 = "bfloat16"
-            self.float8_e4m3fn = "float8_e4m3fn"
             self.int32 = "int32"
             self.tensor = lambda *args, **kwargs: FakeTensor()
             self.ops = SimpleNamespace(
                 _C_ascend=SimpleNamespace(
-                    npu_kv_quant_sparse_attn_sharedkv_metadata=self._metadata,
-                    npu_kv_quant_sparse_attn_sharedkv=self._attention,
+                    npu_sparse_attn_sharedkv_metadata=self._metadata,
+                    npu_sparse_attn_sharedkv=self._attention,
                 )
             )
 
@@ -523,8 +532,8 @@ def test_ascend_vllm_sparse_attention_a5_setup_avoids_device_permute(monkeypatch
     operator()
 
     assert calls["attention"]["q"].shape == (512, 64, 512)
-    assert calls["attention"]["ori_kv"].shape == (4, 128, 1, 640)
-    assert calls["attention"]["cmp_kv"].shape == (1, 128, 1, 640)
+    assert calls["attention"]["ori_kv"] is None
+    assert calls["attention"]["cmp_kv"].shape == (4, 128, 1, 512)
 
 
 def test_nvidia_cuda_library_uses_external_lightning_indexer_adapter(monkeypatch):
