@@ -268,26 +268,22 @@ def test_flashmla_prefill_uses_distinct_qk_and_value_dimensions():
     torch = pytest.importorskip("torch")
     adapter = _reload_adapter()
     query = torch.arange(8, dtype=torch.float32).reshape(1, 2, 1, 4)
-    keys = torch.tensor(
+    shared_kv = torch.tensor(
         [[[[10.0, 11.0, 12.0, 13.0], [20.0, 21.0, 22.0, 23.0]]]]
     )
-    values = keys[..., :2]
 
     result = adapter._flash_mla_prefill_attention_kwargs(
         {
             "torch": torch,
             "payload": {
                 "query_shape": (1, 2, 1, 4),
-                "key_shape": (1, 1, 2, 4),
-                "value_shape": (1, 1, 2, 2),
+                "shared_kv_shape": (1, 1, 2, 4),
                 "indices_shape": (1, 1, 1),
                 "qk_head_dim": 4,
                 "value_head_dim": 2,
-                "shared_kv": True,
             },
             "query": query,
-            "keys": keys,
-            "values": values,
+            "shared_kv": shared_kv,
             "indices": torch.tensor([[[1]]]),
         }
     )
@@ -299,23 +295,6 @@ def test_flashmla_prefill_uses_distinct_qk_and_value_dimensions():
         [[20.0, 21.0, 22.0, 23.0]],
     ]
     assert result["d_v"] == 2
-
-
-def test_flashmla_shared_kv_reuses_canonical_key_tensor():
-    adapter = _reload_adapter()
-    keys = object()
-    values = object()
-
-    result = adapter._flash_mla_shared_kv(
-        None,
-        keys,
-        values,
-        qk_head_dim=4,
-        value_head_dim=2,
-        shared_kv=True,
-    )
-
-    assert result is keys
 
 
 def test_flashmla_v32_decode_cache_uses_656_byte_layout():
@@ -407,11 +386,6 @@ def test_flashmla_decode_attention_supports_multiple_query_tokens(monkeypatch):
     )
     monkeypatch.setattr(
         adapter,
-        "_flash_mla_shared_kv",
-        lambda *args, **kwargs: _FakeTensor((2, 1, 32768, 576)),
-    )
-    monkeypatch.setattr(
-        adapter,
         "_blocked_kv_cache",
         lambda *args, **kwargs: _FakeTensor((1024, 64, 1, 576)),
     )
@@ -430,14 +404,12 @@ def test_flashmla_decode_attention_supports_multiple_query_tokens(monkeypatch):
             "torch": torch,
             "payload": {
                 "query_shape": (2, 128, 2, 576),
-                "key_shape": (2, 1, 32768, 576),
-                "value_shape": (2, 1, 32768, 512),
+                "shared_kv_shape": (2, 1, 32768, 576),
+                "value_head_dim": 512,
                 "indices_shape": (2, 2, 2048),
-                "shared_kv": True,
             },
             "query": _FakeTensor((2, 128, 2, 576)),
-            "keys": _FakeTensor((2, 1, 32768, 576)),
-            "values": _FakeTensor((2, 1, 32768, 512)),
+            "shared_kv": _FakeTensor((2, 1, 32768, 576)),
             "indices": source_indices,
         },
     )

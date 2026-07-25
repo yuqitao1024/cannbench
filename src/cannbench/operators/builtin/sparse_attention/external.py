@@ -26,18 +26,12 @@ def build_cuda_library_callable(ctx):
         device=ctx.device,
         dtype=ctx.dtype,
     ).reshape(payload["query_shape"])
-    keys = ctx.backend._tensor(
+    shared_kv = ctx.backend._tensor(
         ctx.torch,
-        materialized_values_to_buffer(payload["keys"]),
+        materialized_values_to_buffer(payload["shared_kv"]),
         device=ctx.device,
         dtype=ctx.dtype,
-    ).reshape(payload["key_shape"])
-    values = ctx.backend._tensor(
-        ctx.torch,
-        materialized_values_to_buffer(payload["values"]),
-        device=ctx.device,
-        dtype=ctx.dtype,
-    ).reshape(payload["value_shape"])
+    ).reshape(payload["shared_kv_shape"])
     indices = bound_indices(ctx, payload["indices_shape"], dtype=ctx.torch.int32)
     if indices is None:
         indices = ctx.backend._tensor(
@@ -57,8 +51,7 @@ def build_cuda_library_callable(ctx):
             device=ctx.device,
             dtype=ctx.dtype,
             query=query,
-            keys=keys,
-            values=values,
+            shared_kv=shared_kv,
             indices=indices,
             causal=payload["causal"],
             phase=payload["phase"],
@@ -167,18 +160,18 @@ def _build_vllm_sparse_flash_attention_callable(ctx):
             part_dims=(value_head_dim, rope_head_dim),
         )
         key_values, key_rope_values = _split_bhtd_values_as_bthd(
-            payload["keys"],
+            payload["shared_kv"],
             batch=batch,
             heads=kv_heads,
             tokens=context_tokens,
             part_dims=(value_head_dim, rope_head_dim),
         )
-        (value_values,) = _split_bhtd_values_as_bthd(
-            payload["values"],
+        value_values, _ = _split_bhtd_values_as_bthd(
+            payload["shared_kv"],
             batch=batch,
             heads=kv_heads,
             tokens=context_tokens,
-            part_dims=(value_head_dim,),
+            part_dims=(value_head_dim, rope_head_dim),
         )
         query = ctx.backend._tensor(
             ctx.torch, query_values, device=ctx.device, dtype=ctx.dtype
@@ -295,7 +288,7 @@ def _build_vllm_sharedkv_callable(ctx):
         ctx.case, dtype=ctx.request.dtype, seed=ctx.request.seed
     )
     batch, query_heads, query_tokens, qk_head_dim = payload["query_shape"]
-    _, kv_heads, context_tokens, _ = payload["key_shape"]
+    _, kv_heads, context_tokens, _ = payload["shared_kv_shape"]
     selected_tokens = payload["indices_shape"][2]
     block_size = 128 if context_tokens % 128 == 0 else context_tokens
     blocks_per_batch = context_tokens // block_size
@@ -316,7 +309,7 @@ def _build_vllm_sharedkv_callable(ctx):
     cmp_kv = ctx.backend._tensor(
         ctx.torch,
         ctx.backend._materialized_kv_values_as_bthd(
-            payload["keys"],
+            payload["shared_kv"],
             batch=batch,
             kv_heads=kv_heads,
             context_tokens=context_tokens,

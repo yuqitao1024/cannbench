@@ -295,8 +295,8 @@ def test_prefill_reference_returns_output_and_lse(monkeypatch):
     output, lse = ops._prefill_reference(
         _fake_query(),
         _fake_keys(),
-        _fake_values(),
         _fake_indices(),
+        value_head_dim=2,
         causal=True,
     )
 
@@ -312,15 +312,15 @@ def test_prefill_reference_zeroes_all_masked_query_rows(monkeypatch):
     output, lse = ops._prefill_reference(
         _fake_query(),
         _fake_keys(),
-        _fake_values(),
         all_masked_indices,
+        value_head_dim=2,
         causal=True,
     )
 
     assert output.data[0][0][0] == [0.0, 0.0]
     assert output.data[0][1][0] == [0.0, 0.0]
-    assert output.data[0][0][1] == [30.0, 3.0]
-    assert output.data[0][1][1] == [30.0, 3.0]
+    assert output.data[0][0][1] == [1.0, 1.0]
+    assert output.data[0][1][1] == [1.0, 1.0]
     assert lse.data[0][0][0] == float("-inf")
     assert lse.data[0][1][0] == float("-inf")
     assert lse.data[0][0][1] != float("-inf")
@@ -329,16 +329,15 @@ def test_prefill_reference_zeroes_all_masked_query_rows(monkeypatch):
 
 def test_prefill_reference_uses_right_aligned_absolute_query_positions(monkeypatch):
     monkeypatch.setattr(ops, "torch", FakeTorch)
-    query = FakeTensor([[[[1.0], [1.0]]]])
-    keys = FakeTensor([[[[0.0], [0.0], [0.0], [0.0]]]])
-    values = FakeTensor([[[[0.0], [0.0], [20.0], [40.0]]]])
+    query = FakeTensor([[[[0.0], [0.0]]]])
+    shared_kv = FakeTensor([[[[0.0], [0.0], [20.0], [40.0]]]])
     indices = FakeTensor([[[2, 3], [2, 3]]], dtype="int64")
 
     output, _ = ops._prefill_reference(
         query,
-        keys,
-        values,
+        shared_kv,
         indices,
+        value_head_dim=1,
         causal=True,
     )
 
@@ -353,8 +352,8 @@ def test_sparse_attention_forward_rejects_unsupported_family(monkeypatch):
         ops.sparse_attention_forward(
             _fake_query(),
             _fake_keys(),
-            _fake_values(),
             _fake_indices(),
+            value_head_dim=2,
             phase="decode",
             family="fallback",
             causal=False,
@@ -368,8 +367,10 @@ def test_sparse_attention_forward_prefers_registered_custom_op_for_prefill_famil
 ):
     captured = {}
 
-    def fake_custom_op(query, keys, values, indices, phase, family, causal):
-        del query, keys, values, indices
+    def fake_custom_op(
+        query, shared_kv, indices, value_head_dim, phase, family, causal
+    ):
+        del query, shared_kv, indices, value_head_dim
         captured["phase"] = phase
         captured["family"] = family
         captured["causal"] = causal
@@ -381,7 +382,7 @@ def test_sparse_attention_forward_prefers_registered_custom_op_for_prefill_famil
         object(),
         object(),
         object(),
-        object(),
+        value_head_dim=512,
         phase="prefill",
         family=family,
         causal=True,
@@ -407,7 +408,7 @@ def test_sparse_attention_forward_requires_registered_custom_op_for_prefill_fami
             object(),
             object(),
             object(),
-            object(),
+            value_head_dim=512,
             phase="prefill",
             family=family,
             causal=True,
@@ -443,8 +444,7 @@ def test_custom_op_prefill_matches_reference_when_registered(
 
     device = ops.torch.device("npu")
     query = ops.torch.randn(*query_shape, device=device, dtype=ops.torch.float16)
-    keys = ops.torch.randn(*kv_shape, device=device, dtype=ops.torch.float16)
-    values = ops.torch.randn(*kv_shape, device=device, dtype=ops.torch.float16)
+    shared_kv = ops.torch.randn(*kv_shape, device=device, dtype=ops.torch.float16)
     indices = ops.torch.randint(
         0,
         kv_shape[2],
@@ -455,16 +455,16 @@ def test_custom_op_prefill_matches_reference_when_registered(
 
     reference_out, reference_lse = ops._prefill_reference(
         query,
-        keys,
-        values,
+        shared_kv,
         indices,
+        value_head_dim=kv_shape[-1],
         causal=True,
     )
     custom_out, custom_lse = ops.sparse_attention_forward(
         query,
-        keys,
-        values,
+        shared_kv,
         indices,
+        value_head_dim=kv_shape[-1],
         phase="prefill",
         family=family,
         causal=True,

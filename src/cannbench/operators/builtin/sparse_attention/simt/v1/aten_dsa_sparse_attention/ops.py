@@ -15,7 +15,16 @@ __all__ = [
 ]
 
 
-def sparse_attention_forward(query, keys, values, indices, *, phase: str, family: str, causal: bool):
+def sparse_attention_forward(
+    query,
+    shared_kv,
+    indices,
+    *,
+    value_head_dim: int,
+    phase: str,
+    family: str,
+    causal: bool,
+):
     if phase not in {"prefill", "decode"}:
         raise RuntimeError(f"unsupported sparse_attention phase for custom op wrapper: {phase}")
     if family not in {
@@ -28,7 +37,15 @@ def sparse_attention_forward(query, keys, values, indices, *, phase: str, family
     custom_op = _load_registered_op()
     if custom_op is None:
         raise RuntimeError("aten_dsa_sparse_attention custom op is not registered")
-    return custom_op(query, keys, values, indices, phase, family, causal)
+    return custom_op(
+        query,
+        shared_kv,
+        indices,
+        value_head_dim,
+        phase,
+        family,
+        causal,
+    )
 
 
 def _load_registered_op():
@@ -41,10 +58,20 @@ def _load_registered_op():
         return None
 
 
-def _prefill_reference(query, keys, values, indices, *, causal: bool):
+def _prefill_reference(
+    query,
+    shared_kv,
+    indices,
+    *,
+    value_head_dim: int,
+    causal: bool,
+):
     if torch is None:
         raise RuntimeError("torch is required for sparse_attention reference wrapper")
-    expanded_keys, expanded_values = _expand_kv(keys, values, query.shape[1])
+    values = shared_kv[:, :, :, :value_head_dim]
+    expanded_keys, expanded_values = _expand_kv(
+        shared_kv, values, query.shape[1]
+    )
     selected_keys = _gather_selected(expanded_keys, indices)
     selected_values = _gather_selected(expanded_values, indices)
     scores = (query.unsqueeze(3) * selected_keys).sum(dim=-1) / math.sqrt(query.shape[-1])
@@ -52,7 +79,7 @@ def _prefill_reference(query, keys, values, indices, *, causal: bool):
     if causal:
         positions = (
             torch.arange(query.shape[2], device=getattr(query, "device", None))
-            + (keys.shape[2] - query.shape[2])
+            + (shared_kv.shape[2] - query.shape[2])
         ).reshape(1, 1, query.shape[2], 1)
         invalid_mask = indices[:, None, :, :] > positions
         scores = scores.masked_fill(invalid_mask, float("-inf"))
@@ -65,8 +92,21 @@ def _prefill_reference(query, keys, values, indices, *, causal: bool):
         lse = lse.masked_fill(all_invalid, float("-inf"))
     output = (probabilities.to(query.dtype).unsqueeze(-1) * selected_values).sum(dim=-2)
     return output, lse
-def _decode_reference(query, keys, values, indices, *, causal: bool):
-    return _prefill_reference(query, keys, values, indices, causal=causal)
+def _decode_reference(
+    query,
+    shared_kv,
+    indices,
+    *,
+    value_head_dim: int,
+    causal: bool,
+):
+    return _prefill_reference(
+        query,
+        shared_kv,
+        indices,
+        value_head_dim=value_head_dim,
+        causal=causal,
+    )
 
 
 def _expand_kv(keys, values, query_heads: int):

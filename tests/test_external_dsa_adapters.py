@@ -81,12 +81,11 @@ def test_ascend_vllm_sparse_attention_uses_sparse_flash_attention_for_v32(
 
     payload = {
         "query_shape": (1, 128, 1, 576),
-        "key_shape": (1, 1, 16, 576),
-        "value_shape": (1, 1, 16, 512),
+        "shared_kv_shape": (1, 1, 16, 576),
+        "value_head_dim": 512,
         "indices_shape": (1, 1, 4),
         "query": tuple(0.0 for _ in range(128 * 576)),
-        "keys": tuple(0.0 for _ in range(16 * 576)),
-        "values": tuple(0.0 for _ in range(16 * 512)),
+        "shared_kv": tuple(0.0 for _ in range(16 * 576)),
         "indices": (0, 1, 2, 3),
     }
     monkeypatch.setattr(
@@ -158,12 +157,11 @@ def test_ascend_vllm_sparse_attention_uses_bound_indexer_output(monkeypatch):
 
     payload = {
         "query_shape": (1, 128, 1, 576),
-        "key_shape": (1, 1, 16, 576),
-        "value_shape": (1, 1, 16, 512),
+        "shared_kv_shape": (1, 1, 16, 576),
+        "value_head_dim": 512,
         "indices_shape": (1, 1, 4),
         "query": tuple(0.0 for _ in range(128 * 576)),
-        "keys": tuple(0.0 for _ in range(16 * 576)),
-        "values": tuple(0.0 for _ in range(16 * 512)),
+        "shared_kv": tuple(0.0 for _ in range(16 * 576)),
         "indices": (0, 1, 2, 3),
     }
     monkeypatch.setattr(
@@ -906,8 +904,9 @@ def test_nvidia_cuda_library_uses_external_sparse_attention_adapter(monkeypatch)
     assert calls[0]["request"] is request
     assert calls[0]["payload"]["phase"] == "decode"
     assert calls[0]["query"].shape == (2, 2, 1, 16)
-    assert calls[0]["keys"].shape == (2, 2, 32, 16)
-    assert calls[0]["values"].shape == (2, 2, 32, 16)
+    assert calls[0]["shared_kv"].shape == (2, 2, 32, 16)
+    assert "keys" not in calls[0]
+    assert "values" not in calls[0]
     assert calls[0]["indices"].shape == (2, 1, 4)
 
 

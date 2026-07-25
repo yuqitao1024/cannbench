@@ -618,7 +618,7 @@ def test_sparse_attention_v32_flashmla_uses_distinct_qk_and_value_dimensions(
     assert "head_dim" not in case.payload
 
 
-def test_materialized_v32_sparse_attention_uses_value_dimension_for_values():
+def test_materialized_v32_sparse_attention_exposes_one_shared_kv_tensor():
     case = replace(
         get_sparse_attention_case("smoke", "tiny_decode_top4"),
         batch=1,
@@ -635,15 +635,12 @@ def test_materialized_v32_sparse_attention_uses_value_dimension_for_values():
     payload = materialize_sparse_attention_inputs(case, dtype="bfloat16", seed=7)
 
     assert payload["query_shape"] == (1, 1, 1, 4)
-    assert payload["key_shape"] == (1, 1, 2, 4)
-    assert payload["value_shape"] == (1, 1, 2, 2)
+    assert payload["shared_kv_shape"] == (1, 1, 2, 4)
     assert payload["qk_head_dim"] == 4
     assert payload["value_head_dim"] == 2
-    assert payload["shared_kv"] is True
-    assert payload["values"] == (
-        *payload["keys"][0:2],
-        *payload["keys"][4:6],
-    )
+    assert len(payload["shared_kv"]) == 8
+    assert "keys" not in payload
+    assert "values" not in payload
     assert "head_dim" not in payload
 
 
@@ -794,12 +791,10 @@ def test_materialized_sparse_attention_inputs_are_deterministic_for_same_seed():
     right = materialize_sparse_attention_inputs(case, dtype="float16", seed=123)
 
     assert left["query_shape"] == right["query_shape"] == (2, 2, 1, 16)
-    assert left["key_shape"] == right["key_shape"] == (2, 2, 32, 16)
-    assert left["value_shape"] == right["value_shape"] == (2, 2, 32, 16)
+    assert left["shared_kv_shape"] == right["shared_kv_shape"] == (2, 2, 32, 16)
     assert left["indices_shape"] == right["indices_shape"] == (2, 1, 4)
     assert left["query"] == right["query"]
-    assert left["keys"] == right["keys"]
-    assert left["values"] == right["values"]
+    assert left["shared_kv"] == right["shared_kv"]
     assert left["indices"] == right["indices"]
 
 

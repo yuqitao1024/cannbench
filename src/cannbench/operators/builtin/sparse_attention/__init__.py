@@ -27,18 +27,12 @@ def _build_torch_callable(ctx):
         device=ctx.device,
         dtype=ctx.dtype,
     ).reshape(payload["query_shape"])
-    keys = ctx.backend._tensor(
+    shared_kv = ctx.backend._tensor(
         ctx.torch,
-        materialized_values_to_buffer(payload["keys"]),
+        materialized_values_to_buffer(payload["shared_kv"]),
         device=ctx.device,
         dtype=ctx.dtype,
-    ).reshape(payload["key_shape"])
-    values = ctx.backend._tensor(
-        ctx.torch,
-        materialized_values_to_buffer(payload["values"]),
-        device=ctx.device,
-        dtype=ctx.dtype,
-    ).reshape(payload["value_shape"])
+    ).reshape(payload["shared_kv_shape"])
     indices = bound_indices(ctx, payload["indices_shape"], dtype=ctx.torch.long)
     if indices is None:
         indices = ctx.backend._tensor(
@@ -49,10 +43,11 @@ def _build_torch_callable(ctx):
         ).reshape(payload["indices_shape"])
     def operator():
         batch, query_heads, query_tokens, qk_head_dim = query.shape
-        value_head_dim = values.shape[-1]
-        context_tokens = keys.shape[2]
+        value_head_dim = int(payload["value_head_dim"])
+        values = shared_kv[:, :, :, :value_head_dim]
+        context_tokens = shared_kv.shape[2]
         selected_tokens = indices.shape[2]
-        expanded_keys = keys
+        expanded_keys = shared_kv
         expanded_values = values
         if expanded_keys.shape[1] != query_heads:
             repeats = query_heads // expanded_keys.shape[1]
@@ -123,17 +118,11 @@ def _build_simt_callable(ctx):
                 ctx.case.query_tokens,
                 ctx.case.qk_head_dim,
             ),
-            "key_shape": (
+            "shared_kv_shape": (
                 ctx.case.batch,
                 ctx.case.kv_heads,
                 ctx.case.context_tokens,
                 ctx.case.qk_head_dim,
-            ),
-            "value_shape": (
-                ctx.case.batch,
-                ctx.case.kv_heads,
-                ctx.case.context_tokens,
-                ctx.case.value_head_dim,
             ),
             "indices_shape": (
                 ctx.case.batch,
@@ -145,7 +134,6 @@ def _build_simt_callable(ctx):
             "selected_tokens": ctx.case.selected_tokens,
             "qk_head_dim": ctx.case.qk_head_dim,
             "value_head_dim": ctx.case.value_head_dim,
-            "shared_kv": ctx.case.shared_kv,
             "causal": ctx.case.causal,
             "phase": ctx.case.phase,
         }
@@ -165,15 +153,9 @@ def _build_simt_callable(ctx):
         query = ctx.torch.zeros(
             payload["query_shape"], device=ctx.device, dtype=ctx.dtype
         )
-        keys = ctx.torch.zeros(
-            payload["key_shape"], device=ctx.device, dtype=ctx.dtype
+        shared_kv = ctx.torch.zeros(
+            payload["shared_kv_shape"], device=ctx.device, dtype=ctx.dtype
         )
-        if payload["shared_kv"]:
-            values = keys[..., : payload["value_head_dim"]].contiguous()
-        else:
-            values = ctx.torch.zeros(
-                payload["value_shape"], device=ctx.device, dtype=ctx.dtype
-            )
         indices = bound_indices(ctx, payload["indices_shape"])
         if indices is None:
             indices = ctx.torch.zeros(
@@ -186,18 +168,12 @@ def _build_simt_callable(ctx):
             device=ctx.device,
             dtype=ctx.dtype,
         ).reshape(payload["query_shape"])
-        keys = ctx.backend._tensor(
+        shared_kv = ctx.backend._tensor(
             ctx.torch,
-            materialized_values_to_buffer(payload["keys"]),
+            materialized_values_to_buffer(payload["shared_kv"]),
             device=ctx.device,
             dtype=ctx.dtype,
-        ).reshape(payload["key_shape"])
-        values = ctx.backend._tensor(
-            ctx.torch,
-            materialized_values_to_buffer(payload["values"]),
-            device=ctx.device,
-            dtype=ctx.dtype,
-        ).reshape(payload["value_shape"])
+        ).reshape(payload["shared_kv_shape"])
         indices = bound_indices(ctx, payload["indices_shape"])
         if indices is None:
             indices = ctx.backend._tensor(
@@ -208,9 +184,9 @@ def _build_simt_callable(ctx):
             ).reshape(payload["indices_shape"])
     return lambda: ctx.implementation_module.ops.sparse_attention_forward(
         query,
-        keys,
-        values,
+        shared_kv,
         indices,
+        value_head_dim=int(payload["value_head_dim"]),
         phase=str(payload["phase"]),
         family=family,
         causal=bool(payload["causal"]),

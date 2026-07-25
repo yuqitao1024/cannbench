@@ -1323,13 +1323,25 @@ def test_ascend_backend_runs_simt_sparse_attention_through_registered_op(monkeyp
             self.long = "long"
             self.tensor = self._tensor
 
+        def zeros(self, shape, device=None, dtype=None):
+            return self._tensor(shape, device=device, dtype=dtype)
+
         def _tensor(self, values, device=None, dtype=None):
             del values, device
             captured["tensor_dtypes"].append(dtype)
             return FakeTensor()
 
-    def fake_forward(query, keys, values, indices, *, phase, family, causal):
-        del query, keys, values, indices
+    def fake_forward(
+        query,
+        shared_kv,
+        indices,
+        *,
+        value_head_dim,
+        phase,
+        family,
+        causal,
+    ):
+        del query, shared_kv, indices, value_head_dim
         captured["simt_calls"] += 1
         captured["phase"] = phase
         captured["family"] = family
@@ -1363,7 +1375,7 @@ def test_ascend_backend_runs_simt_sparse_attention_through_registered_op(monkeyp
 
     assert result.op == "sparse_attention"
     assert captured["simt_calls"] == 1
-    assert captured["tensor_dtypes"] == ["float16", "float16", "float16", "long"]
+    assert captured["tensor_dtypes"] == ["float16", "float16", "long"]
     assert captured["phase"] == "decode"
     assert captured["family"] == "family_hd128"
     assert captured["causal"] is True
@@ -1402,8 +1414,17 @@ def test_ascend_backend_prefers_sparse_attention_custom_op_for_decode_family_hd5
             captured["tensor_dtypes"].append(dtype)
             return FakeTensor()
 
-    def fake_forward(query, keys, values, indices, *, phase, family, causal):
-        del query, keys, values, indices
+    def fake_forward(
+        query,
+        shared_kv,
+        indices,
+        *,
+        value_head_dim,
+        phase,
+        family,
+        causal,
+    ):
+        del query, shared_kv, indices, value_head_dim
         captured["simt_calls"] += 1
         captured["phase"] = phase
         captured["family"] = family
@@ -1437,7 +1458,7 @@ def test_ascend_backend_prefers_sparse_attention_custom_op_for_decode_family_hd5
 
     assert result.op == "sparse_attention"
     assert captured["simt_calls"] == 1
-    assert captured["tensor_dtypes"] == ["float16", "float16", "float16", "long"]
+    assert captured["tensor_dtypes"] == ["float16", "float16", "long"]
     assert captured["phase"] == "decode"
     assert captured["family"] == "family_hd512"
     assert captured["causal"] is True
@@ -1471,13 +1492,25 @@ def test_ascend_backend_prefers_sparse_attention_custom_op_for_decode_family_hd1
             self.long = "long"
             self.tensor = self._tensor
 
+        def zeros(self, shape, device=None, dtype=None):
+            return self._tensor(shape, device=device, dtype=dtype)
+
         def _tensor(self, values, device=None, dtype=None):
             del values, device
             captured["tensor_dtypes"].append(dtype)
             return FakeTensor()
 
-    def fake_forward(query, keys, values, indices, *, phase, family, causal):
-        del query, keys, values, indices
+    def fake_forward(
+        query,
+        shared_kv,
+        indices,
+        *,
+        value_head_dim,
+        phase,
+        family,
+        causal,
+    ):
+        del query, shared_kv, indices, value_head_dim
         captured["simt_calls"] += 1
         captured["phase"] = phase
         captured["family"] = family
@@ -1511,7 +1544,7 @@ def test_ascend_backend_prefers_sparse_attention_custom_op_for_decode_family_hd1
 
     assert result.op == "sparse_attention"
     assert captured["simt_calls"] == 1
-    assert captured["tensor_dtypes"] == ["float16", "float16", "float16", "long"]
+    assert captured["tensor_dtypes"] == ["float16", "float16", "long"]
     assert captured["phase"] == "decode"
     assert captured["family"] == "family_hd128"
     assert captured["causal"] is True
@@ -1550,8 +1583,17 @@ def test_ascend_backend_prefers_sparse_attention_custom_op_for_prefill_family_hd
             captured["tensor_dtypes"].append(dtype)
             return FakeTensor()
 
-    def fake_forward(query, keys, values, indices, *, phase, family, causal):
-        del query, keys, values, indices
+    def fake_forward(
+        query,
+        shared_kv,
+        indices,
+        *,
+        value_head_dim,
+        phase,
+        family,
+        causal,
+    ):
+        del query, shared_kv, indices, value_head_dim
         captured["simt_calls"] += 1
         captured["phase"] = phase
         captured["family"] = family
@@ -1585,7 +1627,7 @@ def test_ascend_backend_prefers_sparse_attention_custom_op_for_prefill_family_hd
 
     assert result.op == "sparse_attention"
     assert captured["simt_calls"] == 1
-    assert captured["tensor_dtypes"] == ["float16", "float16", "float16", "long"]
+    assert captured["tensor_dtypes"] == ["float16", "float16", "long"]
     assert captured["phase"] == "prefill"
     assert captured["family"] == "family_hd128"
     assert captured["causal"] is True

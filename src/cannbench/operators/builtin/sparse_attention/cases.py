@@ -25,7 +25,7 @@ class SparseAttentionCase:
     source_model: str
     source_file: str
     source_op: str
-    shared_kv: bool = False
+    shared_kv: bool = True
 
     def __post_init__(self) -> None:
         for name in (

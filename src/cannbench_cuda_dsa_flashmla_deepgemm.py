@@ -206,21 +206,13 @@ def _flash_mla_prefill_attention_kwargs(kwargs: dict[str, Any]) -> dict[str, Any
     torch = _require_torch(kwargs)
     payload = _require_payload(kwargs)
     batch, query_heads, query_tokens, qk_head_dim = payload["query_shape"]
-    _, kv_heads, context_tokens, _ = payload["key_shape"]
-    value_head_dim = payload["value_shape"][-1]
+    _, kv_heads, context_tokens, _ = payload["shared_kv_shape"]
+    value_head_dim = int(payload["value_head_dim"])
     query = _bhtd_to_bthd_flat(
         kwargs["query"], batch, query_heads, query_tokens, qk_head_dim
     )
-    shared_kv = _flash_mla_shared_kv(
-        torch,
-        kwargs["keys"],
-        kwargs["values"],
-        qk_head_dim=qk_head_dim,
-        value_head_dim=value_head_dim,
-        shared_kv=bool(payload.get("shared_kv", False)),
-    )
     kv = _bhtd_to_bthd_flat(
-        shared_kv, batch, kv_heads, context_tokens, qk_head_dim
+        kwargs["shared_kv"], batch, kv_heads, context_tokens, qk_head_dim
     )
     indices = kwargs["indices"].to(torch.int32)
     offsets = (
@@ -248,8 +240,8 @@ def _flash_mla_decode_attention_kwargs(
     payload = _require_payload(kwargs)
     block_size = 64
     batch, query_heads, query_tokens, qk_head_dim = payload["query_shape"]
-    _, kv_heads, context_tokens, _ = payload["key_shape"]
-    value_head_dim = payload["value_shape"][-1]
+    _, kv_heads, context_tokens, _ = payload["shared_kv_shape"]
+    value_head_dim = int(payload["value_head_dim"])
     if kv_heads != 1:
         raise RuntimeError("FlashMLA sparse decode requires kv_heads == 1")
     query = _bhtd_to_bthd(
@@ -262,17 +254,9 @@ def _flash_mla_decode_attention_kwargs(
         block_size=block_size,
         device=query.device,
     )
-    shared_kv = _flash_mla_shared_kv(
-        torch,
-        kwargs["keys"],
-        kwargs["values"],
-        qk_head_dim=qk_head_dim,
-        value_head_dim=value_head_dim,
-        shared_kv=bool(payload.get("shared_kv", False)),
-    )
     kv_cache_bf16 = _blocked_kv_cache(
         torch,
-        shared_kv,
+        kwargs["shared_kv"],
         batch=batch,
         context_tokens=context_tokens,
         kv_heads=kv_heads,
@@ -325,27 +309,6 @@ def _bhtd_to_bthd(tensor, batch: int, heads: int, tokens: int, dim: int):
 def _bhtd_to_bthd_flat(tensor, batch: int, heads: int, tokens: int, dim: int):
     return _bhtd_to_bthd(tensor, batch, heads, tokens, dim).reshape(
         batch * tokens, heads, dim
-    )
-
-
-def _flash_mla_shared_kv(
-    torch,
-    keys,
-    values,
-    *,
-    qk_head_dim: int,
-    value_head_dim: int,
-    shared_kv: bool = False,
-):
-    if value_head_dim > qk_head_dim:
-        raise RuntimeError("FlashMLA requires value_head_dim <= qk_head_dim")
-    if shared_kv:
-        return keys
-    if value_head_dim == qk_head_dim:
-        return values
-    return torch.cat(
-        (values, keys[..., value_head_dim:qk_head_dim]),
-        dim=-1,
     )
 
 

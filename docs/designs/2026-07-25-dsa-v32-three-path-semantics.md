@@ -6,11 +6,10 @@ CannBench 当前的 Ascend SIMT、vLLM-Ascend 和 CUDA 三条路径采用了相�
 DSA 两阶段抽象和主要 shape，但还不能认为对外输入输出语义已经完全一致。
 
 - 三条路径都执行 `Lightning Indexer -> indices -> Sparse Attention`。
-- 三条路径的目标是从同一套逻辑输入生成各自后端需要的物理布局；当前
-  shared-KV 公开接口和跨后端 conformance 还没有完全收敛。
+- 三条路径从同一套逻辑输入生成各自后端需要的物理布局；跨后端
+  conformance 还没有完全收敛。
 - 底层布局、存储精度和 kernel 数量可以不同，这些属于实现差异。
-- 当前仍存在 shared-KV 公开合同、Indexer scaling/tie 行为和 Attention 附加
-  输出不一致。
+- 当前仍存在 Indexer scaling/tie 行为和 Attention 附加输出不一致。
 - 在这些差异修复前，性能测试只能作为初步数据，不能视为严格的同语义对标。
 
 本文只讨论 DeepSeek V3.2。V4/V4 Pro、attention sink、SWA 以及完整 Attention
@@ -123,8 +122,8 @@ KV 的读取、Cube QK、UB 上的 Softmax/LSE，以及与 V 的乘加。两个�
 通过 GM 中的最终 `indices` 连接。
 
 该路径的公开逻辑输入为 BF16；具体的 BQHD/BHTD 布局由自定义算子 wrapper
-约定。当前 wrapper 仍接收独立的 `keys` 和 `values`，尚未收敛到单一
-`shared_kv` 参数。
+约定。Materializer、wrapper 和自定义算子 ABI 均只接收单一 `shared_kv`，
+kernel 直接用完整维度作为 K，并用每个 token 的前 `value_head_dim` 维作为 V。
 
 ### vLLM-Ascend
 
@@ -208,25 +207,19 @@ Workflow:
   不包含 projection、RoPE 生成、cache scatter 和 SWA
 ```
 
-在完成 shared-KV、Indexer scaling/tie 行为和返回值规范化之后，三条路径才可以
+在完成 Indexer scaling/tie 行为和返回值规范化之后，三条路径才可以
 称为“相同逻辑输入、相同逻辑输出、不同硬件实现”，并用于严格的 V3.2 性能对标。
 
 ## V3.2 剩余工作
 
 本节只记录尚未闭环的事项，不保留已完成事项或历史提交清单。
 
-### 1. 收敛 shared-KV 公开合同
-
-Materializer 和算子 ABI 仍暴露独立的 `keys` 和 `values`。需要收敛为单一
-`shared_kv [B,1,C,576]` canonical 输入，由各后端内部使用完整 576 维作为 K，
-并使用前 512 维作为 V。
-
-### 2. 明确 Indexer scaling 和 tie 行为
+### 1. 明确 Indexer scaling 和 tie 行为
 
 明确 Indexer scaling，并定义跨后端同分数时的 tie 行为，或者明确允许比较
 等价 Top-K 集合。
 
-### 3. 统一 Sparse Attention 数学合同
+### 2. 统一 Sparse Attention 数学合同
 
 - 将 softmax scale 写入 case/schema，并从 V3.2 模型合同验证其数值，而不是
   仅由 adapter 默认使用 `d_qk^-0.5`。
@@ -235,23 +228,23 @@ Materializer 和算子 ABI 仍暴露独立的 `keys` 和 `values`。需要收敛
 - 将三后端结果规范化为 `out [B,Q,H,Dv]` 和 `lse [B,Q,H]`；vLLM adapter
   不能继续只返回 `out`。
 
-### 4. 增加真实序列元数据
+### 3. 增加真实序列元数据
 
 Case schema 需要表达每条请求的 `query_len`、`context_len`、绝对 Query
 position、`cu_seqlens` 和 block table，并支持 ragged batch。Prefill 不能默认
 Query 从位置 0 开始。
 
-### 5. 明确生产量化的计时边界
+### 4. 明确生产量化的计时边界
 
 需要区分静态 KV cache packing/metadata 准备与每步动态 Q 量化。静态准备应放在
 计时外；动态量化是否计时应以真实推理调用边界为准，并在三条路径中保持可比。
 
-### 6. 建立 rank-local shape 合同
+### 5. 建立 rank-local shape 合同
 
 Case 需要记录 TP/DP/CP、local heads、local batch 和 KV shard。否则无法证明
 vLLM 多卡路径与单卡 FlashMLA/SIMT 路径处理了相同的数据量。
 
-### 7. 建立三后端 Conformance 门禁
+### 6. 建立三后端 Conformance 门禁
 
 - Indexer 在相同输入下比较 Top-K recall、集合重叠和分数误差。
 - Sparse Attention 使用同一份合法 indices 比较 output 和自然对数 LSE。

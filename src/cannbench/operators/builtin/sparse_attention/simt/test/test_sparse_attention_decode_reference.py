@@ -19,7 +19,7 @@ def test_sparse_attention_forward_requires_registered_custom_op_for_decode_famil
             object(),
             object(),
             object(),
-            object(),
+            value_head_dim=512,
             phase="decode",
             family=family,
             causal=True,
@@ -33,8 +33,10 @@ def test_sparse_attention_forward_prefers_registered_custom_op_for_decode_family
 ):
     captured: dict[str, object] = {}
 
-    def fake_custom_op(query, keys, values, indices, phase, family, causal):
-        del query, keys, values, indices
+    def fake_custom_op(
+        query, shared_kv, indices, value_head_dim, phase, family, causal
+    ):
+        del query, shared_kv, indices, value_head_dim
         captured["phase"] = phase
         captured["family"] = family
         captured["causal"] = causal
@@ -46,7 +48,7 @@ def test_sparse_attention_forward_prefers_registered_custom_op_for_decode_family
         object(),
         object(),
         object(),
-        object(),
+        value_head_dim=512,
         phase="decode",
         family=family,
         causal=True,
@@ -91,8 +93,7 @@ def test_custom_op_decode_matches_reference_when_registered(
 
     device = ops.torch.device("npu")
     query = ops.torch.randn(*query_shape, device=device, dtype=ops.torch.bfloat16)
-    keys = ops.torch.randn(*kv_shape, device=device, dtype=ops.torch.bfloat16)
-    values = ops.torch.randn(*kv_shape, device=device, dtype=ops.torch.bfloat16)
+    shared_kv = ops.torch.randn(*kv_shape, device=device, dtype=ops.torch.bfloat16)
     indices = ops.torch.randint(
         0,
         kv_shape[2],
@@ -103,16 +104,16 @@ def test_custom_op_decode_matches_reference_when_registered(
 
     reference_out, reference_lse = ops._decode_reference(
         query,
-        keys,
-        values,
+        shared_kv,
         indices,
+        value_head_dim=512 if family == "family_hd576" else kv_shape[-1],
         causal=False,
     )
     custom_out, custom_lse = ops.sparse_attention_forward(
         query,
-        keys,
-        values,
+        shared_kv,
         indices,
+        value_head_dim=512 if family == "family_hd576" else kv_shape[-1],
         phase="decode",
         family=family,
         causal=False,

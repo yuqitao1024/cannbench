@@ -34,44 +34,45 @@ def _build_npu_inputs(case: SparseAttentionCase, *, seed: int = 7):
         device=device,
         dtype=ops.torch.bfloat16,
     ).reshape(payload["query_shape"])
-    keys = ops.torch.tensor(
-        materialized_values_to_buffer(payload["keys"]),
+    shared_kv = ops.torch.tensor(
+        materialized_values_to_buffer(payload["shared_kv"]),
         device=device,
         dtype=ops.torch.bfloat16,
-    ).reshape(payload["key_shape"])
-    values = ops.torch.tensor(
-        materialized_values_to_buffer(payload["values"]),
-        device=device,
-        dtype=ops.torch.bfloat16,
-    ).reshape(payload["value_shape"])
+    ).reshape(payload["shared_kv_shape"])
     indices = ops.torch.tensor(
         payload["indices"],
         device=device,
         dtype=ops.torch.long,
     ).reshape(payload["indices_shape"])
-    return query, keys, values, indices
+    return query, shared_kv, indices
 
 
-def _run_reference(case: SparseAttentionCase, query, keys, values, indices):
+def _run_reference(case: SparseAttentionCase, query, shared_kv, indices):
     reference_fn = ops._decode_reference if case.phase == "decode" else ops._prefill_reference
-    return reference_fn(query, keys, values, indices, causal=case.causal)
+    return reference_fn(
+        query,
+        shared_kv,
+        indices,
+        value_head_dim=case.value_head_dim,
+        causal=case.causal,
+    )
 
 
-def _run_custom_op(case: SparseAttentionCase, query, keys, values, indices):
+def _run_custom_op(case: SparseAttentionCase, query, shared_kv, indices):
     return ops.torch.ops.aten_dsa_sparse_attention.sparse_attention_forward(
         query,
-        keys,
-        values,
+        shared_kv,
         indices,
+        case.value_head_dim,
         case.phase,
         "family_hd512" if case.qk_head_dim == 512 else "family_hd128",
         case.causal,
     )
 
 
-def _assert_matches_reference(case: SparseAttentionCase, query, keys, values, indices):
-    reference_out, reference_lse = _run_reference(case, query, keys, values, indices)
-    custom_out, custom_lse = _run_custom_op(case, query, keys, values, indices)
+def _assert_matches_reference(case: SparseAttentionCase, query, shared_kv, indices):
+    reference_out, reference_lse = _run_reference(case, query, shared_kv, indices)
+    custom_out, custom_lse = _run_custom_op(case, query, shared_kv, indices)
     assert ops.torch.allclose(custom_out.float(), reference_out.float(), atol=5e-2, rtol=5e-2)
     assert ops.torch.allclose(
         custom_lse.float(),
@@ -105,8 +106,8 @@ def test_custom_op_matches_reference_for_existing_sparse_attention_cases(
 ):
     _require_custom_sparse_attention_op()
     case = get_sparse_attention_case(dataset_name, case_id)
-    query, keys, values, indices = _build_npu_inputs(case)
-    _assert_matches_reference(case, query, keys, values, indices)
+    query, shared_kv, indices = _build_npu_inputs(case)
+    _assert_matches_reference(case, query, shared_kv, indices)
 
 
 def test_custom_op_prefill_matches_reference_for_all_invalid_rows():
@@ -115,10 +116,10 @@ def test_custom_op_prefill_matches_reference_for_all_invalid_rows():
         "stress",
         "deepseek_a5_prefill_b1_q64_ctx512_top512",
     )
-    query, keys, values, indices = _build_npu_inputs(case, seed=17)
+    query, shared_kv, indices = _build_npu_inputs(case, seed=17)
     indices = indices.clone()
     indices[:, :4, :] = case.context_tokens - 1
-    _assert_matches_reference(case, query, keys, values, indices)
+    _assert_matches_reference(case, query, shared_kv, indices)
 
 
 def test_custom_op_prefill_lse_uses_negative_infinity_not_nan_for_all_invalid_rows():
@@ -127,12 +128,12 @@ def test_custom_op_prefill_lse_uses_negative_infinity_not_nan_for_all_invalid_ro
         "stress",
         "deepseek_a5_prefill_b1_q64_ctx512_top512",
     )
-    query, keys, values, indices = _build_npu_inputs(case, seed=17)
+    query, shared_kv, indices = _build_npu_inputs(case, seed=17)
     indices = indices.clone()
     indices[:, :4, :] = case.context_tokens - 1
 
-    reference_out, reference_lse = _run_reference(case, query, keys, values, indices)
-    custom_out, custom_lse = _run_custom_op(case, query, keys, values, indices)
+    reference_out, reference_lse = _run_reference(case, query, shared_kv, indices)
+    custom_out, custom_lse = _run_custom_op(case, query, shared_kv, indices)
 
     del reference_out, custom_out
 

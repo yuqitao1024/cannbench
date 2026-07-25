@@ -409,8 +409,10 @@ def test_sparse_attention_wide_fused_kernel_uses_distinct_value_head_dim():
     assert "int32_t value_head_dim" in source
     assert "dim_index < value_head_dim" in source
     assert "const int64_t value_offset" in source
-    assert "* value_head_dim +" in source
-    assert "const auto value_head_dim = values.size(3);" in wrapper
+    assert "* value_token_stride +" in source
+    assert "batch_index * context_tokens * value_token_stride" in source
+    assert "Tensor shared_kv, Tensor indices, int value_head_dim" in wrapper
+    assert "value_head_dim > 0 && value_head_dim <= shared_kv.size(3)" in wrapper
     assert "query_tokens, value_head_dim}" in wrapper
     assert "values.size(3) == expected_head_dim" not in wrapper
 

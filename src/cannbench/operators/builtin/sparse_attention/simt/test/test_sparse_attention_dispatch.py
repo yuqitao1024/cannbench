@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -147,11 +148,20 @@ def test_build_simt_callable_passes_family_to_operator():
             )
             return tensor
 
-    def fake_forward(query, keys, values, indices, *, phase, family, causal):
+    def fake_forward(
+        query,
+        shared_kv,
+        indices,
+        *,
+        value_head_dim,
+        phase,
+        family,
+        causal,
+    ):
         captured["query_shape"] = query.shape
-        captured["key_shape"] = keys.shape
-        captured["value_shape"] = values.shape
+        captured["shared_kv_shape"] = shared_kv.shape
         captured["indices_shape"] = indices.shape
+        captured["value_head_dim"] = value_head_dim
         captured["phase"] = phase
         captured["family"] = family
         captured["causal"] = causal
@@ -167,11 +177,17 @@ def test_build_simt_callable_passes_family_to_operator():
         implementation="simt",
     )
 
+    case = replace(
+        get_sparse_attention_case("stress", "deepseek_64k_decode_top2048"),
+        batch=1,
+        context_tokens=32,
+        selected_tokens=16,
+    )
     ctx = TorchOperatorContext(
         backend=FakeBackend(),
         torch=SimpleNamespace(long="long"),
         request=request,
-        case=get_sparse_attention_case("stress", "deepseek_64k_decode_top2048"),
+        case=case,
         device="npu",
         dtype="float16",
         implementation_module=SimpleNamespace(
@@ -181,10 +197,10 @@ def test_build_simt_callable_passes_family_to_operator():
 
     operator = _build_simt_callable(ctx)
     assert operator() == "ok"
-    assert captured["query_shape"] == (8, 128, 1, 128)
-    assert captured["key_shape"] == (8, 1, 65536, 128)
-    assert captured["value_shape"] == (8, 1, 65536, 128)
-    assert captured["indices_shape"] == (8, 1, 2048)
+    assert captured["query_shape"] == (1, 128, 1, 128)
+    assert captured["shared_kv_shape"] == (1, 1, 32, 128)
+    assert captured["indices_shape"] == (1, 1, 16)
+    assert captured["value_head_dim"] == 128
     assert captured["phase"] == "decode"
     assert captured["family"] == "family_hd128"
     assert captured["causal"] is True
@@ -205,8 +221,17 @@ def test_build_simt_callable_allocates_large_inputs_directly_on_device(monkeypat
             captured["allocations"].append((shape, device, dtype))
             return FakeTensor()
 
-    def fake_forward(query, keys, values, indices, *, phase, family, causal):
-        del query, keys, values, indices
+    def fake_forward(
+        query,
+        shared_kv,
+        indices,
+        *,
+        value_head_dim,
+        phase,
+        family,
+        causal,
+    ):
+        del query, shared_kv, indices, value_head_dim
         captured.update(phase=phase, family=family, causal=causal)
         return "ok"
 
@@ -245,7 +270,6 @@ def test_build_simt_callable_allocates_large_inputs_directly_on_device(monkeypat
     assert captured["allocations"] == [
         ((60, 128, 1, 512), "npu", "bfloat16"),
         ((60, 1, 131072, 512), "npu", "bfloat16"),
-        ((60, 1, 131072, 512), "npu", "bfloat16"),
         ((60, 1, 1024), "npu", "long"),
     ]
     assert captured["phase"] == "decode"
@@ -275,8 +299,17 @@ def test_build_simt_callable_uses_bound_indices_for_large_inputs(monkeypatch):
 
     bound_indices = FakeTensor("indexer-output")
 
-    def fake_forward(query, keys, values, indices, *, phase, family, causal):
-        del query, keys, values, phase, family, causal
+    def fake_forward(
+        query,
+        shared_kv,
+        indices,
+        *,
+        value_head_dim,
+        phase,
+        family,
+        causal,
+    ):
+        del query, shared_kv, value_head_dim, phase, family, causal
         captured["indices"] = indices
         return "ok"
 
@@ -313,7 +346,7 @@ def test_build_simt_callable_uses_bound_indices_for_large_inputs(monkeypatch):
     assert _build_simt_callable(ctx)() == "ok"
     assert captured["indices"] is bound_indices
     assert captured["bound_shape"] == (60, 1, 1024)
-    assert len(captured["allocations"]) == 3
+    assert len(captured["allocations"]) == 2
 
 
 def test_build_simt_callable_rejects_unsupported_family():
