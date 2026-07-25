@@ -2,17 +2,6 @@
   "name": "realistic",
   "cases": [
     {
-      "case_id": "deepseek_128k_decode_top2048",
-      "workflow": "dsa_decode",
-      "phase": "decode",
-      "family": "decode_workflow",
-      "source_kind": "paper_shape",
-      "source_project": "DeepSeek",
-      "source_model": "DeepSeek-V3.2",
-      "source_file": "arxiv:2512.02556v1",
-      "source_op": "dsa_decode"
-    },
-    {
       "case_id": "deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048",
       "workflow": "dsa_decode",
       "phase": "decode",
@@ -43,17 +32,6 @@
       "source_project": "DeepSeek-V4-Pro+vllm-ascend",
       "source_model": "DeepSeek-V4-Pro",
       "source_file": "docs/datasets/dsa-real-sources.md#deepseek-v4-pro-vllm-decode",
-      "source_op": "dsa_decode"
-    },
-    {
-      "case_id": "glm52_vllm_ascend_decode_b3_q3_ctx131072_top2048",
-      "workflow": "dsa_decode",
-      "phase": "decode",
-      "family": "decode_workflow",
-      "source_kind": "official_e2e_test",
-      "source_project": "GLM-5.2+vllm-ascend",
-      "source_model": "GLM-5.2",
-      "source_file": "docs/datasets/dsa-real-sources.md#glm-52-vllm-ascend-decode",
       "source_op": "dsa_decode"
     }
   ]

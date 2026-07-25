@@ -2,17 +2,6 @@
   "name": "stress",
   "cases": [
     {
-      "case_id": "deepseek_128k_prefill_microbatch_top2048",
-      "workflow": "dsa_prefill",
-      "phase": "prefill",
-      "family": "prefill_workflow",
-      "source_kind": "paper_shape",
-      "source_project": "DeepSeek",
-      "source_model": "DeepSeek-V3.2",
-      "source_file": "arxiv:2512.02556v1",
-      "source_op": "dsa_prefill"
-    },
-    {
       "case_id": "vllm_ascend_a5_prefill_b1_q512_ctx512_top512",
       "workflow": "dsa_prefill",
       "phase": "prefill",

@@ -164,3 +164,50 @@ def test_flashmla_deepgemm_adapter_reports_missing_phase():
 
     with pytest.raises(RuntimeError, match="phase"):
         adapter.sparse_attention(payload={}, query="q")
+
+
+def test_flashmla_prefill_uses_distinct_qk_and_value_dimensions():
+    torch = pytest.importorskip("torch")
+    adapter = _reload_adapter()
+    query = torch.arange(8, dtype=torch.float32).reshape(1, 2, 1, 4)
+    keys = torch.tensor(
+        [[[[10.0, 11.0, 12.0, 13.0], [20.0, 21.0, 22.0, 23.0]]]]
+    )
+    values = torch.tensor([[[[30.0, 31.0], [40.0, 41.0]]]])
+
+    result = adapter._flash_mla_prefill_attention_kwargs(
+        {
+            "torch": torch,
+            "payload": {
+                "query_shape": (1, 2, 1, 4),
+                "key_shape": (1, 1, 2, 4),
+                "value_shape": (1, 1, 2, 2),
+                "indices_shape": (1, 1, 1),
+                "qk_head_dim": 4,
+                "value_head_dim": 2,
+            },
+            "query": query,
+            "keys": keys,
+            "values": values,
+            "indices": torch.tensor([[[1]]]),
+        }
+    )
+
+    assert result["q"].shape == (1, 2, 4)
+    assert result["kv"].shape == (2, 1, 4)
+    assert result["kv"].float().tolist() == [
+        [[30.0, 31.0, 12.0, 13.0]],
+        [[40.0, 41.0, 22.0, 23.0]],
+    ]
+    assert result["d_v"] == 2
+
+
+def test_flashmla_v32_decode_cache_uses_656_byte_layout():
+    torch = pytest.importorskip("torch")
+    adapter = _reload_adapter()
+    cache = torch.randn(1, 2, 1, 576, dtype=torch.bfloat16)
+
+    packed = adapter._flash_mla_fp8_k_cache(torch, cache)
+
+    assert packed.shape == (1, 2, 1, 656)
+    assert packed.dtype == torch.float8_e4m3fn

@@ -2,21 +2,6 @@
   "name": "realistic_decode",
   "cases": [
     {
-      "case_id": "deepseek_128k_decode_top2048",
-      "family": "decode_indexing",
-      "batch": 1,
-      "query_tokens": 1,
-      "context_tokens": 131072,
-      "index_heads": 4,
-      "index_dim": 64,
-      "top_k": 2048,
-      "source_kind": "paper_shape",
-      "source_project": "DeepSeek",
-      "source_model": "DeepSeek-V3.2",
-      "source_file": "arxiv:2512.02556v1",
-      "source_op": "lightning_indexer"
-    },
-    {
       "case_id": "deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048",
       "family": "decode_indexing",
       "batch": 2,
@@ -59,21 +44,6 @@
       "source_project": "DeepSeek-V4-Pro+vllm-ascend",
       "source_model": "DeepSeek-V4-Pro",
       "source_file": "docs/datasets/dsa-real-sources.md#deepseek-v4-pro-vllm-decode",
-      "source_op": "lightning_indexer"
-    },
-    {
-      "case_id": "glm52_vllm_ascend_decode_b3_q3_ctx131072_top2048",
-      "family": "decode_indexing",
-      "batch": 3,
-      "query_tokens": 3,
-      "context_tokens": 131072,
-      "index_heads": 32,
-      "index_dim": 128,
-      "top_k": 2048,
-      "source_kind": "official_e2e_test",
-      "source_project": "GLM-5.2+vllm-ascend",
-      "source_model": "GLM-5.2",
-      "source_file": "docs/datasets/dsa-real-sources.md#glm-52-vllm-ascend-decode",
       "source_op": "lightning_indexer"
     }
   ]

@@ -45,7 +45,8 @@ def _build_torch_callable(ctx):
         dtype=ctx.torch.long,
     ).reshape(payload["indices_shape"])
     def operator():
-        batch, query_heads, query_tokens, head_dim = query.shape
+        batch, query_heads, query_tokens, qk_head_dim = query.shape
+        value_head_dim = values.shape[-1]
         context_tokens = keys.shape[2]
         selected_tokens = indices.shape[2]
         expanded_keys = keys
@@ -55,18 +56,23 @@ def _build_torch_callable(ctx):
             expanded_keys = expanded_keys.repeat_interleave(repeats, dim=1)
             expanded_values = expanded_values.repeat_interleave(repeats, dim=1)
 
-        gather_index = indices[:, None, :, :, None].expand(
-            batch, query_heads, query_tokens, selected_tokens, head_dim
+        key_gather_index = indices[:, None, :, :, None].expand(
+            batch, query_heads, query_tokens, selected_tokens, qk_head_dim
+        )
+        value_gather_index = indices[:, None, :, :, None].expand(
+            batch, query_heads, query_tokens, selected_tokens, value_head_dim
         )
         key_source = expanded_keys[:, :, None, :, :].expand(
-            batch, query_heads, query_tokens, context_tokens, head_dim
+            batch, query_heads, query_tokens, context_tokens, qk_head_dim
         )
         value_source = expanded_values[:, :, None, :, :].expand(
-            batch, query_heads, query_tokens, context_tokens, head_dim
+            batch, query_heads, query_tokens, context_tokens, value_head_dim
         )
-        selected_keys = ctx.torch.gather(key_source, 3, gather_index)
-        selected_values = ctx.torch.gather(value_source, 3, gather_index)
-        scores = (query.unsqueeze(3) * selected_keys).sum(dim=-1) / math.sqrt(head_dim)
+        selected_keys = ctx.torch.gather(key_source, 3, key_gather_index)
+        selected_values = ctx.torch.gather(value_source, 3, value_gather_index)
+        scores = (query.unsqueeze(3) * selected_keys).sum(dim=-1) / math.sqrt(
+            qk_head_dim
+        )
         if payload["causal"] and payload["phase"] == "prefill":
             positions = ctx.torch.arange(query_tokens, device=query.device).reshape(
                 1, 1, query_tokens, 1
@@ -85,14 +91,15 @@ def _simt_module_name(version: str | None) -> str | None:
 
 
 def _select_simt_family(payload: dict[str, object]) -> str:
-    if payload["head_dim"] == 512 and payload["kv_heads"] == 1:
+    dimensions = (payload["qk_head_dim"], payload["value_head_dim"])
+    if dimensions == (512, 512) and payload["kv_heads"] == 1:
         return "family_hd512"
-    if payload["head_dim"] == 576 and payload["kv_heads"] == 1:
+    if dimensions == (576, 512) and payload["kv_heads"] == 1:
         return "family_hd576"
-    if payload["head_dim"] == 256 and payload["kv_heads"] == 1:
+    if dimensions == (256, 256) and payload["kv_heads"] == 1:
         return "family_hd256"
     if (
-        payload["head_dim"] == 128
+        dimensions == (128, 128)
         and payload["kv_heads"] == 1
         and payload["query_heads"] == 128
     ):
@@ -110,19 +117,19 @@ def _build_simt_callable(ctx):
                 ctx.case.batch,
                 ctx.case.query_heads,
                 ctx.case.query_tokens,
-                ctx.case.head_dim,
+                ctx.case.qk_head_dim,
             ),
             "key_shape": (
                 ctx.case.batch,
                 ctx.case.kv_heads,
                 ctx.case.context_tokens,
-                ctx.case.head_dim,
+                ctx.case.qk_head_dim,
             ),
             "value_shape": (
                 ctx.case.batch,
                 ctx.case.kv_heads,
                 ctx.case.context_tokens,
-                ctx.case.head_dim,
+                ctx.case.value_head_dim,
             ),
             "indices_shape": (
                 ctx.case.batch,
@@ -132,7 +139,8 @@ def _build_simt_callable(ctx):
             "query_heads": ctx.case.query_heads,
             "kv_heads": ctx.case.kv_heads,
             "selected_tokens": ctx.case.selected_tokens,
-            "head_dim": ctx.case.head_dim,
+            "qk_head_dim": ctx.case.qk_head_dim,
+            "value_head_dim": ctx.case.value_head_dim,
             "causal": ctx.case.causal,
             "phase": ctx.case.phase,
         }
@@ -199,11 +207,14 @@ def _build_simt_callable(ctx):
 
 def _requires_direct_device_inputs(case) -> bool:
     query_size = (
-        case.batch * case.query_heads * case.query_tokens * case.head_dim
+        case.batch * case.query_heads * case.query_tokens * case.qk_head_dim
     )
-    kv_size = case.batch * case.kv_heads * case.context_tokens * case.head_dim
+    key_size = case.batch * case.kv_heads * case.context_tokens * case.qk_head_dim
+    value_size = (
+        case.batch * case.kv_heads * case.context_tokens * case.value_head_dim
+    )
     indices_size = case.batch * case.query_tokens * case.selected_tokens
-    return max(query_size, kv_size, indices_size) > _MAX_HOST_MATERIALIZED_ELEMENTS
+    return max(query_size, key_size, value_size, indices_size) > _MAX_HOST_MATERIALIZED_ELEMENTS
 
 
 def _build_profile_kernel_selection(ctx: ProfileKernelSelectionContext):

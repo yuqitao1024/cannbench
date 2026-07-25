@@ -1115,8 +1115,8 @@ def test_lightning_indexer_simt_v1_prefers_custom_op_for_decode_family_4x64(
         implementation_version="v1",
         op="lightning_indexer",
         dtype="float16",
-        dataset="realistic_decode",
-        case_id="deepseek_128k_decode_top2048",
+        dataset="stress",
+        case_id="deepseek_batch_decode_top2048",
         seed=7,
     )
 
@@ -1262,8 +1262,8 @@ def test_ascend_backend_runs_simt_sparse_attention_through_registered_op(monkeyp
         implementation_version="v1",
         op="sparse_attention",
         dtype="float16",
-        dataset="realistic_decode",
-        case_id="deepseek_128k_decode_top2048",
+        dataset="stress",
+        case_id="deepseek_64k_decode_top2048",
         seed=7,
     )
 
@@ -1410,8 +1410,8 @@ def test_ascend_backend_prefers_sparse_attention_custom_op_for_decode_family_hd1
         implementation_version="v1",
         op="sparse_attention",
         dtype="float16",
-        dataset="realistic_decode",
-        case_id="deepseek_128k_decode_top2048",
+        dataset="stress",
+        case_id="deepseek_64k_decode_top2048",
         seed=7,
     )
 
@@ -1484,8 +1484,8 @@ def test_ascend_backend_prefers_sparse_attention_custom_op_for_prefill_family_hd
         implementation_version="v1",
         op="sparse_attention",
         dtype="float16",
-        dataset="realistic_prefill",
-        case_id="deepseek_v32_prefill_b1_q128_ctx16384_top2048",
+        dataset="smoke",
+        case_id="tiny_hd128_prefill_top8",
         seed=7,
     )
 

@@ -366,8 +366,28 @@ def test_sparse_attention_wide_fused_kernel_uses_runtime_head_dim():
 
     assert "const int32_t head_dim = shape.k;" in fused
     assert "int32_t head_dim" in fused
-    assert "dim_index < head_dim" in fused
+    assert "context_tokens * head_dim" in fused
+    assert "* head_dim +" in fused
     assert "kHeadDim" not in fused
+
+
+def test_sparse_attention_wide_fused_kernel_uses_distinct_value_head_dim():
+    source = _score_source(512)
+    wrapper = (
+        Path(__file__).parents[1]
+        / "v1"
+        / "aten_dsa_sparse_attention"
+        / "csrc"
+        / "sparse_attention.asc"
+    ).read_text()
+
+    assert "int32_t value_head_dim" in source
+    assert "dim_index < value_head_dim" in source
+    assert "const int64_t value_offset" in source
+    assert "* value_head_dim +" in source
+    assert "const auto value_head_dim = values.size(3);" in wrapper
+    assert "query_tokens, value_head_dim}" in wrapper
+    assert "values.size(3) == expected_head_dim" not in wrapper
 
 
 def test_sparse_attention_bridge_routes_all_wide_bf16_families_through_fused_helper():

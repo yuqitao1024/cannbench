@@ -83,6 +83,11 @@ def _resolve_cuda_dsa_adapter(op_name: str):
 
 
 def build_vllm_ascend_callable(ctx):
+    if ctx.case.qk_head_dim != ctx.case.value_head_dim:
+        raise RuntimeError(
+            "vllm_ascend npu_sparse_attn_sharedkv does not support distinct "
+            "QK and value head dimensions"
+        )
     metadata_op, attention_op = ctx.backend._custom_op_pair(
         ctx.torch,
         "npu_sparse_attn_sharedkv_metadata",
@@ -98,7 +103,7 @@ def build_vllm_ascend_callable(ctx):
     payload = materialize_sparse_attention_inputs(
         ctx.case, dtype=ctx.request.dtype, seed=ctx.request.seed
     )
-    batch, query_heads, query_tokens, head_dim = payload["query_shape"]
+    batch, query_heads, query_tokens, qk_head_dim = payload["query_shape"]
     _, kv_heads, context_tokens, _ = payload["key_shape"]
     selected_tokens = payload["indices_shape"][2]
     block_size = 128 if context_tokens % 128 == 0 else context_tokens
@@ -111,12 +116,12 @@ def build_vllm_ascend_callable(ctx):
             batch=batch,
             heads=query_heads,
             tokens=query_tokens,
-            dim=head_dim,
+            dim=qk_head_dim,
         ),
         device=ctx.device,
         dtype=ctx.dtype,
     )
-    query = query.reshape(batch * query_tokens, query_heads, head_dim)
+    query = query.reshape(batch * query_tokens, query_heads, qk_head_dim)
     cmp_kv = ctx.backend._tensor(
         ctx.torch,
         ctx.backend._materialized_kv_values_as_bthd(
@@ -125,13 +130,15 @@ def build_vllm_ascend_callable(ctx):
             kv_heads=kv_heads,
             context_tokens=context_tokens,
             kept_context_tokens=context_tokens,
-            logical_dim=head_dim,
-            physical_dim=head_dim,
+            logical_dim=qk_head_dim,
+            physical_dim=qk_head_dim,
         ),
         device=ctx.device,
         dtype=ctx.dtype,
     )
-    cmp_kv = cmp_kv.reshape(batch * blocks_per_batch, block_size, kv_heads, head_dim)
+    cmp_kv = cmp_kv.reshape(
+        batch * blocks_per_batch, block_size, kv_heads, qk_head_dim
+    )
     cmp_sparse_indices = ctx.backend._tensor(
         ctx.torch,
         payload["indices"],
@@ -156,12 +163,12 @@ def build_vllm_ascend_callable(ctx):
         device=ctx.device,
         dtype=ctx.torch.int32,
     )
-    softmax_scale = head_dim ** -0.5
+    softmax_scale = qk_head_dim ** -0.5
 
     metadata = metadata_op(
         num_heads_q=query_heads,
         num_heads_kv=kv_heads,
-        head_dim=head_dim,
+        head_dim=qk_head_dim,
         cu_seqlens_q=cu_seqlens_q,
         cu_seqlens_ori_kv=None,
         cu_seqlens_cmp_kv=None,

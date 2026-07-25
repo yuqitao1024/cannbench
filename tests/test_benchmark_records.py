@@ -163,6 +163,32 @@ def test_build_benchmark_record_for_vllm_ascend_sparse_attention_shape():
     assert record["shape"] == [512, 64, 512]
 
 
+def test_build_benchmark_record_for_v32_sparse_attention_uses_qk_dimension():
+    prepared = build_prepared_operator_input(
+        op="sparse_attention",
+        dtype="bfloat16",
+        dataset="realistic_decode",
+        case_id="deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048",
+        seed=0,
+    )
+    profile_summary = DeviceProfileSummary(
+        backend="ascend",
+        latency_ms=0.014,
+        source_files=("OpBasicInfo.csv",),
+    )
+
+    record = build_benchmark_record(
+        run_id="dsa/sparse-attention-v32",
+        backend="ascend",
+        implementation="simt",
+        prepared=prepared,
+        device_name="Ascend950PR_9599",
+        profile_summary=profile_summary,
+    )
+
+    assert record["shape"] == [2, 128, 576]
+
+
 def test_build_benchmark_record_for_nvidia_ncu():
     prepared = build_prepared_operator_input(
         op="softmax",

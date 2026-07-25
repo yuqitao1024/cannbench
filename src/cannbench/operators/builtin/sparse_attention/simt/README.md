@@ -15,10 +15,10 @@ Unsupported shapes are rejected by the SIMT plugin path.
 
 The current custom-op fast path covers these shape families:
 
-- `family_hd128`: `H = 128`, `KV_H = 1`, `D = 128`, `selected_tokens <= 2048`
-- `family_hd256`: `D = 256`, `KV_H = 1`, `selected_tokens <= 2048`
-- `family_hd512`: `D = 512`, `KV_H = 1`, `selected_tokens <= 2048`
-- `family_hd576`: `D = 576`, `KV_H = 1`, `selected_tokens <= 2048`
+- `family_hd128`: `H = 128`, `KV_H = 1`, `Dqk = Dv = 128`, `selected_tokens <= 2048`
+- `family_hd256`: `Dqk = Dv = 256`, `KV_H = 1`, `selected_tokens <= 2048`
+- `family_hd512`: `Dqk = Dv = 512`, `KV_H = 1`, `selected_tokens <= 2048`
+- `family_hd576`: `Dqk = 576`, `Dv = 512`, `KV_H = 1`, `selected_tokens <= 2048`
 
 Additional `family_hd128` decode restriction:
 
@@ -26,7 +26,7 @@ Additional `family_hd128` decode restriction:
 
 For the current case set in this repository, that means:
 
-- `61` cases are covered by the implemented fast paths
+- `51` cases are covered by the implemented fast paths
 - `7` cases are not implemented by the current SIMT custom op
 
 ## Realistic Case Classification
@@ -34,43 +34,32 @@ For the current case set in this repository, that means:
 For the current realistic case sets in this repository:
 
 - `realistic`: `0 / 4` supported
-- `realistic_decode`: `5 / 5` DSA workflow cases supported
-- `realistic_prefill`: `10 / 10` DSA workflow cases supported
+- `realistic_decode`: `3 / 3` DSA workflow cases supported
+- `realistic_prefill`: `3 / 3` DSA workflow cases supported
 
-All `15 / 15` current DSA workflow realistic cases route through a sparse-attention
+All `6 / 6` current DSA workflow realistic cases route through a sparse-attention
 custom-op fast path.
 
-Atlas 350 validation for the four newly routed workflows:
+Atlas 350 validation for the corrected V3.2 workflows:
 
 | Phase | Case ID | Family | Status | Accuracy / runtime |
 | --- | --- | --- | --- | --- |
-| Decode | `deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048` | `family_hd576` | Passed | Full custom-op output completed in 1.883s; sampled output max abs `0.000977`, LSE `0.000280`. |
-| Decode | `glm52_vllm_ascend_decode_b3_q3_ctx131072_top2048` | `family_hd256` | Passed | Full custom-op output completed in 0.967s; sampled output max abs `0.000977`, LSE `0.000354`. |
-| Prefill | `glm52_vllm_ascend_prefill_q4096_ctx131072_top2048` | `family_hd256` | Sampled pass | Full custom-op output completed in 412.221s; sampled output max abs `0.004883`, LSE `0.000896`. |
-| Prefill | `deepseek_v32_flashmla_prefill_q4096_ctx32768_top2048` | `family_hd576` | Full run not completed | Full-shape run was stopped because current 5-core row batching projects to about 30 minutes. H128/D576/S2048 causal prefill passed at reduced Q with output max abs `0.015625`, LSE `0.004222`. |
+| Decode | `deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048` | `family_hd576` | Reduced-shape pass; full case pending | Corrected `Dqk = 576`, `Dv = 512` path passed at B1/H128/Q1/C256/S64 with output max abs `0.015625` and LSE `0.005058`. Previous full-case result used the wrong 576/576 layout. |
+| Prefill | `deepseek_v32_flashmla_prefill_q4096_ctx32768_top2048` | `family_hd576` | Reduced-shape pass; full case pending | Corrected `Dqk = 576`, `Dv = 512` path passed at B1/H128/Q4/C256/S64 with output max abs `0.015625` and LSE `0.014242`. Previous reduced-Q result used the wrong 576/576 layout. |
 
 Supported realistic-family cases:
 
-- `realistic_decode::deepseek_128k_decode_top2048` via `family_hd128`
 - `realistic_decode::deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048` via `family_hd576`
 - `realistic_decode::deepseek_v4_flash_vllm_decode_b16_q1_ctx32768_top512` via `family_hd512`
 - `realistic_decode::deepseek_v4_pro_vllm_decode_b60_q1_ctx131072_top1024` via `family_hd512`
-- `realistic_decode::glm52_vllm_ascend_decode_b3_q3_ctx131072_top2048` via `family_hd256`
-- `realistic_prefill::deepseek_v32_prefill_b1_q128_ctx16384_top2048` via `family_hd128`
-- `realistic_prefill::deepseek_v32_prefill_b1_q128_ctx32768_top2048` via `family_hd128`
-- `realistic_prefill::deepseek_v32_prefill_b1_q128_ctx65536_top2048` via `family_hd128`
-- `realistic_prefill::deepseek_v32_prefill_b1_q128_ctx131072_top2048` via `family_hd128`
-- `realistic_prefill::deepseek_v32_prefill_b2_q128_ctx65536_top2048` via `family_hd128`
-- `realistic_prefill::deepseek_128k_prefill_microbatch_top2048` via `family_hd128`
 - `realistic_prefill::deepseek_v32_flashmla_prefill_q4096_ctx32768_top2048` via `family_hd576`
 - `realistic_prefill::deepseek_v4_flash_flashmla_prefill_q4096_ctx32768_top512` via `family_hd512`
 - `realistic_prefill::deepseek_v4_pro_vllm_prefill_q4096_ctx131072_top1024` via `family_hd512`
-- `realistic_prefill::glm52_vllm_ascend_prefill_q4096_ctx131072_top2048` via `family_hd256`
 
 ## Unimplemented Shape Families
 
-The following case groups do not match the current `family_hd512` / `family_hd128`
-fast paths and are therefore not implemented yet.
+The following case groups do not match the current fast paths and are therefore
+not implemented yet.
 
 ### 1. Small smoke-only fallback shapes
 
@@ -98,11 +87,11 @@ current `family_hd128` requirement `H = 128`.
 
 The sparse attention fast path uses the following logical tensor shapes:
 
-- `Q`: `[B, H, Q, D]`
-- `K`: `[B, KV_H, C, D]`
-- `V`: `[B, KV_H, C, D]`
+- `Q`: `[B, H, Q, Dqk]`
+- `K`: `[B, KV_H, C, Dqk]`
+- `V`: `[B, KV_H, C, Dv]`
 - `indices`: `[B, Q, S]`
-- `output`: `[B, H, Q, D]`
+- `output`: `[B, H, Q, Dv]`
 - `lse`: `[B, H, Q]`
 
 Where:
@@ -113,7 +102,8 @@ Where:
 - `Q`: query token count
 - `C`: context token count
 - `S`: selected sparse token count per query token
-- `D`: head dimension
+- `Dqk`: query/key head dimension
+- `Dv`: value/output head dimension
 
 In the common decode case, `Q = 1`. In MQA/GQA style layouts, `H` may be larger than `KV_H`, which means multiple query heads share the same KV head group.
 
@@ -129,13 +119,13 @@ V_sparse = gather(V, indices)
 
 Logical sparse shapes:
 
-- `K_sparse`: `[B, H, Q, S, D]`
-- `V_sparse`: `[B, H, Q, S, D]`
+- `K_sparse`: `[B, H, Q, S, Dqk]`
+- `V_sparse`: `[B, H, Q, S, Dv]`
 
 Then sparse attention scores are computed only on the selected positions:
 
 ```text
-scores[b, h, q, s] = dot(Q[b, h, q, :], K_sparse[b, h, q, s, :]) / sqrt(D)
+scores[b, h, q, s] = dot(Q[b, h, q, :], K_sparse[b, h, q, s, :]) / sqrt(Dqk)
 ```
 
 This produces:

@@ -22,6 +22,30 @@ def _build_sparse_attention_vllm_callable(*, backend, torch, request, case, devi
     )
 
 
+def test_ascend_vllm_sparse_attention_rejects_distinct_dimensions_before_materialize(
+    monkeypatch,
+):
+    import cannbench.operators.builtin.sparse_attention.external as external
+
+    monkeypatch.setattr(
+        external,
+        "materialize_sparse_attention_inputs",
+        lambda *args, **kwargs: pytest.fail("must reject before materializing inputs"),
+    )
+    backend = SimpleNamespace(_custom_op_pair=lambda *args: (object(), object()))
+    case = SimpleNamespace(qk_head_dim=576, value_head_dim=512)
+
+    with pytest.raises(RuntimeError, match="distinct QK and value head dimensions"):
+        _build_sparse_attention_vllm_callable(
+            backend=backend,
+            torch=SimpleNamespace(),
+            request=SimpleNamespace(dtype="bfloat16", seed=0),
+            case=case,
+            device="npu",
+            dtype="bfloat16",
+        )
+
+
 def test_operator_request_preserves_external_implementation():
     request = OperatorBenchmarkRequest(
         backend="ascend",
@@ -422,7 +446,8 @@ def test_ascend_vllm_sparse_attention_uses_bf16_wide_head_layout(monkeypatch):
         query_tokens=1,
         context_tokens=512,
         selected_tokens=512,
-        head_dim=512,
+        qk_head_dim=512,
+        value_head_dim=512,
         causal=True,
         phase="decode",
         source_kind="unit",
@@ -510,7 +535,8 @@ def test_ascend_vllm_sparse_attention_bf16_setup_avoids_device_permute(monkeypat
         query_tokens=512,
         context_tokens=512,
         selected_tokens=512,
-        head_dim=512,
+        qk_head_dim=512,
+        value_head_dim=512,
         causal=True,
         phase="prefill",
         source_kind="unit",

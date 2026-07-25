@@ -16,7 +16,8 @@ class SparseAttentionCase:
     query_tokens: int
     context_tokens: int
     selected_tokens: int
-    head_dim: int
+    qk_head_dim: int
+    value_head_dim: int
     causal: bool
     phase: str
     source_kind: str
@@ -33,7 +34,8 @@ class SparseAttentionCase:
             "query_tokens",
             "context_tokens",
             "selected_tokens",
-            "head_dim",
+            "qk_head_dim",
+            "value_head_dim",
         ):
             if getattr(self, name) <= 0:
                 raise ValueError(f"{name} must be positive")
@@ -53,7 +55,8 @@ class SparseAttentionCase:
             "query_tokens": self.query_tokens,
             "context_tokens": self.context_tokens,
             "selected_tokens": self.selected_tokens,
-            "head_dim": self.head_dim,
+            "qk_head_dim": self.qk_head_dim,
+            "value_head_dim": self.value_head_dim,
             "causal": self.causal,
             "phase": self.phase,
         }

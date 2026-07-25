@@ -17,7 +17,8 @@ from cannbench.operators.plugin import TorchOperatorContext
 
 def test_select_simt_family_prefers_hd512():
     payload = {
-        "head_dim": 512,
+        "qk_head_dim": 512,
+        "value_head_dim": 512,
         "kv_heads": 1,
         "query_heads": 128,
         "selected_tokens": 1024,
@@ -28,7 +29,8 @@ def test_select_simt_family_prefers_hd512():
 
 def test_select_simt_family_prefers_hd128():
     payload = {
-        "head_dim": 128,
+        "qk_head_dim": 128,
+        "value_head_dim": 128,
         "kv_heads": 1,
         "query_heads": 128,
         "selected_tokens": 2048,
@@ -38,19 +40,21 @@ def test_select_simt_family_prefers_hd128():
 
 
 @pytest.mark.parametrize(
-    ("head_dim", "query_heads", "expected"),
+    ("qk_head_dim", "value_head_dim", "query_heads", "expected"),
     [
-        (256, 64, "family_hd256"),
-        (576, 128, "family_hd576"),
+        (256, 256, 64, "family_hd256"),
+        (576, 512, 128, "family_hd576"),
     ],
 )
 def test_select_simt_family_prefers_new_wide_head_families(
-    head_dim,
+    qk_head_dim,
+    value_head_dim,
     query_heads,
     expected,
 ):
     payload = {
-        "head_dim": head_dim,
+        "qk_head_dim": qk_head_dim,
+        "value_head_dim": value_head_dim,
         "kv_heads": 1,
         "query_heads": query_heads,
         "selected_tokens": 2048,
@@ -61,10 +65,23 @@ def test_select_simt_family_prefers_new_wide_head_families(
 
 def test_select_simt_family_falls_back_for_unknown_shape():
     payload = {
-        "head_dim": 64,
+        "qk_head_dim": 64,
+        "value_head_dim": 64,
         "kv_heads": 12,
         "query_heads": 12,
         "selected_tokens": 512,
+    }
+
+    assert _select_simt_family(payload) == "fallback"
+
+
+def test_select_simt_family_rejects_unknown_qk_value_dimension_pair():
+    payload = {
+        "qk_head_dim": 576,
+        "value_head_dim": 576,
+        "kv_heads": 1,
+        "query_heads": 128,
+        "selected_tokens": 2048,
     }
 
     assert _select_simt_family(payload) == "fallback"
@@ -144,8 +161,8 @@ def test_build_simt_callable_passes_family_to_operator():
         backend="ascend",
         op="sparse_attention",
         dtype="float16",
-        dataset="realistic_decode",
-        case_id="deepseek_128k_decode_top2048",
+        dataset="stress",
+        case_id="deepseek_64k_decode_top2048",
         seed=7,
         implementation="simt",
     )
@@ -154,7 +171,7 @@ def test_build_simt_callable_passes_family_to_operator():
         backend=FakeBackend(),
         torch=SimpleNamespace(long="long"),
         request=request,
-        case=get_sparse_attention_case("realistic_decode", "deepseek_128k_decode_top2048"),
+        case=get_sparse_attention_case("stress", "deepseek_64k_decode_top2048"),
         device="npu",
         dtype="float16",
         implementation_module=SimpleNamespace(
@@ -164,10 +181,10 @@ def test_build_simt_callable_passes_family_to_operator():
 
     operator = _build_simt_callable(ctx)
     assert operator() == "ok"
-    assert captured["query_shape"] == (1, 128, 1, 128)
-    assert captured["key_shape"] == (1, 1, 131072, 128)
-    assert captured["value_shape"] == (1, 1, 131072, 128)
-    assert captured["indices_shape"] == (1, 1, 2048)
+    assert captured["query_shape"] == (8, 128, 1, 128)
+    assert captured["key_shape"] == (8, 1, 65536, 128)
+    assert captured["value_shape"] == (8, 1, 65536, 128)
+    assert captured["indices_shape"] == (8, 1, 2048)
     assert captured["phase"] == "decode"
     assert captured["family"] == "family_hd128"
     assert captured["causal"] is True

@@ -64,7 +64,7 @@ def _run_custom_op(case: SparseAttentionCase, query, keys, values, indices):
         values,
         indices,
         case.phase,
-        "family_hd512" if case.head_dim == 512 else "family_hd128",
+        "family_hd512" if case.qk_head_dim == 512 else "family_hd128",
         case.causal,
     )
 
@@ -89,18 +89,14 @@ def _assert_matches_reference(case: SparseAttentionCase, query, keys, values, in
         ("smoke", "deepseek_a5_decode_b1_ctx16384_top1024"),
         ("stress", "deepseek_a5_prefill_b1_q64_ctx512_top512"),
         ("stress", "deepseek_a5_prefill_b1_q512_ctx1024_top1024"),
-        ("realistic_decode", "deepseek_128k_decode_top2048"),
         ("smoke", "tiny_hd128_prefill_top8"),
-        ("realistic_prefill", "deepseek_v32_prefill_b1_q128_ctx16384_top2048"),
     ],
     ids=[
         "hd512_decode_smoke_top512",
         "hd512_decode_top1024",
         "hd512_prefill_q64_top512",
         "hd512_prefill_q512_top1024",
-        "hd128_decode_top2048",
         "hd128_prefill_smoke",
-        "hd128_prefill_top2048",
     ],
 )
 def test_custom_op_matches_reference_for_existing_sparse_attention_cases(

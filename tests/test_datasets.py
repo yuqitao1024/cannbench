@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import pytest
 from cannbench.operators.builtin.cross_entropy import (
     get_cross_entropy_case,
@@ -354,50 +356,41 @@ def test_lightning_indexer_realistic_splits_cover_declared_dsa_families():
     for split in ("realistic_decode", "realistic_prefill"):
         dataset = get_lightning_indexer_dataset(split)
 
-        assert len(dataset.cases) == (5 if split == "realistic_decode" else 10)
+        assert len(dataset.cases) == 3
         if split == "realistic_decode":
             assert {case.source_kind for case in dataset.cases} == {
-                "paper_shape",
                 "official_operator_test",
-                "official_e2e_test",
                 "derived_official_e2e_test",
             }
             assert {case.source_project for case in dataset.cases} == {
-                "DeepSeek",
                 "DeepSeek-V3.2+FlashMLA",
                 "DeepSeek-V4+vllm-ascend",
                 "DeepSeek-V4-Pro+vllm-ascend",
-                "GLM-5.2+vllm-ascend",
             }
             assert {case.source_model for case in dataset.cases} == {
                 "DeepSeek-V3.2",
                 "DeepSeek-V4-Flash",
                 "DeepSeek-V4-Pro",
-                "GLM-5.2",
             }
         else:
             assert {case.source_kind for case in dataset.cases} == {
-                "paper_shape",
                 "official_operator_test",
                 "derived_official_operator_test",
                 "derived_official_e2e_test",
             }
             assert {case.source_project for case in dataset.cases} == {
-                "DeepSeek",
                 "DeepSeek-V3.2+FlashMLA",
                 "DeepSeek-V4+FlashMLA",
                 "DeepSeek-V4-Pro+vllm-ascend",
-                "GLM-5.2+vllm-ascend",
             }
             assert {case.source_model for case in dataset.cases} == {
                 "DeepSeek-V3.2",
                 "DeepSeek-V4-Flash",
                 "DeepSeek-V4-Pro",
-                "GLM-5.2",
             }
         assert {case.source_op for case in dataset.cases} == {"lightning_indexer"}
-        expected_index_heads = {64, 32, 4}
-        expected_index_dim = {128, 64}
+        expected_index_heads = {64}
+        expected_index_dim = {128}
         assert all(case.index_heads in expected_index_heads for case in dataset.cases)
         assert all(case.index_dim in expected_index_dim for case in dataset.cases)
         expected_topk = {512, 1024, 2048} if split == "realistic_decode" else {512, 1024, 2048}
@@ -405,7 +398,7 @@ def test_lightning_indexer_realistic_splits_cover_declared_dsa_families():
         assert all(case.context_tokens % 128 == 0 for case in dataset.cases)
 
 
-def test_lightning_indexer_v4pro_moves_to_stress_but_v32_paper_stays_realistic():
+def test_lightning_indexer_excludes_unverified_v32_paper_shapes():
     stress_ids = {
         case.case_id for case in get_lightning_indexer_dataset("stress").cases
     }
@@ -415,7 +408,9 @@ def test_lightning_indexer_v4pro_moves_to_stress_but_v32_paper_stays_realistic()
     }
 
     assert "deepseek_v4pro_prefill_b1_q512_ctx4096_top1024" in stress_ids
-    assert "deepseek_v32_prefill_b1_q128_ctx16384_top2048" in realistic_ids
+    assert "deepseek_v32_prefill_b1_q128_ctx16384_top2048" not in stress_ids
+    assert "deepseek_v32_prefill_b1_q128_ctx16384_top2048" not in realistic_ids
+    assert "deepseek_v32_prefill_b1_q128_ctx131072_top2048" not in realistic_ids
 
 
 def test_get_sparse_attention_case_preserves_realistic_source_metadata():
@@ -428,7 +423,8 @@ def test_get_sparse_attention_case_preserves_realistic_source_metadata():
     assert case.query_tokens == 64
     assert case.context_tokens == 64
     assert case.selected_tokens == 32
-    assert case.head_dim == 64
+    assert case.qk_head_dim == 64
+    assert case.value_head_dim == 64
     assert case.causal is True
     assert case.phase == "prefill"
     assert case.source_project == "TritonBench"
@@ -447,21 +443,6 @@ def test_sparse_attention_dataset_loads_builtin_splits():
     assert len(stress.cases) >= 3
 
 
-def test_sparse_attention_smoke_includes_vllm_ascend_sharedkv_case():
-    case = get_sparse_attention_case("smoke", "vllm_ascend_decode_sharedkv_top64")
-
-    assert case.batch == 1
-    assert case.query_heads == 64
-    assert case.kv_heads == 1
-    assert case.query_tokens == 1
-    assert case.context_tokens == 1024
-    assert case.selected_tokens == 64
-    assert case.head_dim == 512
-    assert case.phase == "decode"
-    assert case.source_project == "vllm-ascend"
-    assert case.source_op == "npu_sparse_attn_sharedkv"
-
-
 def test_sparse_attention_smoke_includes_vllm_ascend_a5_case():
     case = get_sparse_attention_case(
         "smoke", "vllm_ascend_a5_decode_b1_ctx512_top512"
@@ -473,7 +454,8 @@ def test_sparse_attention_smoke_includes_vllm_ascend_a5_case():
     assert case.query_tokens == 1
     assert case.context_tokens == 512
     assert case.selected_tokens == 512
-    assert case.head_dim == 512
+    assert case.qk_head_dim == 512
+    assert case.value_head_dim == 512
     assert case.phase == "decode"
     assert case.source_project == "vllm-ascend"
     assert case.source_op == "npu_kv_quant_sparse_attn_sharedkv"
@@ -490,7 +472,8 @@ def test_sparse_attention_smoke_includes_vllm_ascend_a5_prefill_case():
     assert case.query_tokens == 512
     assert case.context_tokens == 512
     assert case.selected_tokens == 512
-    assert case.head_dim == 512
+    assert case.qk_head_dim == 512
+    assert case.value_head_dim == 512
     assert case.phase == "prefill"
     assert case.source_project == "vllm-ascend"
     assert case.source_op == "npu_kv_quant_sparse_attn_sharedkv"
@@ -511,13 +494,15 @@ def test_sparse_attention_stress_dataset_includes_nonofficial_a5_cases():
     assert decode_case.query_heads == 64
     assert decode_case.kv_heads == 1
     assert decode_case.selected_tokens == 1024
-    assert decode_case.head_dim == 512
+    assert decode_case.qk_head_dim == 512
+    assert decode_case.value_head_dim == 512
     assert prefill_case.phase == "prefill"
     assert prefill_case.query_tokens == 512
     assert prefill_case.query_heads == 64
     assert prefill_case.kv_heads == 1
     assert prefill_case.selected_tokens == 512
-    assert prefill_case.head_dim == 512
+    assert prefill_case.qk_head_dim == 512
+    assert prefill_case.value_head_dim == 512
 
 
 def test_sparse_attention_realistic_splits_cover_declared_dsa_families():
@@ -527,69 +512,114 @@ def test_sparse_attention_realistic_splits_cover_declared_dsa_families():
     ):
         dataset = get_sparse_attention_dataset(split)
 
-        assert len(dataset.cases) == (5 if split == "realistic_decode" else 10)
+        assert len(dataset.cases) == 3
         if split == "realistic_decode":
             assert {case.source_kind for case in dataset.cases} == {
-                "paper_shape",
                 "official_operator_test",
-                "official_e2e_test",
                 "derived_official_e2e_test",
             }
             assert {case.source_project for case in dataset.cases} == {
-                "DeepSeek",
                 "DeepSeek-V3.2+FlashMLA",
                 "DeepSeek-V4+vllm-ascend",
                 "DeepSeek-V4-Pro+vllm-ascend",
-                "GLM-5.2+vllm-ascend",
             }
             assert {case.source_model for case in dataset.cases} == {
                 "DeepSeek-V3.2",
                 "DeepSeek-V4-Flash",
                 "DeepSeek-V4-Pro",
-                "GLM-5.2",
             }
         else:
             assert {case.source_kind for case in dataset.cases} == {
-                "paper_shape",
                 "official_operator_test",
                 "derived_official_operator_test",
                 "derived_official_e2e_test",
             }
             assert {case.source_project for case in dataset.cases} == {
-                "DeepSeek",
                 "DeepSeek-V3.2+FlashMLA",
                 "DeepSeek-V4+FlashMLA",
                 "DeepSeek-V4-Pro+vllm-ascend",
-                "GLM-5.2+vllm-ascend",
             }
             assert {case.source_model for case in dataset.cases} == {
                 "DeepSeek-V3.2",
                 "DeepSeek-V4-Flash",
                 "DeepSeek-V4-Pro",
-                "GLM-5.2",
             }
         assert {case.source_op for case in dataset.cases} == {"sparse_attention"}
         assert all(case.phase == phase for case in dataset.cases)
         expected_query_heads = {64, 128} if split == "realistic_decode" else {64, 128}
         expected_kv_heads = {1}
-        expected_head_dim = {576, 512, 256, 128}
+        expected_qk_head_dim = {576, 512}
+        expected_value_head_dim = {512}
         assert all(case.query_heads in expected_query_heads for case in dataset.cases)
         assert all(case.kv_heads in expected_kv_heads for case in dataset.cases)
-        assert all(case.head_dim in expected_head_dim for case in dataset.cases)
+        assert all(case.qk_head_dim in expected_qk_head_dim for case in dataset.cases)
+        assert all(
+            case.value_head_dim in expected_value_head_dim for case in dataset.cases
+        )
         expected_selected = {512, 1024, 2048} if split == "realistic_decode" else {512, 1024, 2048}
         assert all(case.selected_tokens in expected_selected for case in dataset.cases)
         assert all(case.context_tokens % 128 == 0 for case in dataset.cases)
 
 
-def test_sparse_attention_v4pro_moves_to_stress_but_v32_paper_stays_realistic():
+@pytest.mark.parametrize(
+    ("split", "case_id"),
+    (
+        (
+            "realistic_decode",
+            "deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048",
+        ),
+        (
+            "realistic_prefill",
+            "deepseek_v32_flashmla_prefill_q4096_ctx32768_top2048",
+        ),
+    ),
+)
+def test_sparse_attention_v32_flashmla_uses_distinct_qk_and_value_dimensions(
+    split, case_id
+):
+    case = get_sparse_attention_case(split, case_id)
+
+    assert case.qk_head_dim == 576
+    assert case.value_head_dim == 512
+    assert "head_dim" not in case.payload
+
+
+def test_materialized_v32_sparse_attention_uses_value_dimension_for_values():
+    case = replace(
+        get_sparse_attention_case("smoke", "tiny_decode_top4"),
+        batch=1,
+        query_heads=1,
+        kv_heads=1,
+        query_tokens=1,
+        context_tokens=2,
+        selected_tokens=1,
+        qk_head_dim=576,
+        value_head_dim=512,
+    )
+
+    payload = materialize_sparse_attention_inputs(case, dtype="bfloat16", seed=7)
+
+    assert payload["query_shape"] == (1, 1, 1, 576)
+    assert payload["key_shape"] == (1, 1, 2, 576)
+    assert payload["value_shape"] == (1, 1, 2, 512)
+    assert payload["qk_head_dim"] == 576
+    assert payload["value_head_dim"] == 512
+    assert "head_dim" not in payload
+
+
+def test_sparse_attention_excludes_unverified_v32_paper_shapes():
     stress_ids = {case.case_id for case in get_sparse_attention_dataset("stress").cases}
+    smoke_ids = {case.case_id for case in get_sparse_attention_dataset("smoke").cases}
     realistic_ids = {
         case.case_id
         for case in get_sparse_attention_dataset("realistic_prefill").cases
     }
 
     assert "deepseek_v4pro_prefill_b1_q512_ctx4096_top1024" in stress_ids
-    assert "deepseek_v32_prefill_b1_q128_ctx16384_top2048" in realistic_ids
+    assert "deepseek_v32_prefill_b1_q128_ctx16384_top2048" not in stress_ids
+    assert "deepseek_v32_prefill_b1_q128_ctx16384_top2048" not in realistic_ids
+    assert "deepseek_v32_prefill_b1_q128_ctx131072_top2048" not in realistic_ids
+    assert "vllm_ascend_decode_sharedkv_top64" not in smoke_ids
 
 
 @pytest.mark.parametrize(
@@ -606,7 +636,7 @@ def test_sparse_attention_v4pro_moves_to_stress_but_v32_paper_stays_realistic():
             "realistic_decode",
             "deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048",
             (2, 2, 32768, 64, 128, 2048),
-            (2, 128, 1, 2, 32768, 2048, 576),
+            (2, 128, 1, 2, 32768, 2048, 576, 512),
             "DeepSeek-V3.2",
             "official_operator_test",
         ),
@@ -614,7 +644,7 @@ def test_sparse_attention_v4pro_moves_to_stress_but_v32_paper_stays_realistic():
             "realistic_prefill",
             "deepseek_v32_flashmla_prefill_q4096_ctx32768_top2048",
             (1, 4096, 32768, 64, 128, 2048),
-            (1, 128, 1, 4096, 32768, 2048, 576),
+            (1, 128, 1, 4096, 32768, 2048, 576, 512),
             "DeepSeek-V3.2",
             "official_operator_test",
         ),
@@ -622,7 +652,7 @@ def test_sparse_attention_v4pro_moves_to_stress_but_v32_paper_stays_realistic():
             "realistic_decode",
             "deepseek_v4_flash_vllm_decode_b16_q1_ctx32768_top512",
             (16, 1, 32768, 64, 128, 512),
-            (16, 64, 1, 1, 32768, 512, 512),
+            (16, 64, 1, 1, 32768, 512, 512, 512),
             "DeepSeek-V4-Flash",
             "derived_official_e2e_test",
         ),
@@ -630,7 +660,7 @@ def test_sparse_attention_v4pro_moves_to_stress_but_v32_paper_stays_realistic():
             "realistic_prefill",
             "deepseek_v4_flash_flashmla_prefill_q4096_ctx32768_top512",
             (1, 4096, 32768, 64, 128, 512),
-            (1, 64, 1, 4096, 32768, 512, 512),
+            (1, 64, 1, 4096, 32768, 512, 512, 512),
             "DeepSeek-V4-Flash",
             "derived_official_operator_test",
         ),
@@ -638,7 +668,7 @@ def test_sparse_attention_v4pro_moves_to_stress_but_v32_paper_stays_realistic():
             "realistic_decode",
             "deepseek_v4_pro_vllm_decode_b60_q1_ctx131072_top1024",
             (60, 1, 131072, 64, 128, 1024),
-            (60, 128, 1, 1, 131072, 1024, 512),
+            (60, 128, 1, 1, 131072, 1024, 512, 512),
             "DeepSeek-V4-Pro",
             "derived_official_e2e_test",
         ),
@@ -646,24 +676,8 @@ def test_sparse_attention_v4pro_moves_to_stress_but_v32_paper_stays_realistic():
             "realistic_prefill",
             "deepseek_v4_pro_vllm_prefill_q4096_ctx131072_top1024",
             (1, 4096, 131072, 64, 128, 1024),
-            (1, 128, 1, 4096, 131072, 1024, 512),
+            (1, 128, 1, 4096, 131072, 1024, 512, 512),
             "DeepSeek-V4-Pro",
-            "derived_official_e2e_test",
-        ),
-        (
-            "realistic_decode",
-            "glm52_vllm_ascend_decode_b3_q3_ctx131072_top2048",
-            (3, 3, 131072, 32, 128, 2048),
-            (3, 64, 1, 3, 131072, 2048, 256),
-            "GLM-5.2",
-            "official_e2e_test",
-        ),
-        (
-            "realistic_prefill",
-            "glm52_vllm_ascend_prefill_q4096_ctx131072_top2048",
-            (1, 4096, 131072, 32, 128, 2048),
-            (1, 64, 1, 4096, 131072, 2048, 256),
-            "GLM-5.2",
             "derived_official_e2e_test",
         ),
     ),
@@ -689,7 +703,8 @@ def test_real_world_dsa_cases_match_pinned_source_shapes(
         sparse.query_tokens,
         sparse.context_tokens,
         sparse.selected_tokens,
-        sparse.head_dim,
+        sparse.qk_head_dim,
+        sparse.value_head_dim,
     ) == sparse_shape
     assert indexer.source_model == sparse.source_model == source_model
     assert indexer.source_kind == sparse.source_kind == source_kind

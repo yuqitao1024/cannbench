@@ -13,23 +13,31 @@ def materialize_sparse_attention_inputs(
         case.batch,
         case.query_heads,
         case.query_tokens,
-        case.head_dim,
+        case.qk_head_dim,
     )
     key_shape = (
         case.batch,
         case.kv_heads,
         case.context_tokens,
-        case.head_dim,
+        case.qk_head_dim,
     )
-    value_shape = key_shape
+    value_shape = (
+        case.batch,
+        case.kv_heads,
+        case.context_tokens,
+        case.value_head_dim,
+    )
     indices_shape = (case.batch, case.query_tokens, case.selected_tokens)
-    query_size = case.batch * case.query_heads * case.query_tokens * case.head_dim
-    kv_size = case.batch * case.kv_heads * case.context_tokens * case.head_dim
+    query_size = case.batch * case.query_heads * case.query_tokens * case.qk_head_dim
+    key_size = case.batch * case.kv_heads * case.context_tokens * case.qk_head_dim
+    value_size = (
+        case.batch * case.kv_heads * case.context_tokens * case.value_head_dim
+    )
     indices_size = case.batch * case.query_tokens * case.selected_tokens
 
     query = tuple(round(generator.uniform(-1.0, 1.0), 6) for _ in range(query_size))
-    keys = tuple(round(generator.uniform(-1.0, 1.0), 6) for _ in range(kv_size))
-    values = tuple(round(generator.uniform(-1.0, 1.0), 6) for _ in range(kv_size))
+    keys = tuple(round(generator.uniform(-1.0, 1.0), 6) for _ in range(key_size))
+    values = tuple(round(generator.uniform(-1.0, 1.0), 6) for _ in range(value_size))
     if case.causal and case.phase == "prefill":
         generated_indices = []
         for _batch in range(case.batch):
@@ -48,7 +56,8 @@ def materialize_sparse_attention_inputs(
         "query_heads": case.query_heads,
         "kv_heads": case.kv_heads,
         "selected_tokens": case.selected_tokens,
-        "head_dim": case.head_dim,
+        "qk_head_dim": case.qk_head_dim,
+        "value_head_dim": case.value_head_dim,
         "causal": case.causal,
         "phase": case.phase,
         "dtype": dtype,

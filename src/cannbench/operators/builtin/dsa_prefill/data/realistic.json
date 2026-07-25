@@ -2,72 +2,6 @@
   "name": "realistic",
   "cases": [
     {
-      "case_id": "deepseek_v32_prefill_b1_q128_ctx16384_top2048",
-      "workflow": "dsa_prefill",
-      "phase": "prefill",
-      "family": "prefill_workflow",
-      "source_kind": "paper_shape",
-      "source_project": "DeepSeek",
-      "source_model": "DeepSeek-V3.2",
-      "source_file": "arxiv:2512.02556v1",
-      "source_op": "dsa_prefill"
-    },
-    {
-      "case_id": "deepseek_v32_prefill_b1_q128_ctx32768_top2048",
-      "workflow": "dsa_prefill",
-      "phase": "prefill",
-      "family": "prefill_workflow",
-      "source_kind": "paper_shape",
-      "source_project": "DeepSeek",
-      "source_model": "DeepSeek-V3.2",
-      "source_file": "arxiv:2512.02556v1",
-      "source_op": "dsa_prefill"
-    },
-    {
-      "case_id": "deepseek_v32_prefill_b1_q128_ctx65536_top2048",
-      "workflow": "dsa_prefill",
-      "phase": "prefill",
-      "family": "prefill_workflow",
-      "source_kind": "paper_shape",
-      "source_project": "DeepSeek",
-      "source_model": "DeepSeek-V3.2",
-      "source_file": "arxiv:2512.02556v1",
-      "source_op": "dsa_prefill"
-    },
-    {
-      "case_id": "deepseek_v32_prefill_b1_q128_ctx131072_top2048",
-      "workflow": "dsa_prefill",
-      "phase": "prefill",
-      "family": "prefill_workflow",
-      "source_kind": "paper_shape",
-      "source_project": "DeepSeek",
-      "source_model": "DeepSeek-V3.2",
-      "source_file": "arxiv:2512.02556v1",
-      "source_op": "dsa_prefill"
-    },
-    {
-      "case_id": "deepseek_v32_prefill_b2_q128_ctx65536_top2048",
-      "workflow": "dsa_prefill",
-      "phase": "prefill",
-      "family": "prefill_workflow",
-      "source_kind": "paper_shape",
-      "source_project": "DeepSeek",
-      "source_model": "DeepSeek-V3.2",
-      "source_file": "arxiv:2512.02556v1",
-      "source_op": "dsa_prefill"
-    },
-    {
-      "case_id": "deepseek_128k_prefill_microbatch_top2048",
-      "workflow": "dsa_prefill",
-      "phase": "prefill",
-      "family": "prefill_workflow",
-      "source_kind": "paper_shape",
-      "source_project": "DeepSeek",
-      "source_model": "DeepSeek-V3.2",
-      "source_file": "arxiv:2512.02556v1",
-      "source_op": "dsa_prefill"
-    },
-    {
       "case_id": "deepseek_v32_flashmla_prefill_q4096_ctx32768_top2048",
       "workflow": "dsa_prefill",
       "phase": "prefill",
@@ -98,17 +32,6 @@
       "source_project": "DeepSeek-V4-Pro+vllm-ascend",
       "source_model": "DeepSeek-V4-Pro",
       "source_file": "docs/datasets/dsa-real-sources.md#deepseek-v4-pro-vllm-prefill",
-      "source_op": "dsa_prefill"
-    },
-    {
-      "case_id": "glm52_vllm_ascend_prefill_q4096_ctx131072_top2048",
-      "workflow": "dsa_prefill",
-      "phase": "prefill",
-      "family": "prefill_workflow",
-      "source_kind": "derived_official_e2e_test",
-      "source_project": "GLM-5.2+vllm-ascend",
-      "source_model": "GLM-5.2",
-      "source_file": "docs/datasets/dsa-real-sources.md#glm-52-vllm-ascend-prefill",
       "source_op": "dsa_prefill"
     }
   ]

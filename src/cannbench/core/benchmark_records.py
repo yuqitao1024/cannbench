@@ -30,11 +30,14 @@ def _infer_shape(case_payload: dict[str, Any]) -> list[int]:
             int(case_payload["index_heads"]),
             int(case_payload["index_dim"]),
         ]
-    if all(key in case_payload for key in ("query_tokens", "query_heads", "head_dim")):
+    if all(
+        key in case_payload
+        for key in ("query_tokens", "query_heads", "qk_head_dim")
+    ):
         return [
             int(case_payload["query_tokens"]),
             int(case_payload["query_heads"]),
-            int(case_payload["head_dim"]),
+            int(case_payload["qk_head_dim"]),
         ]
     raise ValueError("unable to infer benchmark record shape from case payload")
 

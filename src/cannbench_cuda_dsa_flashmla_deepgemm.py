@@ -176,10 +176,22 @@ def _deep_gemm_decode_indexer_kwargs(deep_gemm, kwargs: dict[str, Any]) -> dict[
 def _flash_mla_prefill_attention_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
     torch = _require_torch(kwargs)
     payload = _require_payload(kwargs)
-    batch, query_heads, query_tokens, head_dim = payload["query_shape"]
+    batch, query_heads, query_tokens, qk_head_dim = payload["query_shape"]
     _, kv_heads, context_tokens, _ = payload["key_shape"]
-    query = _bhtd_to_bthd_flat(kwargs["query"], batch, query_heads, query_tokens, head_dim)
-    kv = _bhtd_to_bthd_flat(kwargs["values"], batch, kv_heads, context_tokens, head_dim)
+    value_head_dim = payload["value_shape"][-1]
+    query = _bhtd_to_bthd_flat(
+        kwargs["query"], batch, query_heads, query_tokens, qk_head_dim
+    )
+    shared_kv = _flash_mla_shared_kv(
+        torch,
+        kwargs["keys"],
+        kwargs["values"],
+        qk_head_dim=qk_head_dim,
+        value_head_dim=value_head_dim,
+    )
+    kv = _bhtd_to_bthd_flat(
+        shared_kv, batch, kv_heads, context_tokens, qk_head_dim
+    )
     indices = kwargs["indices"].to(torch.int32)
     offsets = (
         torch.arange(batch, device=query.device, dtype=torch.int32)
@@ -194,22 +206,27 @@ def _flash_mla_prefill_attention_kwargs(kwargs: dict[str, Any]) -> dict[str, Any
         "q": query.to(torch.bfloat16),
         "kv": kv.to(torch.bfloat16),
         "indices": indices.contiguous(),
-        "sm_scale": float(kwargs.get("softmax_scale", head_dim ** -0.5)),
-        "d_v": head_dim,
+        "sm_scale": float(kwargs.get("softmax_scale", qk_head_dim ** -0.5)),
+        "d_v": value_head_dim,
     }
 
 
-def _flash_mla_decode_attention_kwargs(flash_mla, kwargs: dict[str, Any]) -> dict[str, Any]:
+def _flash_mla_decode_attention_kwargs(
+    flash_mla, kwargs: dict[str, Any]
+) -> dict[str, Any]:
     torch = _require_torch(kwargs)
     payload = _require_payload(kwargs)
     block_size = 64
-    batch, query_heads, query_tokens, head_dim = payload["query_shape"]
+    batch, query_heads, query_tokens, qk_head_dim = payload["query_shape"]
     _, kv_heads, context_tokens, _ = payload["key_shape"]
+    value_head_dim = payload["value_shape"][-1]
     if query_tokens != 1:
         raise RuntimeError("FlashMLA decode attention requires query_tokens == 1")
     if kv_heads != 1:
         raise RuntimeError("FlashMLA sparse decode requires kv_heads == 1")
-    query = _bhtd_to_bthd(kwargs["query"], batch, query_heads, query_tokens, head_dim)
+    query = _bhtd_to_bthd(
+        kwargs["query"], batch, query_heads, query_tokens, qk_head_dim
+    )
     block_table, max_context_len = _sequential_block_table(
         torch,
         batch=batch,
@@ -217,17 +234,24 @@ def _flash_mla_decode_attention_kwargs(flash_mla, kwargs: dict[str, Any]) -> dic
         block_size=block_size,
         device=query.device,
     )
+    shared_kv = _flash_mla_shared_kv(
+        torch,
+        kwargs["keys"],
+        kwargs["values"],
+        qk_head_dim=qk_head_dim,
+        value_head_dim=value_head_dim,
+    )
     kv_cache_bf16 = _blocked_kv_cache(
         torch,
-        kwargs["values"],
+        shared_kv,
         batch=batch,
         context_tokens=context_tokens,
         kv_heads=kv_heads,
-        head_dim=head_dim,
+        head_dim=qk_head_dim,
         block_size=block_size,
         max_context_len=max_context_len,
     ).to(torch.bfloat16)
-    k_cache = _flash_mla_model1_fp8_k_cache(torch, kv_cache_bf16)
+    k_cache = _flash_mla_fp8_k_cache(torch, kv_cache_bf16)
     abs_indices = kwargs["indices"].to(torch.int32)
     indices_in_kvcache = _indices_to_kvcache_indices(
         torch,
@@ -241,10 +265,10 @@ def _flash_mla_decode_attention_kwargs(flash_mla, kwargs: dict[str, Any]) -> dic
         "k_cache": k_cache,
         "block_table": None,
         "cache_seqlens": None,
-        "head_dim_v": head_dim,
+        "head_dim_v": value_head_dim,
         "tile_scheduler_metadata": tile_scheduler_metadata,
         "num_splits": num_splits,
-        "softmax_scale": float(kwargs.get("softmax_scale", head_dim ** -0.5)),
+        "softmax_scale": float(kwargs.get("softmax_scale", qk_head_dim ** -0.5)),
         "causal": False,
         "is_fp8_kvcache": True,
         "indices": indices_in_kvcache.contiguous(),
@@ -275,7 +299,27 @@ def _bhtd_to_bthd_flat(tensor, batch: int, heads: int, tokens: int, dim: int):
     )
 
 
-def _sequential_block_table(torch, *, batch: int, context_tokens: int, block_size: int, device):
+def _flash_mla_shared_kv(
+    torch,
+    keys,
+    values,
+    *,
+    qk_head_dim: int,
+    value_head_dim: int,
+):
+    if value_head_dim > qk_head_dim:
+        raise RuntimeError("FlashMLA requires value_head_dim <= qk_head_dim")
+    if value_head_dim == qk_head_dim:
+        return values
+    return torch.cat(
+        (values, keys[..., value_head_dim:qk_head_dim]),
+        dim=-1,
+    )
+
+
+def _sequential_block_table(
+    torch, *, batch: int, context_tokens: int, block_size: int, device
+):
     blocks_per_batch = max(math.ceil(context_tokens / block_size), 1)
     max_context_len = blocks_per_batch * block_size
     block_table = torch.arange(
@@ -306,7 +350,9 @@ def _blocked_kv_cache(
             dtype=values.dtype,
         )
         values = torch.cat((values, padding), dim=1)
-    return values.reshape(batch * (max_context_len // block_size), block_size, kv_heads, head_dim)
+    return values.reshape(
+        batch * (max_context_len // block_size), block_size, kv_heads, head_dim
+    )
 
 
 def _indices_to_kvcache_indices(torch, indices, block_table, *, block_size: int):
@@ -336,7 +382,10 @@ def _per_custom_dims_cast_to_fp8(torch, tensor, *, dims: tuple[int, ...], use_ue
         bits = scale.abs().float().view(torch.int32)
         exponent = ((bits >> 23) & 0xFF) + (bits & 0x7FFFFF).bool().int()
         scale = (exponent.clamp(1, 254) << 23).view(torch.float32)
-    return (tensor * (1.0 / scale)).to(torch.float8_e4m3fn).contiguous(), scale.squeeze().contiguous()
+    return (
+        (tensor * (1.0 / scale)).to(torch.float8_e4m3fn).contiguous(),
+        scale.squeeze().contiguous(),
+    )
 
 
 def _deep_gemm_fp8_kv_cache(torch, tensor):
@@ -362,7 +411,9 @@ def _deep_gemm_fp8_kv_cache(torch, tensor):
 def _flash_mla_model1_fp8_k_cache(torch, tensor):
     num_blocks, block_size, num_heads, head_dim = tensor.shape
     if num_heads != 1 or head_dim != 512:
-        raise RuntimeError("FlashMLA MODEL1 sparse decode requires shape [blocks, block, 1, 512]")
+        raise RuntimeError(
+            "FlashMLA MODEL1 sparse decode requires shape [blocks, block, 1, 512]"
+        )
     d_nope = 448
     d_rope = 64
     tile_size = 64
@@ -389,7 +440,10 @@ def _flash_mla_model1_fp8_k_cache(torch, tensor):
     for tile_index in range(num_tiles):
         start = tile_index * tile_size
         end = start + tile_size
-        cur_scale = source[..., start:end].abs().float().amax(dim=-1).clamp(1e-4) / 448.0
+        cur_scale = (
+            source[..., start:end].abs().float().amax(dim=-1).clamp(1e-4)
+            / 448.0
+        )
         bits = cur_scale.abs().float().view(torch.int32)
         exponent = ((bits >> 23) & 0xFF) + (bits & 0x7FFFFF).bool().int()
         cur_scale = (exponent.clamp(1, 254) << 23).view(torch.float32)
@@ -398,6 +452,53 @@ def _flash_mla_model1_fp8_k_cache(torch, tensor):
             source[..., start:end].float() / cur_scale.unsqueeze(-1)
         ).to(torch.float8_e4m3fn)
     return result.view(num_blocks, block_size, num_heads, -1)
+
+
+def _flash_mla_v32_fp8_k_cache(torch, tensor):
+    num_blocks, block_size, num_heads, head_dim = tensor.shape
+    if num_heads != 1 or head_dim != 576:
+        raise RuntimeError(
+            "FlashMLA V3.2 sparse decode requires shape [blocks, block, 1, 576]"
+        )
+    d_nope = 512
+    d_rope = 64
+    tile_size = 128
+    num_tiles = 4
+    bytes_per_token = d_nope + num_tiles * 4 + 2 * d_rope
+    result = torch.empty(
+        (num_blocks, block_size + 1, bytes_per_token),
+        dtype=torch.float8_e4m3fn,
+        device=tensor.device,
+    )[:, :block_size, :]
+    nope = result[..., :d_nope]
+    scales = result[..., d_nope : d_nope + num_tiles * 4].view(torch.float32)
+    rope = result[..., d_nope + num_tiles * 4 :].view(tensor.dtype)
+    source = tensor.squeeze(2)
+    rope[:] = source[..., d_nope:]
+    for tile_index in range(num_tiles):
+        start = tile_index * tile_size
+        end = start + tile_size
+        cur_scale = (
+            source[..., start:end].abs().float().amax(dim=-1).clamp(1e-4)
+            / 448.0
+        )
+        bits = cur_scale.abs().float().view(torch.int32)
+        exponent = ((bits >> 23) & 0xFF) + (bits & 0x7FFFFF).bool().int()
+        cur_scale = (exponent.clamp(1, 254) << 23).view(torch.float32)
+        scales[..., tile_index] = cur_scale
+        nope[..., start:end] = (
+            source[..., start:end].float() / cur_scale.unsqueeze(-1)
+        ).to(torch.float8_e4m3fn)
+    return result.view(num_blocks, block_size, num_heads, bytes_per_token)
+
+
+def _flash_mla_fp8_k_cache(torch, tensor):
+    head_dim = tensor.shape[-1]
+    if head_dim == 576:
+        return _flash_mla_v32_fp8_k_cache(torch, tensor)
+    if head_dim == 512:
+        return _flash_mla_model1_fp8_k_cache(torch, tensor)
+    raise RuntimeError(f"FlashMLA sparse decode does not support qk_head_dim={head_dim}")
 
 
 def _unsupported_phase(phase: str, op_name: str) -> RuntimeError:
