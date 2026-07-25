@@ -3,14 +3,14 @@
 ## 结论
 
 CannBench 当前的 Ascend SIMT、vLLM-Ascend 和 CUDA 三条路径采用了相同的
-DSA 两阶段抽象和主要 shape，但还不能认为对外输入输出语义已经完全一致。
+DSA 两阶段抽象、逻辑输入输出和真实序列元数据合同。
 
 - 三条路径都执行 `Lightning Indexer -> indices -> Sparse Attention`。
-- 三条路径从同一套逻辑输入生成各自后端需要的物理布局；跨后端
-  conformance 还没有完全收敛。
+- 三条路径从同一套 padded canonical 输入和逐请求长度生成各自后端需要的
+  物理布局；跨后端 conformance 门禁还没有建立。
 - 底层布局、存储精度和 kernel 数量可以不同，这些属于实现差异。
-- 当前仍存在 Attention 附加输出不一致。
-- 在这些差异修复前，性能测试只能作为初步数据，不能视为严格的同语义对标。
+- 在生产量化计时边界、rank-local shape 和 conformance 收敛前，性能测试只能
+  作为初步数据，不能视为严格公平的生产实现对标。
 
 本文只讨论 DeepSeek V3.2。V4/V4 Pro、attention sink、SWA 以及完整 Attention
 Layer 的其他前后处理不在当前对齐范围内。
@@ -118,6 +118,44 @@ Sparse Attention。当前目标不是把整个 workflow 合并为一个 kernel�
 因为这是两个 kernel，`indices` 必须作为 device tensor 保存在设备全局内存中；
 要求是它不能回到 host，也不能由第二个算子重新随机生成或重新物化。
 
+## 真实序列元数据
+
+Canonical 张量使用 padded batch 表示，case 同时携带每条请求的真实长度：
+
+```text
+query_lens             [B]
+context_lens           [B]
+query_start_positions  [B]
+cu_seqlens_q            [B+1]
+cu_seqlens_kv           [B+1]
+page_block_size         scalar
+block_tables            [B, ceil(C_padded / page_block_size)]
+```
+
+其中 `query_start_positions[b]` 是该请求第一条 Query 的绝对 Token 位置；V3.2
+使用 right-aligned causal 语义，因此默认值为
+`context_lens[b] - query_lens[b]`。`cu_seqlens` 是真实长度的前缀和，例如
+`query_lens=(1, 3)` 对应 `cu_seqlens_q=(0, 1, 4)`。它用于把 padded BQ 张量
+无歧义地打包成 TND。
+
+`block_tables[b, i]` 把请求内第 `i` 个逻辑 KV page 映射到物理 page；不足
+`C_padded` 的尾部 entry 使用 `-1`。CannBench 生成的 canonical cache 当前采用
+各请求独立、顺序分配的 page，adapter 不再自行假定所有请求具有相同真实长度。
+
+Padding 行遵循固定公开语义：Indexer 返回 `-1` indices；Sparse Attention 的
+`topk_lengths` 为 0、output 为 0、LSE 为 `-inf`。Workflow 构建时会校验两阶段
+的真实 Query 长度、Context 长度、绝对位置、page 大小和 block table 完全一致。
+
+各后端按以下方式 lowering：
+
+- PyTorch baseline 保留 padded 张量，用逐行有效长度构造 mask。
+- vLLM-Ascend Indexer 将有效 Query/KV 行打包成 TND；Sparse Attention 将有效
+  Query 打包成 TND，并使用 canonical paged KV、block table 和逐请求 KV 长度。
+- CUDA prefill 将有效 Query 行打包后调用 FlashMLA，并把 TND 输出回填成统一的
+  `[B,Q,H,Dv]` / `[B,Q,H]`；paged decode 使用 canonical block table。
+- SIMT 对 uniform batch 保持一次融合 kernel 调用；ragged batch 按请求切片调用
+  同一个融合 kernel，并在 device 上组装 padded 输出，不经过 host。
+
 ## 三条实现路径
 
 ### Ascend SIMT
@@ -213,30 +251,24 @@ Workflow:
   不包含 projection、RoPE 生成、cache scatter 和 SWA
 ```
 
-三条路径现在具有相同的逻辑输入和输出合同。进入严格性能对标前，仍需完成
-真实序列元数据、量化计时边界、rank-local shape 和 conformance 门禁。
+三条路径现在具有相同的逻辑输入、输出和序列元数据合同。进入严格性能对标前，
+仍需完成量化计时边界、rank-local shape 和 conformance 门禁。
 
 ## V3.2 剩余工作
 
 本节只记录尚未闭环的事项，不保留已完成事项或历史提交清单。
 
-### 1. 增加真实序列元数据
-
-Case schema 需要表达每条请求的 `query_len`、`context_len`、绝对 Query
-position、`cu_seqlens` 和 block table，并支持 ragged batch。Prefill 不能默认
-Query 从位置 0 开始。
-
-### 2. 明确生产量化的计时边界
+### 1. 明确生产量化的计时边界
 
 需要区分静态 KV cache packing/metadata 准备与每步动态 Q 量化。静态准备应放在
 计时外；动态量化是否计时应以真实推理调用边界为准，并在三条路径中保持可比。
 
-### 3. 建立 rank-local shape 合同
+### 2. 建立 rank-local shape 合同
 
 Case 需要记录 TP/DP/CP、local heads、local batch 和 KV shard。否则无法证明
 vLLM 多卡路径与单卡 FlashMLA/SIMT 路径处理了相同的数据量。
 
-### 4. 建立三后端 Conformance 门禁
+### 3. 建立三后端 Conformance 门禁
 
 - Indexer 在相同输入下比较 Top-K recall、集合重叠和分数误差。
 - Sparse Attention 使用同一份合法 indices 比较 output 和自然对数 LSE。

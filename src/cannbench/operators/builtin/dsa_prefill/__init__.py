@@ -150,6 +150,31 @@ def _validate_component_pair(
         raise ValueError("DSA prefill component context_tokens mismatch")
     if sparse_case.selected_tokens != indexer_case.top_k:
         raise ValueError("DSA prefill component top_k mismatch")
+    for name, sparse_value, indexer_value in (
+        (
+            "query_lens",
+            sparse_case.resolved_query_lens,
+            indexer_case.resolved_query_lens,
+        ),
+        (
+            "context_lens",
+            sparse_case.resolved_context_lens,
+            indexer_case.resolved_context_lens,
+        ),
+        (
+            "query_start_positions",
+            sparse_case.resolved_query_start_positions,
+            indexer_case.resolved_query_start_positions,
+        ),
+        (
+            "page_block_size",
+            sparse_case.resolved_page_block_size,
+            indexer_case.resolved_page_block_size,
+        ),
+        ("block_tables", sparse_case.block_tables, indexer_case.block_tables),
+    ):
+        if sparse_value != indexer_value:
+            raise ValueError(f"DSA prefill component {name} mismatch")
 
 
 def _phase_from_indexer_case(case: LightningIndexerCase) -> str:

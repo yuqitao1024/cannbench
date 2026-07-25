@@ -206,6 +206,54 @@ def test_build_simt_callable_passes_family_to_operator():
     assert captured["causal"] is True
 
 
+def test_build_simt_callable_validates_topk_lengths_per_batch():
+    class FakeTensor:
+        def reshape(self, shape):
+            del shape
+            return self
+
+    class FakeBackend:
+        @staticmethod
+        def _tensor(torch, values, *, device, dtype):
+            del torch, values, device, dtype
+            return FakeTensor()
+
+    case = replace(
+        get_sparse_attention_case("stress", "deepseek_64k_decode_top2048"),
+        batch=2,
+        query_tokens=3,
+        context_tokens=8,
+        selected_tokens=4,
+        query_lens=(1, 3),
+        context_lens=(4, 8),
+        query_start_positions=(3, 5),
+        page_block_size=4,
+    )
+    ctx = TorchOperatorContext(
+        backend=FakeBackend(),
+        torch=SimpleNamespace(long="long"),
+        request=OperatorBenchmarkRequest(
+            backend="ascend",
+            op="sparse_attention",
+            dtype="float16",
+            dataset="stress",
+            case_id="deepseek_64k_decode_top2048",
+            seed=7,
+            implementation="simt",
+        ),
+        case=case,
+        device="npu",
+        dtype="float16",
+        implementation_module=SimpleNamespace(
+            ops=SimpleNamespace(sparse_attention_forward=lambda *args, **kwargs: None)
+        ),
+    )
+
+    operator = _build_simt_callable(ctx)
+
+    assert callable(operator)
+
+
 def test_build_simt_callable_allocates_large_inputs_directly_on_device(monkeypatch):
     captured: dict[str, object] = {"allocations": []}
 

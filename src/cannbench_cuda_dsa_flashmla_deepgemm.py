@@ -104,7 +104,17 @@ def _lightning_indexer_topk(kwargs: dict[str, Any], logits):
         largest=True,
         sorted=True,
     ).indices.to(torch.int32)
-    return indices.reshape(batch, query_tokens, top_k)
+    indices = indices.reshape(batch, query_tokens, top_k)
+    query_lens = payload.get("query_lens", (query_tokens,) * batch)
+    if query_lens != (query_tokens,) * batch:
+        query_positions = torch.arange(
+            query_tokens, device=indices.device, dtype=torch.int32
+        ).reshape(1, query_tokens)
+        valid_queries = query_positions < torch.tensor(
+            query_lens, device=indices.device, dtype=torch.int32
+        ).reshape(batch, 1)
+        indices = indices.masked_fill(~valid_queries.unsqueeze(-1), -1)
+    return indices
 
 
 def _deep_gemm_prefill_indexer_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
@@ -164,8 +174,13 @@ def _deep_gemm_decode_indexer_kwargs(deep_gemm, kwargs: dict[str, Any]) -> dict[
     q_fp8 = query.reshape(batch, query_tokens, index_heads, index_dim).to(
         torch.float8_e4m3fn
     )
-    block_table, max_context_len = _sequential_block_table(
-        torch, batch=batch, context_tokens=context_tokens, block_size=block_kv, device=query.device
+    block_table, max_context_len = _payload_or_sequential_block_table(
+        torch,
+        payload,
+        batch=batch,
+        context_tokens=context_tokens,
+        block_size=block_kv,
+        device=query.device,
     )
     kv_cache_bf16 = _blocked_kv_cache(
         torch,
@@ -215,29 +230,35 @@ def _flash_mla_prefill_attention_kwargs(kwargs: dict[str, Any]) -> dict[str, Any
     query = _bhtd_to_bthd_flat(
         kwargs["query"], batch, query_heads, query_tokens, qk_head_dim
     )
+    query_lens = tuple(payload.get("query_lens", (query_tokens,) * batch))
+    if query_lens != (query_tokens,) * batch:
+        query = _pack_bthd_tokens(torch, query, query_lens, query_tokens)
     kv = _bhtd_to_bthd_flat(
         kwargs["shared_kv"], batch, kv_heads, context_tokens, qk_head_dim
     )
     indices = kwargs["indices"].to(torch.int32)
-    offsets = (
-        torch.arange(batch, device=query.device, dtype=torch.int32)
-        .view(batch, 1, 1)
-        * context_tokens
+    indices = _offset_prefill_indices(
+        torch,
+        indices,
+        batch=batch,
+        context_tokens=context_tokens,
     )
-    indices = indices + offsets
-    indices = indices.reshape(batch * query_tokens, 1, payload["indices_shape"][2])
+    if query_lens != (query_tokens,) * batch:
+        indices = _pack_bq_tokens(torch, indices, query_lens)
+    indices = indices.reshape(sum(query_lens), 1, payload["indices_shape"][2])
     if kv_heads > 1:
-        indices = indices.expand(batch * query_tokens, kv_heads, payload["indices_shape"][2])
+        indices = indices.expand(sum(query_lens), kv_heads, payload["indices_shape"][2])
     return {
         "q": query.to(torch.bfloat16),
         "kv": kv.to(torch.bfloat16),
         "indices": indices.contiguous(),
         "sm_scale": float(kwargs.get("softmax_scale", qk_head_dim ** -0.5)),
         "d_v": value_head_dim,
-        "topk_length": (
-            None
-            if kwargs.get("topk_lengths") is None
-            else kwargs["topk_lengths"].reshape(batch * query_tokens)
+        "topk_length": _prefill_topk_lengths(
+            torch,
+            kwargs.get("topk_lengths"),
+            query_lens=query_lens,
+            padded_query_tokens=query_tokens,
         ),
     }
 
@@ -256,8 +277,12 @@ def _flash_mla_decode_attention_kwargs(
     query = _bhtd_to_bthd(
         kwargs["query"], batch, query_heads, query_tokens, qk_head_dim
     )
-    block_table, max_context_len = _sequential_block_table(
+    query_lens = tuple(payload.get("query_lens", (query_tokens,) * batch))
+    if query_lens != (query_tokens,) * batch:
+        raise RuntimeError("FlashMLA decode does not support ragged query batches")
+    block_table, max_context_len = _payload_or_sequential_block_table(
         torch,
+        payload,
         batch=batch,
         context_tokens=context_tokens,
         block_size=block_size,
@@ -307,6 +332,26 @@ def _decode_topk_lengths(topk_lengths, *, batch: int, query_tokens: int):
     return topk_lengths.reshape(batch)
 
 
+def _prefill_topk_lengths(
+    torch, topk_lengths, *, query_lens, padded_query_tokens: int
+):
+    if topk_lengths is None:
+        return None
+    if query_lens != (padded_query_tokens,) * len(query_lens):
+        topk_lengths = _pack_bq_tokens(torch, topk_lengths, query_lens)
+    return topk_lengths.reshape(sum(query_lens))
+
+
+def _offset_prefill_indices(torch, indices, *, batch: int, context_tokens: int):
+    invalid = indices < 0
+    offsets = (
+        torch.arange(batch, device=indices.device, dtype=torch.int32)
+        .view(batch, 1, 1)
+        * context_tokens
+    )
+    return (indices + offsets).masked_fill(invalid, -1)
+
+
 def _normalize_flash_mla_attention_result(
     kwargs: dict[str, Any], result, *, phase: str
 ):
@@ -319,8 +364,15 @@ def _normalize_flash_mla_attention_result(
                 "FlashMLA sparse prefill must return output, max_logits, and lse"
             )
         output, _, lse = result[:3]
-        output = output.reshape(batch, query_tokens, query_heads, value_head_dim)
-        lse = lse.reshape(batch, query_tokens, query_heads)
+        output, lse = _reshape_or_pad_cuda_tnd_result(
+            kwargs,
+            output,
+            lse,
+            batch=batch,
+            query_tokens=query_tokens,
+            query_heads=query_heads,
+            value_head_dim=value_head_dim,
+        )
         return _normalize_all_invalid_rows(kwargs, output, lse)
     if not isinstance(result, tuple) or len(result) < 2:
         raise RuntimeError("FlashMLA sparse decode must return output and lse")
@@ -339,6 +391,47 @@ def _normalize_all_invalid_rows(kwargs: dict[str, Any], output, lse):
     output = output.masked_fill(all_invalid.unsqueeze(-1).unsqueeze(-1), 0.0)
     lse = lse.masked_fill(all_invalid.unsqueeze(-1), float("-inf"))
     return output, lse
+
+
+def _reshape_or_pad_cuda_tnd_result(
+    kwargs,
+    output,
+    lse,
+    *,
+    batch: int,
+    query_tokens: int,
+    query_heads: int,
+    value_head_dim: int,
+):
+    query_lens = tuple(
+        _require_payload(kwargs).get("query_lens", (query_tokens,) * batch)
+    )
+    total_query_tokens = sum(query_lens)
+    output = output.reshape(total_query_tokens, query_heads, value_head_dim)
+    lse = lse.reshape(total_query_tokens, query_heads)
+    if total_query_tokens == batch * query_tokens:
+        return (
+            output.reshape(batch, query_tokens, query_heads, value_head_dim),
+            lse.reshape(batch, query_tokens, query_heads),
+        )
+    torch = _require_torch(kwargs)
+    padded_output = torch.zeros(
+        (batch, query_tokens, query_heads, value_head_dim),
+        device=output.device,
+        dtype=output.dtype,
+    )
+    padded_lse = torch.full(
+        (batch, query_tokens, query_heads),
+        float("-inf"),
+        device=lse.device,
+        dtype=lse.dtype,
+    )
+    offset = 0
+    for batch_index, query_len in enumerate(query_lens):
+        padded_output[batch_index, :query_len] = output[offset : offset + query_len]
+        padded_lse[batch_index, :query_len] = lse[offset : offset + query_len]
+        offset += query_len
+    return padded_output, padded_lse
 
 
 def _require_torch(kwargs: dict[str, Any]):
@@ -374,6 +467,52 @@ def _sequential_block_table(
         batch * blocks_per_batch, device=device, dtype=torch.int32
     ).reshape(batch, blocks_per_batch)
     return block_table, max_context_len
+
+
+def _payload_or_sequential_block_table(
+    torch,
+    payload,
+    *,
+    batch: int,
+    context_tokens: int,
+    block_size: int,
+    device,
+):
+    block_tables = payload.get("block_tables")
+    if block_tables is None:
+        return _sequential_block_table(
+            torch,
+            batch=batch,
+            context_tokens=context_tokens,
+            block_size=block_size,
+            device=device,
+        )
+    if payload["page_block_size"] != block_size:
+        raise RuntimeError("canonical page_block_size does not match backend cache")
+    blocks_per_batch = len(block_tables[0])
+    max_context_len = blocks_per_batch * block_size
+    block_table = torch.tensor(
+        tuple(value for row in block_tables for value in row),
+        device=device,
+        dtype=torch.int32,
+    ).reshape(batch, blocks_per_batch)
+    return block_table, max_context_len
+
+
+def _pack_bthd_tokens(torch, tensor, query_lens, padded_query_tokens):
+    batch = len(query_lens)
+    tensor = tensor.reshape(batch, padded_query_tokens, *tensor.shape[1:])
+    return torch.cat(
+        tuple(tensor[index, :query_len] for index, query_len in enumerate(query_lens)),
+        dim=0,
+    )
+
+
+def _pack_bq_tokens(torch, tensor, query_lens):
+    return torch.cat(
+        tuple(tensor[index, :query_len] for index, query_len in enumerate(query_lens)),
+        dim=0,
+    )
 
 
 def _blocked_kv_cache(

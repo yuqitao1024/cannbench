@@ -91,34 +91,54 @@ def build_vllm_ascend_callable(ctx):
     key_shape = payload["key_shape"]
     batch, query_tokens, index_heads, index_dim = query_shape
     context_tokens = key_shape[1]
+    query_values = _pack_padded_rows(
+        payload["query"],
+        row_width=index_heads * index_dim,
+        padded_rows=query_tokens,
+        row_counts=payload["query_lens"],
+    )
+    key_values = _pack_padded_rows(
+        payload["keys"],
+        row_width=index_dim,
+        padded_rows=context_tokens,
+        row_counts=payload["context_lens"],
+    )
+    weight_values = _pack_padded_rows(
+        payload["weights"],
+        row_width=index_heads,
+        padded_rows=query_tokens,
+        row_counts=payload["query_lens"],
+    )
+    total_query_tokens = payload["cu_seqlens_q"][-1]
+    total_context_tokens = payload["cu_seqlens_kv"][-1]
 
     query = ctx.backend._tensor(
         ctx.torch,
-        materialized_values_to_buffer(payload["query"]),
+        materialized_values_to_buffer(query_values),
         device=ctx.device,
         dtype=ctx.dtype,
-    ).reshape(batch * query_tokens, index_heads, index_dim)
+    ).reshape(total_query_tokens, index_heads, index_dim)
     keys = ctx.backend._tensor(
         ctx.torch,
-        materialized_values_to_buffer(payload["keys"]),
+        materialized_values_to_buffer(key_values),
         device=ctx.device,
         dtype=ctx.dtype,
-    ).reshape(batch * context_tokens, 1, index_dim)
+    ).reshape(total_context_tokens, 1, index_dim)
     weights = ctx.backend._tensor(
         ctx.torch,
-        materialized_values_to_buffer(payload["weights"]),
+        materialized_values_to_buffer(weight_values),
         device=ctx.device,
         dtype=ctx.dtype,
-    ).reshape(batch * query_tokens, index_heads)
+    ).reshape(total_query_tokens, index_heads)
     actual_seq_lengths_query = ctx.backend._tensor(
         ctx.torch,
-        tuple((index + 1) * query_tokens for index in range(batch)),
+        payload["cu_seqlens_q"][1:],
         device=ctx.device,
         dtype=ctx.torch.int32,
     )
     actual_seq_lengths_key = ctx.backend._tensor(
         ctx.torch,
-        tuple((index + 1) * context_tokens for index in range(batch)),
+        payload["cu_seqlens_kv"][1:],
         device=ctx.device,
         dtype=ctx.torch.int32,
     )
@@ -136,6 +156,35 @@ def build_vllm_ascend_callable(ctx):
             sparse_count=payload["top_k"],
             sparse_mode=3,
         )
-        return result[0] if isinstance(result, tuple) else result
+        indices = result[0] if isinstance(result, tuple) else result
+        indices = indices.reshape(total_query_tokens, payload["top_k"])
+        if total_query_tokens == batch * query_tokens:
+            return indices.reshape(batch, query_tokens, payload["top_k"])
+        padded = ctx.torch.full(
+            (batch, query_tokens, payload["top_k"]),
+            -1,
+            device=ctx.device,
+            dtype=ctx.torch.int32,
+        )
+        offset = 0
+        for batch_index, query_len in enumerate(payload["query_lens"]):
+            padded[batch_index, :query_len] = indices[offset : offset + query_len]
+            offset += query_len
+        return padded
 
     return operator
+
+
+def _pack_padded_rows(
+    values,
+    *,
+    row_width: int,
+    padded_rows: int,
+    row_counts: tuple[int, ...],
+):
+    packed = []
+    batch_stride = padded_rows * row_width
+    for batch_index, row_count in enumerate(row_counts):
+        start = batch_index * batch_stride
+        packed.extend(values[start : start + row_count * row_width])
+    return tuple(packed)

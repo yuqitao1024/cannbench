@@ -47,6 +47,18 @@ def _build_torch_callable(ctx):
         device=ctx.device,
         dtype=ctx.torch.int32,
     ).reshape(payload["query_shape"][0], payload["query_shape"][2])
+    context_lens = ctx.backend._tensor(
+        ctx.torch,
+        payload["context_lens"],
+        device=ctx.device,
+        dtype=ctx.torch.int32,
+    )
+    query_start_positions = ctx.backend._tensor(
+        ctx.torch,
+        payload["query_start_positions"],
+        device=ctx.device,
+        dtype=ctx.torch.int32,
+    )
     def operator():
         batch, query_heads, query_tokens, qk_head_dim = query.shape
         value_head_dim = int(payload["value_head_dim"])
@@ -60,7 +72,9 @@ def _build_torch_callable(ctx):
             expanded_keys = expanded_keys.repeat_interleave(repeats, dim=1)
             expanded_values = expanded_values.repeat_interleave(repeats, dim=1)
 
-        invalid_indices = (indices < 0) | (indices >= context_tokens)
+        invalid_indices = (indices < 0) | (
+            indices >= context_lens.reshape(batch, 1, 1)
+        )
         topk_positions = ctx.torch.arange(
             selected_tokens, device=query.device
         ).reshape(1, 1, selected_tokens)
@@ -87,9 +101,9 @@ def _build_torch_callable(ctx):
         invalid_mask = invalid_indices[:, None, :, :]
         if payload["causal"]:
             positions = (
-                ctx.torch.arange(query_tokens, device=query.device)
-                + (context_tokens - query_tokens)
-            ).reshape(1, 1, query_tokens, 1)
+                query_start_positions.reshape(batch, 1)
+                + ctx.torch.arange(query_tokens, device=query.device).reshape(1, -1)
+            ).reshape(batch, 1, query_tokens, 1)
             invalid_mask = invalid_mask | (indices[:, None, :, :] > positions)
         scores = scores.masked_fill(invalid_mask, float("-inf"))
         scores_float = scores.float()
@@ -161,6 +175,13 @@ def _build_simt_callable(ctx):
             "phase": ctx.case.phase,
             "softmax_scale": ctx.case.softmax_scale,
             "topk_lengths": ctx.case.resolved_topk_lengths,
+            "query_lens": ctx.case.resolved_query_lens,
+            "context_lens": ctx.case.resolved_context_lens,
+            "query_start_positions": ctx.case.resolved_query_start_positions,
+            "cu_seqlens_q": ctx.case.cu_seqlens_q,
+            "cu_seqlens_kv": ctx.case.cu_seqlens_kv,
+            "page_block_size": ctx.case.resolved_page_block_size,
+            "block_tables": ctx.case.block_tables,
         }
     else:
         payload = materialize_sparse_attention_inputs(
@@ -173,9 +194,18 @@ def _build_simt_callable(ctx):
         raise RuntimeError(
             "sparse_attention SIMT custom op does not support this shape family"
         )
+    ragged = (
+        payload["query_lens"] != (payload["query_shape"][2],) * ctx.case.batch
+        or payload["context_lens"]
+        != (payload["shared_kv_shape"][2],) * ctx.case.batch
+    )
     if any(
-        length != payload["selected_tokens"]
-        for length in payload["topk_lengths"]
+        payload["topk_lengths"][
+            batch_index * payload["query_shape"][2] + query_index
+        ]
+        != (payload["selected_tokens"] if query_index < query_len else 0)
+        for batch_index, query_len in enumerate(payload["query_lens"])
+        for query_index in range(payload["query_shape"][2])
     ):
         raise RuntimeError(
             "sparse_attention SIMT custom op requires full topk_lengths"
@@ -185,6 +215,18 @@ def _build_simt_callable(ctx):
         raise RuntimeError(
             "sparse_attention SIMT custom op requires qk_head_dim**-0.5 "
             "softmax_scale"
+        )
+    if ragged and any(
+        start != context_len - query_len
+        for start, context_len, query_len in zip(
+            payload["query_start_positions"],
+            payload["context_lens"],
+            payload["query_lens"],
+            strict=True,
+        )
+    ):
+        raise RuntimeError(
+            "sparse_attention SIMT ragged path requires right-aligned queries"
         )
 
     if direct_device_inputs:
@@ -220,6 +262,15 @@ def _build_simt_callable(ctx):
                 device=ctx.device,
                 dtype=ctx.torch.long,
             ).reshape(payload["indices_shape"])
+    if ragged:
+        return _build_ragged_simt_operator(
+            ctx,
+            payload,
+            query=query,
+            shared_kv=shared_kv,
+            indices=indices,
+            family=family,
+        )
     return lambda: ctx.implementation_module.ops.sparse_attention_forward(
         query,
         shared_kv,
@@ -229,6 +280,52 @@ def _build_simt_callable(ctx):
         family=family,
         causal=bool(payload["causal"]),
     )
+
+
+def _build_ragged_simt_operator(
+    ctx,
+    payload,
+    *,
+    query,
+    shared_kv,
+    indices,
+    family: str,
+):
+    batch, query_heads, padded_query_tokens, _ = payload["query_shape"]
+
+    def operator():
+        output = ctx.torch.zeros(
+            (batch, padded_query_tokens, query_heads, payload["value_head_dim"]),
+            device=ctx.device,
+            dtype=ctx.dtype,
+        )
+        lse = ctx.torch.full(
+            (batch, padded_query_tokens, query_heads),
+            float("-inf"),
+            device=ctx.device,
+            dtype=ctx.torch.float32,
+        )
+        for batch_index, (query_len, context_len) in enumerate(
+            zip(payload["query_lens"], payload["context_lens"], strict=True)
+        ):
+            if query_len == 0:
+                continue
+            request_output, request_lse = (
+                ctx.implementation_module.ops.sparse_attention_forward(
+                    query[batch_index : batch_index + 1, :, :query_len],
+                    shared_kv[batch_index : batch_index + 1, :, :context_len],
+                    indices[batch_index : batch_index + 1, :query_len],
+                    value_head_dim=int(payload["value_head_dim"]),
+                    phase=str(payload["phase"]),
+                    family=family,
+                    causal=bool(payload["causal"]),
+                )
+            )
+            output[batch_index : batch_index + 1, :query_len] = request_output
+            lse[batch_index : batch_index + 1, :query_len] = request_lse
+        return output, lse
+
+    return operator
 
 
 def _build_profile_kernel_selection(ctx: ProfileKernelSelectionContext):

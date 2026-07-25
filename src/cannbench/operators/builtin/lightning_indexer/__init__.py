@@ -42,6 +42,12 @@ def _build_torch_callable(ctx):
         device=ctx.device,
         dtype=ctx.torch.int32,
     ).reshape(payload["query_shape"][:2])
+    query_lens = ctx.backend._tensor(
+        ctx.torch,
+        payload["query_lens"],
+        device=ctx.device,
+        dtype=ctx.torch.int32,
+    )
     def operator():
         index_scores = ctx.torch.einsum("bqhd,bcd->bqhc", query, keys)
         index_scores = ctx.torch.relu(index_scores)
@@ -56,13 +62,17 @@ def _build_torch_callable(ctx):
             context_positions >= valid_lengths.unsqueeze(-1),
             float("-inf"),
         )
-        return ctx.torch.topk(
+        result = ctx.torch.topk(
             index_scores,
             payload["top_k"],
             dim=-1,
             largest=True,
             sorted=True,
         ).indices
+        valid_queries = ctx.torch.arange(
+            payload["query_shape"][1], device=query.device
+        ).reshape(1, -1) < query_lens.reshape(-1, 1)
+        return result.masked_fill(~valid_queries.unsqueeze(-1), -1)
 
     return operator
 
@@ -111,6 +121,13 @@ def _build_simt_callable(ctx):
             "causal": ctx.case.causal,
             "score_scale": ctx.case.score_scale,
             "tie_policy": ctx.case.tie_policy,
+            "query_lens": ctx.case.resolved_query_lens,
+            "context_lens": ctx.case.resolved_context_lens,
+            "query_start_positions": ctx.case.resolved_query_start_positions,
+            "cu_seqlens_q": ctx.case.cu_seqlens_q,
+            "cu_seqlens_kv": ctx.case.cu_seqlens_kv,
+            "page_block_size": ctx.case.resolved_page_block_size,
+            "block_tables": ctx.case.block_tables,
             "valid_context_lengths": valid_context_lengths(ctx.case),
         }
         query = ctx.torch.zeros(
@@ -153,6 +170,21 @@ def _build_simt_callable(ctx):
         dtype=ctx.torch.int32,
     ).reshape(payload["query_shape"][:2])
     family = _select_simt_family(payload)
+    ragged = (
+        payload["query_lens"] != (payload["query_shape"][1],) * ctx.case.batch
+        or payload["context_lens"]
+        != (payload["key_shape"][1],) * ctx.case.batch
+    )
+    if ragged:
+        return _build_ragged_simt_operator(
+            ctx,
+            payload,
+            query=query,
+            keys=keys,
+            weights=weights,
+            valid_context_lengths=native_valid_context_lengths,
+            family=family,
+        )
     return lambda: ctx.implementation_module.ops.lightning_indexer_forward(
         query,
         keys,
@@ -162,6 +194,48 @@ def _build_simt_callable(ctx):
         phase=str(payload["phase"]),
         family=family,
     )
+
+
+def _build_ragged_simt_operator(
+    ctx,
+    payload,
+    *,
+    query,
+    keys,
+    weights,
+    valid_context_lengths,
+    family: str,
+):
+    batch, padded_query_tokens = payload["query_shape"][:2]
+
+    def operator():
+        output = ctx.torch.full(
+            (batch, padded_query_tokens, payload["top_k"]),
+            -1,
+            device=ctx.device,
+            dtype=ctx.torch.int32,
+        )
+        for batch_index, (query_len, context_len) in enumerate(
+            zip(payload["query_lens"], payload["context_lens"], strict=True)
+        ):
+            if query_len == 0:
+                continue
+            output[batch_index : batch_index + 1, :query_len] = (
+                ctx.implementation_module.ops.lightning_indexer_forward(
+                    query[batch_index : batch_index + 1, :query_len],
+                    keys[batch_index : batch_index + 1, :context_len],
+                    weights[batch_index : batch_index + 1, :query_len],
+                    valid_context_lengths=valid_context_lengths[
+                        batch_index : batch_index + 1, :query_len
+                    ],
+                    top_k=int(payload["top_k"]),
+                    phase=str(payload["phase"]),
+                    family=family,
+                )
+            )
+        return output
+
+    return operator
 
 
 def _requires_direct_device_inputs(case) -> bool:

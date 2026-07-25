@@ -6,13 +6,21 @@ from .cases import LightningIndexerCase
 
 
 def valid_context_lengths(case: LightningIndexerCase) -> tuple[int, ...]:
-    if not case.causal:
-        return (case.context_tokens,) * (case.batch * case.query_tokens)
-    first_length = case.context_tokens - case.query_tokens + 1
-    row_lengths = tuple(
-        first_length + query_index for query_index in range(case.query_tokens)
-    )
-    return row_lengths * case.batch
+    row_lengths = []
+    for query_len, context_len, query_start in zip(
+        case.resolved_query_lens,
+        case.resolved_context_lens,
+        case.resolved_query_start_positions,
+        strict=True,
+    ):
+        for query_index in range(case.query_tokens):
+            if query_index >= query_len:
+                row_lengths.append(0)
+            elif case.causal:
+                row_lengths.append(min(context_len, query_start + query_index + 1))
+            else:
+                row_lengths.append(context_len)
+    return tuple(row_lengths)
 
 
 def materialize_lightning_indexer_inputs(
@@ -44,6 +52,13 @@ def materialize_lightning_indexer_inputs(
         "causal": case.causal,
         "score_scale": case.score_scale,
         "tie_policy": case.tie_policy,
+        "query_lens": case.resolved_query_lens,
+        "context_lens": case.resolved_context_lens,
+        "query_start_positions": case.resolved_query_start_positions,
+        "cu_seqlens_q": case.cu_seqlens_q,
+        "cu_seqlens_kv": case.cu_seqlens_kv,
+        "page_block_size": case.resolved_page_block_size,
+        "block_tables": case.block_tables,
         "valid_context_lengths": valid_context_lengths(case),
         "dtype": dtype,
         "query": query,

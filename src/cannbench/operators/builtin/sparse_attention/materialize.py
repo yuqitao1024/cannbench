@@ -51,13 +51,19 @@ def materialize_sparse_attention_inputs(
     for batch_index in range(case.batch):
         for query_index in range(case.query_tokens):
             row_index = batch_index * case.query_tokens + query_index
-            if case.causal:
+            query_len = case.resolved_query_lens[batch_index]
+            context_len = case.resolved_context_lens[batch_index]
+            if query_index >= query_len:
+                upper_bound = 1
+            elif case.causal:
                 upper_bound = min(
-                    case.context_tokens,
-                    case.context_tokens - case.query_tokens + query_index + 1,
+                    context_len,
+                    case.resolved_query_start_positions[batch_index]
+                    + query_index
+                    + 1,
                 )
             else:
-                upper_bound = case.context_tokens
+                upper_bound = context_len
             for selected_index in range(case.selected_tokens):
                 if selected_index < topk_lengths[row_index]:
                     generated_indices.append(generator.randrange(upper_bound))
@@ -77,6 +83,13 @@ def materialize_sparse_attention_inputs(
         "phase": case.phase,
         "softmax_scale": case.softmax_scale,
         "topk_lengths": topk_lengths,
+        "query_lens": case.resolved_query_lens,
+        "context_lens": case.resolved_context_lens,
+        "query_start_positions": case.resolved_query_start_positions,
+        "cu_seqlens_q": case.cu_seqlens_q,
+        "cu_seqlens_kv": case.cu_seqlens_kv,
+        "page_block_size": case.resolved_page_block_size,
+        "block_tables": case.block_tables,
         "dtype": dtype,
         "query": query,
         "shared_kv": shared_kv,

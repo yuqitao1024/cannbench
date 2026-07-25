@@ -141,12 +141,29 @@ def _build_vllm_sparse_flash_attention_callable(ctx):
     context_tokens = ctx.case.context_tokens
     value_head_dim = ctx.case.value_head_dim
     selected_tokens = ctx.case.selected_tokens
+    query_lens = tuple(
+        getattr(ctx.case, "resolved_query_lens", (query_tokens,) * batch)
+    )
+    context_lens = tuple(
+        getattr(ctx.case, "resolved_context_lens", (context_tokens,) * batch)
+    )
+    cu_seqlens_q = tuple(
+        getattr(
+            ctx.case,
+            "cu_seqlens_q",
+            tuple(index * query_tokens for index in range(batch + 1)),
+        )
+    )
+    total_query_tokens = cu_seqlens_q[-1]
     rope_head_dim = qk_head_dim - value_head_dim
-    block_size = _sfa_page_block_size(context_tokens)
-    blocks_per_batch = context_tokens // block_size
+    block_size = int(
+        getattr(ctx.case, "resolved_page_block_size", 0)
+        or _sfa_page_block_size(context_tokens)
+    )
+    blocks_per_batch = (context_tokens + block_size - 1) // block_size
 
-    query_shape = (batch * query_tokens, query_heads, value_head_dim)
-    query_rope_shape = (batch * query_tokens, query_heads, rope_head_dim)
+    query_shape = (total_query_tokens, query_heads, value_head_dim)
+    query_rope_shape = (total_query_tokens, query_heads, rope_head_dim)
     key_shape = (
         batch * blocks_per_batch,
         block_size,
@@ -159,7 +176,7 @@ def _build_vllm_sparse_flash_attention_callable(ctx):
         kv_heads,
         rope_head_dim,
     )
-    indices_shape = (batch * query_tokens, kv_heads, selected_tokens)
+    indices_shape = (total_query_tokens, kv_heads, selected_tokens)
     softmax_scale = float(
         getattr(ctx.case, "softmax_scale", None) or qk_head_dim**-0.5
     )
@@ -174,7 +191,13 @@ def _build_vllm_sparse_flash_attention_callable(ctx):
             key_rope_shape, device=ctx.device, dtype=ctx.dtype
         )
         value = ctx.torch.zeros(key_shape, device=ctx.device, dtype=ctx.dtype)
-        sparse_indices = bound_indices(ctx, indices_shape, dtype=ctx.torch.int32)
+        sparse_indices = _bound_tnd_indices(
+            ctx,
+            query_lens=query_lens,
+            padded_query_tokens=query_tokens,
+            kv_heads=kv_heads,
+            selected_tokens=selected_tokens,
+        )
         if sparse_indices is None:
             sparse_indices = ctx.torch.zeros(
                 indices_shape, device=ctx.device, dtype=ctx.torch.int32
@@ -189,6 +212,7 @@ def _build_vllm_sparse_flash_attention_callable(ctx):
             heads=query_heads,
             tokens=query_tokens,
             part_dims=(value_head_dim, rope_head_dim),
+            token_lens=query_lens,
         )
         key_values, key_rope_values = _split_bhtd_values_as_bthd(
             payload["shared_kv"],
@@ -219,29 +243,51 @@ def _build_vllm_sparse_flash_attention_callable(ctx):
         value = ctx.backend._tensor(
             ctx.torch, value_values, device=ctx.device, dtype=ctx.dtype
         ).reshape(key_shape)
-        sparse_indices = bound_indices(ctx, indices_shape, dtype=ctx.torch.int32)
+        sparse_indices = _bound_tnd_indices(
+            ctx,
+            query_lens=query_lens,
+            padded_query_tokens=query_tokens,
+            kv_heads=kv_heads,
+            selected_tokens=selected_tokens,
+        )
         if sparse_indices is None:
+            packed_indices = _pack_padded_token_values(
+                payload["indices"],
+                batch=batch,
+                padded_tokens=query_tokens,
+                token_lens=query_lens,
+                row_width=selected_tokens,
+            )
             sparse_indices = ctx.backend._tensor(
                 ctx.torch,
-                payload["indices"],
+                packed_indices,
                 device=ctx.device,
                 dtype=ctx.torch.int32,
             ).reshape(indices_shape)
+    block_tables = getattr(ctx.case, "block_tables", None)
+    if block_tables is None:
+        block_tables = tuple(
+            tuple(
+                batch_index * blocks_per_batch + block_index
+                for block_index in range(blocks_per_batch)
+            )
+            for batch_index in range(batch)
+        )
     block_table = ctx.backend._tensor(
         ctx.torch,
-        tuple(range(batch * blocks_per_batch)),
+        tuple(value for row in block_tables for value in row),
         device=ctx.device,
         dtype=ctx.torch.int32,
     ).reshape(batch, blocks_per_batch)
     actual_seq_lengths_query = ctx.backend._tensor(
         ctx.torch,
-        tuple((index + 1) * query_tokens for index in range(batch)),
+        cu_seqlens_q[1:],
         device=ctx.device,
         dtype=ctx.torch.int32,
     )
     actual_seq_lengths_kv = ctx.backend._tensor(
         ctx.torch,
-        tuple(context_tokens for _ in range(batch)),
+        context_lens,
         device=ctx.device,
         dtype=ctx.torch.int32,
     )
@@ -271,6 +317,7 @@ def _build_vllm_sparse_flash_attention_callable(ctx):
             query_tokens=query_tokens,
             query_heads=query_heads,
             value_head_dim=value_head_dim,
+            query_lens=query_lens,
         )
 
     return operator
@@ -293,11 +340,14 @@ def _split_bhtd_values_as_bthd(
     heads: int,
     tokens: int,
     part_dims: tuple[int, ...],
+    token_lens: tuple[int, ...] | None = None,
 ):
     logical_dim = sum(part_dims)
     parts = tuple([] for _ in part_dims)
+    if token_lens is None:
+        token_lens = (tokens,) * batch
     for batch_index in range(batch):
-        for token_index in range(tokens):
+        for token_index in range(token_lens[batch_index]):
             for head_index in range(heads):
                 offset = (
                     ((batch_index * heads + head_index) * tokens + token_index)
@@ -308,6 +358,47 @@ def _split_bhtd_values_as_bthd(
                     part.extend(values[part_offset : part_offset + part_dim])
                     part_offset += part_dim
     return tuple(materialized_values_to_buffer(part) for part in parts)
+
+
+def _pack_padded_token_values(
+    values,
+    *,
+    batch: int,
+    padded_tokens: int,
+    token_lens: tuple[int, ...],
+    row_width: int,
+):
+    packed = []
+    batch_stride = padded_tokens * row_width
+    for batch_index in range(batch):
+        start = batch_index * batch_stride
+        packed.extend(values[start : start + token_lens[batch_index] * row_width])
+    return tuple(packed)
+
+
+def _bound_tnd_indices(
+    ctx,
+    *,
+    query_lens: tuple[int, ...],
+    padded_query_tokens: int,
+    kv_heads: int,
+    selected_tokens: int,
+):
+    indices = ctx.bound_inputs.get("indices")
+    if indices is None:
+        return None
+    if getattr(indices, "dtype", ctx.torch.int32) != ctx.torch.int32:
+        indices = indices.to(dtype=ctx.torch.int32)
+    total_query_tokens = sum(query_lens)
+    if total_query_tokens == len(query_lens) * padded_query_tokens:
+        return indices.reshape(total_query_tokens, kv_heads, selected_tokens)
+    rows = tuple(
+        indices[batch_index, :query_len].reshape(
+            query_len, kv_heads, selected_tokens
+        )
+        for batch_index, query_len in enumerate(query_lens)
+    )
+    return ctx.torch.cat(rows, dim=0)
 
 
 def _build_vllm_sharedkv_callable(ctx):
@@ -466,6 +557,7 @@ def _normalize_ascend_sfa_result(
     query_tokens: int,
     query_heads: int,
     value_head_dim: int,
+    query_lens: tuple[int, ...] | None = None,
 ):
     if not isinstance(result, tuple) or len(result) < 2:
         raise RuntimeError(
@@ -473,13 +565,65 @@ def _normalize_ascend_sfa_result(
         )
     if len(result) == 2:
         output, lse = result
+        return _reshape_or_pad_tnd_result(
+            torch,
+            output,
+            lse,
+            batch=batch,
+            query_tokens=query_tokens,
+            query_heads=query_heads,
+            value_head_dim=value_head_dim,
+            query_lens=query_lens,
+        )
+    output, softmax_max, softmax_sum = result[:3]
+    lse = softmax_max + torch.log(softmax_sum)
+    return _reshape_or_pad_tnd_result(
+        torch,
+        output,
+        lse,
+        batch=batch,
+        query_tokens=query_tokens,
+        query_heads=query_heads,
+        value_head_dim=value_head_dim,
+        query_lens=query_lens,
+    )
+
+
+def _reshape_or_pad_tnd_result(
+    torch,
+    output,
+    lse,
+    *,
+    batch: int,
+    query_tokens: int,
+    query_heads: int,
+    value_head_dim: int,
+    query_lens: tuple[int, ...] | None,
+):
+    if query_lens is None:
+        query_lens = (query_tokens,) * batch
+    total_query_tokens = sum(query_lens)
+    output = output.reshape(total_query_tokens, query_heads, value_head_dim)
+    lse = lse.reshape(total_query_tokens, query_heads)
+    if total_query_tokens == batch * query_tokens:
         return (
             output.reshape(batch, query_tokens, query_heads, value_head_dim),
             lse.reshape(batch, query_tokens, query_heads),
         )
-    output, softmax_max, softmax_sum = result[:3]
-    output = output.reshape(batch, query_tokens, query_heads, value_head_dim)
-    lse = (softmax_max + torch.log(softmax_sum)).reshape(
-        batch, query_tokens, query_heads
+    padded_output = torch.zeros(
+        (batch, query_tokens, query_heads, value_head_dim),
+        device=output.device,
+        dtype=output.dtype,
     )
-    return output, lse
+    padded_lse = torch.full(
+        (batch, query_tokens, query_heads),
+        float("-inf"),
+        device=lse.device,
+        dtype=lse.dtype,
+    )
+    offset = 0
+    for batch_index, query_len in enumerate(query_lens):
+        padded_output[batch_index, :query_len] = output[offset : offset + query_len]
+        padded_lse[batch_index, :query_len] = lse[offset : offset + query_len]
+        offset += query_len
+    return padded_output, padded_lse
