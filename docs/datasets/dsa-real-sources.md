@@ -39,7 +39,8 @@ Case：`deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048`。
 `index_topk=2048`。FlashMLA 将其 production decode 模板标记为 V3.2，并
 给出 `h_q=128`、`s_q=2`、`s_k=32768`、`topk=2048`、`d_qk=576`，
 `d_v=512`，测试 batch size 中包含 `2`。CannBench 分别使用
-`qk_head_dim=576` 和 `value_head_dim=512` 表示该接口。
+`qk_head_dim=576` 和 `value_head_dim=512` 表示该接口，并从同一份
+shared-KV 数据生成 K 与 `V = K[..., :512]`。
 
 <a id="deepseek-v32-flashmla-prefill"></a>
 
@@ -49,7 +50,8 @@ Case：`deepseek_v32_flashmla_prefill_q4096_ctx32768_top2048`。
 
 模型维度来自同一份官方配置。FlashMLA 的 V3.2 performance 模板提供
 `d_qk=576`、`d_v=512`、`h_q=128`、`topk=2048`、`s_q=4096`，
-测试的 KV 长度中包含 `32768`。
+测试的 KV 长度中包含 `32768`。该 case 使用与 decode 相同的 shared-KV
+生成规则。
 
 <a id="deepseek-v4-flash-vllm-decode"></a>
 

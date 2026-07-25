@@ -581,6 +581,7 @@ def test_sparse_attention_v32_flashmla_uses_distinct_qk_and_value_dimensions(
 
     assert case.qk_head_dim == 576
     assert case.value_head_dim == 512
+    assert case.shared_kv is True
     assert "head_dim" not in case.payload
 
 
@@ -593,17 +594,23 @@ def test_materialized_v32_sparse_attention_uses_value_dimension_for_values():
         query_tokens=1,
         context_tokens=2,
         selected_tokens=1,
-        qk_head_dim=576,
-        value_head_dim=512,
+        qk_head_dim=4,
+        value_head_dim=2,
+        shared_kv=True,
     )
 
     payload = materialize_sparse_attention_inputs(case, dtype="bfloat16", seed=7)
 
-    assert payload["query_shape"] == (1, 1, 1, 576)
-    assert payload["key_shape"] == (1, 1, 2, 576)
-    assert payload["value_shape"] == (1, 1, 2, 512)
-    assert payload["qk_head_dim"] == 576
-    assert payload["value_head_dim"] == 512
+    assert payload["query_shape"] == (1, 1, 1, 4)
+    assert payload["key_shape"] == (1, 1, 2, 4)
+    assert payload["value_shape"] == (1, 1, 2, 2)
+    assert payload["qk_head_dim"] == 4
+    assert payload["value_head_dim"] == 2
+    assert payload["shared_kv"] is True
+    assert payload["values"] == (
+        *payload["keys"][0:2],
+        *payload["keys"][4:6],
+    )
     assert "head_dim" not in payload
 
 

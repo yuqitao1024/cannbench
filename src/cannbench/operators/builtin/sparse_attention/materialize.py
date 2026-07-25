@@ -37,7 +37,16 @@ def materialize_sparse_attention_inputs(
 
     query = tuple(round(generator.uniform(-1.0, 1.0), 6) for _ in range(query_size))
     keys = tuple(round(generator.uniform(-1.0, 1.0), 6) for _ in range(key_size))
-    values = tuple(round(generator.uniform(-1.0, 1.0), 6) for _ in range(value_size))
+    if case.shared_kv:
+        values = tuple(
+            keys[token_offset + dim_index]
+            for token_offset in range(0, key_size, case.qk_head_dim)
+            for dim_index in range(case.value_head_dim)
+        )
+    else:
+        values = tuple(
+            round(generator.uniform(-1.0, 1.0), 6) for _ in range(value_size)
+        )
     if case.causal and case.phase == "prefill":
         generated_indices = []
         for _batch in range(case.batch):
@@ -58,6 +67,7 @@ def materialize_sparse_attention_inputs(
         "selected_tokens": case.selected_tokens,
         "qk_head_dim": case.qk_head_dim,
         "value_head_dim": case.value_head_dim,
+        "shared_kv": case.shared_kv,
         "causal": case.causal,
         "phase": case.phase,
         "dtype": dtype,

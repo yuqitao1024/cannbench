@@ -12,6 +12,7 @@
       "selected_tokens": 2048,
       "qk_head_dim": 576,
       "value_head_dim": 512,
+      "shared_kv": true,
       "causal": true,
       "phase": "prefill",
       "source_kind": "official_operator_test",

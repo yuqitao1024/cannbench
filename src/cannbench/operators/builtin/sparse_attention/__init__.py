@@ -141,6 +141,7 @@ def _build_simt_callable(ctx):
             "selected_tokens": ctx.case.selected_tokens,
             "qk_head_dim": ctx.case.qk_head_dim,
             "value_head_dim": ctx.case.value_head_dim,
+            "shared_kv": ctx.case.shared_kv,
             "causal": ctx.case.causal,
             "phase": ctx.case.phase,
         }
@@ -163,9 +164,12 @@ def _build_simt_callable(ctx):
         keys = ctx.torch.zeros(
             payload["key_shape"], device=ctx.device, dtype=ctx.dtype
         )
-        values = ctx.torch.zeros(
-            payload["value_shape"], device=ctx.device, dtype=ctx.dtype
-        )
+        if payload["shared_kv"]:
+            values = keys[..., : payload["value_head_dim"]].contiguous()
+        else:
+            values = ctx.torch.zeros(
+                payload["value_shape"], device=ctx.device, dtype=ctx.dtype
+            )
         indices = ctx.torch.zeros(
             payload["indices_shape"], device=ctx.device, dtype=ctx.torch.long
         )

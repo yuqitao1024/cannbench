@@ -173,7 +173,7 @@ def test_flashmla_prefill_uses_distinct_qk_and_value_dimensions():
     keys = torch.tensor(
         [[[[10.0, 11.0, 12.0, 13.0], [20.0, 21.0, 22.0, 23.0]]]]
     )
-    values = torch.tensor([[[[30.0, 31.0], [40.0, 41.0]]]])
+    values = keys[..., :2]
 
     result = adapter._flash_mla_prefill_attention_kwargs(
         {
@@ -185,6 +185,7 @@ def test_flashmla_prefill_uses_distinct_qk_and_value_dimensions():
                 "indices_shape": (1, 1, 1),
                 "qk_head_dim": 4,
                 "value_head_dim": 2,
+                "shared_kv": True,
             },
             "query": query,
             "keys": keys,
@@ -196,10 +197,27 @@ def test_flashmla_prefill_uses_distinct_qk_and_value_dimensions():
     assert result["q"].shape == (1, 2, 4)
     assert result["kv"].shape == (2, 1, 4)
     assert result["kv"].float().tolist() == [
-        [[30.0, 31.0, 12.0, 13.0]],
-        [[40.0, 41.0, 22.0, 23.0]],
+        [[10.0, 11.0, 12.0, 13.0]],
+        [[20.0, 21.0, 22.0, 23.0]],
     ]
     assert result["d_v"] == 2
+
+
+def test_flashmla_shared_kv_reuses_canonical_key_tensor():
+    adapter = _reload_adapter()
+    keys = object()
+    values = object()
+
+    result = adapter._flash_mla_shared_kv(
+        None,
+        keys,
+        values,
+        qk_head_dim=4,
+        value_head_dim=2,
+        shared_kv=True,
+    )
+
+    assert result is keys
 
 
 def test_flashmla_v32_decode_cache_uses_656_byte_layout():

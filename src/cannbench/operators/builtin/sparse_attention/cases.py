@@ -25,6 +25,7 @@ class SparseAttentionCase:
     source_model: str
     source_file: str
     source_op: str
+    shared_kv: bool = False
 
     def __post_init__(self) -> None:
         for name in (
@@ -43,6 +44,8 @@ class SparseAttentionCase:
             raise ValueError("query_heads must be divisible by kv_heads")
         if self.selected_tokens > self.context_tokens:
             raise ValueError("selected_tokens must not exceed context_tokens")
+        if self.shared_kv and self.value_head_dim > self.qk_head_dim:
+            raise ValueError("shared-KV requires value_head_dim <= qk_head_dim")
         if self.phase not in {"decode", "prefill"}:
             raise ValueError("phase must be decode or prefill")
 
@@ -57,6 +60,7 @@ class SparseAttentionCase:
             "selected_tokens": self.selected_tokens,
             "qk_head_dim": self.qk_head_dim,
             "value_head_dim": self.value_head_dim,
+            "shared_kv": self.shared_kv,
             "causal": self.causal,
             "phase": self.phase,
         }

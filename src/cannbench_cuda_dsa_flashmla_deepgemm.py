@@ -188,6 +188,7 @@ def _flash_mla_prefill_attention_kwargs(kwargs: dict[str, Any]) -> dict[str, Any
         kwargs["values"],
         qk_head_dim=qk_head_dim,
         value_head_dim=value_head_dim,
+        shared_kv=bool(payload.get("shared_kv", False)),
     )
     kv = _bhtd_to_bthd_flat(
         shared_kv, batch, kv_heads, context_tokens, qk_head_dim
@@ -240,6 +241,7 @@ def _flash_mla_decode_attention_kwargs(
         kwargs["values"],
         qk_head_dim=qk_head_dim,
         value_head_dim=value_head_dim,
+        shared_kv=bool(payload.get("shared_kv", False)),
     )
     kv_cache_bf16 = _blocked_kv_cache(
         torch,
@@ -306,9 +308,12 @@ def _flash_mla_shared_kv(
     *,
     qk_head_dim: int,
     value_head_dim: int,
+    shared_kv: bool = False,
 ):
     if value_head_dim > qk_head_dim:
         raise RuntimeError("FlashMLA requires value_head_dim <= qk_head_dim")
+    if shared_kv:
+        return keys
     if value_head_dim == qk_head_dim:
         return values
     return torch.cat(
