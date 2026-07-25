@@ -265,13 +265,13 @@ def test_ascend_softmax_v3_fast_path_uses_real_ilp_and_shifted_half2():
     reg_start = source.index("row_softmax_fast_reg_forward_vf")
     fast_source = source[fast_start:reg_start]
 
-    assert "constexpr int64_t kFastILP = 4;" in fast_source
+    assert "constexpr int64_t kFastILP = 4;" in source
     assert "offset = threadIdx.x * kILP" in source
     assert "offset += blockDim.x * kILP" in source
     assert "fast_ilp_softmax_write" in source
     assert "fast_fp16x2_reduce" in source
     assert "fast_fp16x2_write" in source
-    assert "const int64_t fp16x2_shift = (row * dim_size) % 2;" in fast_source
+    assert "const int64_t fp16x2_shift = row_softmax_fast_fp16x2_shift(row, dim_size);" in source
     assert "aligned_data = data + shift" in source
     assert "aligned_input = input + shift" in source
 
@@ -306,6 +306,26 @@ def test_ascend_softmax_v3_fast_path_uses_large_row_recompute_for_logits_scale_d
     assert "dim3(kThreadsPerBlock)," in source
     assert "32768>(" in source
     assert "16384>(" in source
+
+
+def test_ascend_softmax_v3_fast_path_uses_large_row_gmem_workspace_for_very_large_logits():
+    row_fast_source = _read_v3_simt_source("row_fast.asc")
+    spatial_source = _read_v3_simt_source("spatial_softmax.asc")
+
+    assert "inline bool use_large_row_gmem_row_softmax_fast(int64_t dim_size)" in row_fast_source
+    assert "row_softmax_fast_large_gmem_max_vf" in row_fast_source
+    assert "row_softmax_fast_large_gmem_sum_vf" in row_fast_source
+    assert "row_softmax_fast_large_gmem_write_vf" in row_fast_source
+    assert "row_softmax_fast_large_gmem_max_kernel" in row_fast_source
+    assert "row_softmax_fast_large_gmem_sum_kernel" in row_fast_source
+    assert "row_softmax_fast_large_gmem_write_kernel" in row_fast_source
+    assert "launch_row_fast_large_gmem_forward_kernel" in row_fast_source
+    assert "dispatch_row_fast_large_gmem_forward_kernel" in row_fast_source
+    assert "use_large_row_gmem_workspace_row_softmax_fast" in spatial_source
+    assert "auto row_max = at::empty({outer_size}" in spatial_source
+    assert "auto row_inv_sum = at::empty({outer_size}" in spatial_source
+    assert "row_max.mutable_data_ptr<float>()" in spatial_source
+    assert "row_inv_sum.mutable_data_ptr<float>()" in spatial_source
 
 
 def test_ascend_softmax_v3_uses_mixed_simd_simt_vf_launch_model():
