@@ -22,28 +22,189 @@ def _build_sparse_attention_vllm_callable(*, backend, torch, request, case, devi
     )
 
 
-def test_ascend_vllm_sparse_attention_rejects_distinct_dimensions_before_materialize(
+def test_ascend_vllm_sparse_attention_uses_sparse_flash_attention_for_v32(
     monkeypatch,
 ):
     import cannbench.operators.builtin.sparse_attention.external as external
 
+    calls: dict[str, dict[str, object]] = {}
+
+    class FakeTensor:
+        def __init__(self, name="tensor", shape=()):
+            self.name = name
+            self.shape = shape
+
+        def reshape(self, *shape):
+            self.shape = shape[0] if len(shape) == 1 else shape
+            return self
+
+    class FakeTorch:
+        int32 = "int32"
+
+    def fake_sparse_flash_attention(
+        query,
+        key,
+        value,
+        sparse_indices,
+        scale_value,
+        sparse_block_size,
+        *,
+        block_table=None,
+        actual_seq_lengths_query=None,
+        actual_seq_lengths_kv=None,
+        query_rope=None,
+        key_rope=None,
+        layout_query="BSND",
+        layout_kv="BSND",
+        sparse_mode=3,
+    ):
+        calls["attention"] = {
+            "query": query,
+            "key": key,
+            "value": value,
+            "sparse_indices": sparse_indices,
+            "scale_value": scale_value,
+            "sparse_block_size": sparse_block_size,
+            "block_table": block_table,
+            "actual_seq_lengths_query": actual_seq_lengths_query,
+            "actual_seq_lengths_kv": actual_seq_lengths_kv,
+            "query_rope": query_rope,
+            "key_rope": key_rope,
+            "layout_query": layout_query,
+            "layout_kv": layout_kv,
+            "sparse_mode": sparse_mode,
+        }
+        return FakeTensor("out")
+
+    payload = {
+        "query_shape": (1, 128, 1, 576),
+        "key_shape": (1, 1, 16, 576),
+        "value_shape": (1, 1, 16, 512),
+        "indices_shape": (1, 1, 4),
+        "query": tuple(0.0 for _ in range(128 * 576)),
+        "keys": tuple(0.0 for _ in range(16 * 576)),
+        "values": tuple(0.0 for _ in range(16 * 512)),
+        "indices": (0, 1, 2, 3),
+    }
     monkeypatch.setattr(
         external,
         "materialize_sparse_attention_inputs",
-        lambda *args, **kwargs: pytest.fail("must reject before materializing inputs"),
+        lambda *args, **kwargs: payload,
     )
-    backend = SimpleNamespace(_custom_op_pair=lambda *args: (object(), object()))
-    case = SimpleNamespace(qk_head_dim=576, value_head_dim=512)
+    backend = SimpleNamespace(
+        _ascend_custom_ops=lambda torch: SimpleNamespace(
+            npu_sparse_flash_attention=fake_sparse_flash_attention
+        ),
+        _tensor=lambda torch, values, *, device, dtype: FakeTensor(
+            shape=(len(values),)
+        ),
+        _custom_op_pair=lambda *args: pytest.fail("sharedkv ops must not be selected"),
+    )
+    case = SimpleNamespace(
+        batch=1,
+        query_heads=128,
+        kv_heads=1,
+        query_tokens=1,
+        context_tokens=16,
+        selected_tokens=4,
+        qk_head_dim=576,
+        value_head_dim=512,
+        shared_kv=True,
+    )
 
-    with pytest.raises(RuntimeError, match="distinct QK and value head dimensions"):
-        _build_sparse_attention_vllm_callable(
-            backend=backend,
-            torch=SimpleNamespace(),
-            request=SimpleNamespace(dtype="bfloat16", seed=0),
-            case=case,
-            device="npu",
-            dtype="bfloat16",
-        )
+    operator = _build_sparse_attention_vllm_callable(
+        backend=backend,
+        torch=FakeTorch(),
+        request=SimpleNamespace(dtype="bfloat16", seed=0),
+        case=case,
+        device="npu",
+        dtype="bfloat16",
+    )
+    output = operator()
+
+    assert output.name == "out"
+    assert calls["attention"]["query"].shape == (1, 128, 512)
+    assert calls["attention"]["query_rope"].shape == (1, 128, 64)
+    assert calls["attention"]["key"].shape == (1, 16, 1, 512)
+    assert calls["attention"]["key_rope"].shape == (1, 16, 1, 64)
+    assert calls["attention"]["value"].shape == (1, 16, 1, 512)
+    assert calls["attention"]["sparse_indices"].shape == (1, 1, 4)
+    assert calls["attention"]["block_table"].shape == (1, 1)
+    assert calls["attention"]["actual_seq_lengths_query"].shape == (1,)
+    assert calls["attention"]["actual_seq_lengths_kv"].shape == (1,)
+    assert calls["attention"]["scale_value"] == pytest.approx(576**-0.5)
+    assert calls["attention"]["layout_query"] == "TND"
+    assert calls["attention"]["layout_kv"] == "PA_BSND"
+
+
+def test_ascend_vllm_v32_prefill_allocates_large_inputs_on_device(monkeypatch):
+    import cannbench.operators.builtin.sparse_attention.external as external
+
+    allocations: list[tuple[tuple[int, ...], object]] = []
+
+    class FakeTensor:
+        def __init__(self, shape):
+            self.shape = shape
+
+        def reshape(self, *shape):
+            self.shape = shape[0] if len(shape) == 1 else shape
+            return self
+
+    class FakeTorch:
+        int32 = "int32"
+
+        @staticmethod
+        def zeros(shape, *, device, dtype):
+            del device
+            allocations.append((shape, dtype))
+            return FakeTensor(shape)
+
+    def fake_sparse_flash_attention(*args, **kwargs):
+        del args, kwargs
+        return FakeTensor((4096, 128, 512))
+
+    monkeypatch.setattr(
+        external,
+        "materialize_sparse_attention_inputs",
+        lambda *args, **kwargs: pytest.fail("large inputs must not use host materialization"),
+    )
+    backend = SimpleNamespace(
+        _ascend_custom_ops=lambda torch: SimpleNamespace(
+            npu_sparse_flash_attention=fake_sparse_flash_attention
+        ),
+        _tensor=lambda torch, values, *, device, dtype: FakeTensor((len(values),)),
+    )
+    case = SimpleNamespace(
+        batch=1,
+        query_heads=128,
+        kv_heads=1,
+        query_tokens=4096,
+        context_tokens=32768,
+        selected_tokens=2048,
+        qk_head_dim=576,
+        value_head_dim=512,
+        shared_kv=True,
+    )
+
+    operator = _build_sparse_attention_vllm_callable(
+        backend=backend,
+        torch=FakeTorch(),
+        request=SimpleNamespace(dtype="bfloat16", seed=0),
+        case=case,
+        device="npu",
+        dtype="bfloat16",
+    )
+    output = operator()
+
+    assert output.shape == (4096, 128, 512)
+    assert allocations == [
+        ((4096, 128, 512), "bfloat16"),
+        ((4096, 128, 64), "bfloat16"),
+        ((256, 128, 1, 512), "bfloat16"),
+        ((256, 128, 1, 64), "bfloat16"),
+        ((256, 128, 1, 512), "bfloat16"),
+        ((4096, 1, 2048), "int32"),
+    ]
 
 
 def test_operator_request_preserves_external_implementation():

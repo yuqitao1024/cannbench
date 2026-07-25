@@ -4,7 +4,10 @@ import math
 
 from cannbench.core.profile import ProfileKernelSelection
 from cannbench.operators.materialize import materialized_values_to_buffer
-from .materialize import materialize_sparse_attention_inputs
+from .materialize import (
+    _requires_direct_device_inputs,
+    materialize_sparse_attention_inputs,
+)
 from .cases import (
     get_sparse_attention_case,
     get_sparse_attention_dataset,
@@ -12,9 +15,6 @@ from .cases import (
 from cannbench.operators.plugin import OperatorPlugin, ProfileKernelSelectionContext
 from cannbench.operators.spec import OperatorSpec
 from .external import build_cuda_library_callable, build_vllm_ascend_callable
-
-_MAX_HOST_MATERIALIZED_ELEMENTS = 64 * 1024 * 1024
-
 
 def _build_torch_callable(ctx):
     payload = materialize_sparse_attention_inputs(
@@ -207,18 +207,6 @@ def _build_simt_callable(ctx):
         family=family,
         causal=bool(payload["causal"]),
     )
-
-
-def _requires_direct_device_inputs(case) -> bool:
-    query_size = (
-        case.batch * case.query_heads * case.query_tokens * case.qk_head_dim
-    )
-    key_size = case.batch * case.kv_heads * case.context_tokens * case.qk_head_dim
-    value_size = (
-        case.batch * case.kv_heads * case.context_tokens * case.value_head_dim
-    )
-    indices_size = case.batch * case.query_tokens * case.selected_tokens
-    return max(query_size, key_size, value_size, indices_size) > _MAX_HOST_MATERIALIZED_ELEMENTS
 
 
 def _build_profile_kernel_selection(ctx: ProfileKernelSelectionContext):

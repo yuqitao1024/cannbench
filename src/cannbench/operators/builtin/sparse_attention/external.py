@@ -5,7 +5,10 @@ import os
 
 from cannbench.operators.materialize import materialized_values_to_buffer
 
-from .materialize import materialize_sparse_attention_inputs
+from .materialize import (
+    _requires_direct_device_inputs,
+    materialize_sparse_attention_inputs,
+)
 
 _CUDA_DSA_ADAPTER_ENV = "CANNBENCH_CUDA_DSA_ADAPTER"
 _DEFAULT_CUDA_DSA_ADAPTER_MODULE = "cannbench_cuda_dsa"
@@ -83,11 +86,192 @@ def _resolve_cuda_dsa_adapter(op_name: str):
 
 
 def build_vllm_ascend_callable(ctx):
+    if (ctx.case.qk_head_dim, ctx.case.value_head_dim) == (576, 512):
+        return _build_vllm_sparse_flash_attention_callable(ctx)
     if ctx.case.qk_head_dim != ctx.case.value_head_dim:
         raise RuntimeError(
-            "vllm_ascend npu_sparse_attn_sharedkv does not support distinct "
-            "QK and value head dimensions"
+            "vllm_ascend sparse_attention only supports equal QK/value head "
+            "dimensions or the MLA 576/512 layout"
         )
+    return _build_vllm_sharedkv_callable(ctx)
+
+
+def _build_vllm_sparse_flash_attention_callable(ctx):
+    attention_op = getattr(
+        ctx.backend._ascend_custom_ops(ctx.torch),
+        "npu_sparse_flash_attention",
+        None,
+    )
+    if attention_op is None:
+        raise RuntimeError(
+            "vllm_ascend V3.2 sparse_attention requires "
+            "torch.ops._C_ascend.npu_sparse_flash_attention"
+        )
+
+    direct_device_inputs = _requires_direct_device_inputs(ctx.case)
+    batch = ctx.case.batch
+    query_heads = ctx.case.query_heads
+    query_tokens = ctx.case.query_tokens
+    qk_head_dim = ctx.case.qk_head_dim
+    kv_heads = ctx.case.kv_heads
+    context_tokens = ctx.case.context_tokens
+    value_head_dim = ctx.case.value_head_dim
+    selected_tokens = ctx.case.selected_tokens
+    rope_head_dim = qk_head_dim - value_head_dim
+    block_size = _sfa_page_block_size(context_tokens)
+    blocks_per_batch = context_tokens // block_size
+
+    query_shape = (batch * query_tokens, query_heads, value_head_dim)
+    query_rope_shape = (batch * query_tokens, query_heads, rope_head_dim)
+    key_shape = (
+        batch * blocks_per_batch,
+        block_size,
+        kv_heads,
+        value_head_dim,
+    )
+    key_rope_shape = (
+        batch * blocks_per_batch,
+        block_size,
+        kv_heads,
+        rope_head_dim,
+    )
+    indices_shape = (batch * query_tokens, kv_heads, selected_tokens)
+
+    if direct_device_inputs:
+        query = ctx.torch.zeros(query_shape, device=ctx.device, dtype=ctx.dtype)
+        query_rope = ctx.torch.zeros(
+            query_rope_shape, device=ctx.device, dtype=ctx.dtype
+        )
+        key = ctx.torch.zeros(key_shape, device=ctx.device, dtype=ctx.dtype)
+        key_rope = ctx.torch.zeros(
+            key_rope_shape, device=ctx.device, dtype=ctx.dtype
+        )
+        value = ctx.torch.zeros(key_shape, device=ctx.device, dtype=ctx.dtype)
+        sparse_indices = ctx.torch.zeros(
+            indices_shape, device=ctx.device, dtype=ctx.torch.int32
+        )
+    else:
+        payload = materialize_sparse_attention_inputs(
+            ctx.case, dtype=ctx.request.dtype, seed=ctx.request.seed
+        )
+        query_values, query_rope_values = _split_bhtd_values_as_bthd(
+            payload["query"],
+            batch=batch,
+            heads=query_heads,
+            tokens=query_tokens,
+            part_dims=(value_head_dim, rope_head_dim),
+        )
+        key_values, key_rope_values = _split_bhtd_values_as_bthd(
+            payload["keys"],
+            batch=batch,
+            heads=kv_heads,
+            tokens=context_tokens,
+            part_dims=(value_head_dim, rope_head_dim),
+        )
+        (value_values,) = _split_bhtd_values_as_bthd(
+            payload["values"],
+            batch=batch,
+            heads=kv_heads,
+            tokens=context_tokens,
+            part_dims=(value_head_dim,),
+        )
+        query = ctx.backend._tensor(
+            ctx.torch, query_values, device=ctx.device, dtype=ctx.dtype
+        ).reshape(query_shape)
+        query_rope = ctx.backend._tensor(
+            ctx.torch, query_rope_values, device=ctx.device, dtype=ctx.dtype
+        ).reshape(query_rope_shape)
+        key = ctx.backend._tensor(
+            ctx.torch, key_values, device=ctx.device, dtype=ctx.dtype
+        ).reshape(key_shape)
+        key_rope = ctx.backend._tensor(
+            ctx.torch, key_rope_values, device=ctx.device, dtype=ctx.dtype
+        ).reshape(key_rope_shape)
+        value = ctx.backend._tensor(
+            ctx.torch, value_values, device=ctx.device, dtype=ctx.dtype
+        ).reshape(key_shape)
+        sparse_indices = ctx.backend._tensor(
+            ctx.torch,
+            payload["indices"],
+            device=ctx.device,
+            dtype=ctx.torch.int32,
+        ).reshape(indices_shape)
+    block_table = ctx.backend._tensor(
+        ctx.torch,
+        tuple(range(batch * blocks_per_batch)),
+        device=ctx.device,
+        dtype=ctx.torch.int32,
+    ).reshape(batch, blocks_per_batch)
+    actual_seq_lengths_query = ctx.backend._tensor(
+        ctx.torch,
+        tuple((index + 1) * query_tokens for index in range(batch)),
+        device=ctx.device,
+        dtype=ctx.torch.int32,
+    )
+    actual_seq_lengths_kv = ctx.backend._tensor(
+        ctx.torch,
+        tuple(context_tokens for _ in range(batch)),
+        device=ctx.device,
+        dtype=ctx.torch.int32,
+    )
+
+    def operator():
+        result = attention_op(
+            query=query,
+            key=key,
+            value=value,
+            sparse_indices=sparse_indices,
+            scale_value=qk_head_dim**-0.5,
+            block_table=block_table,
+            actual_seq_lengths_query=actual_seq_lengths_query,
+            actual_seq_lengths_kv=actual_seq_lengths_kv,
+            query_rope=query_rope,
+            key_rope=key_rope,
+            sparse_block_size=1,
+            layout_query="TND",
+            layout_kv="PA_BSND",
+            sparse_mode=3,
+        )
+        return result[0] if isinstance(result, tuple) else result
+
+    return operator
+
+
+def _sfa_page_block_size(context_tokens: int) -> int:
+    for block_size in (128, 64, 32, 16):
+        if context_tokens % block_size == 0:
+            return block_size
+    raise RuntimeError(
+        "vllm_ascend V3.2 sparse_attention requires context_tokens to be "
+        "divisible by a supported page block size"
+    )
+
+
+def _split_bhtd_values_as_bthd(
+    values,
+    *,
+    batch: int,
+    heads: int,
+    tokens: int,
+    part_dims: tuple[int, ...],
+):
+    logical_dim = sum(part_dims)
+    parts = tuple([] for _ in part_dims)
+    for batch_index in range(batch):
+        for token_index in range(tokens):
+            for head_index in range(heads):
+                offset = (
+                    ((batch_index * heads + head_index) * tokens + token_index)
+                    * logical_dim
+                )
+                part_offset = offset
+                for part, part_dim in zip(parts, part_dims, strict=True):
+                    part.extend(values[part_offset : part_offset + part_dim])
+                    part_offset += part_dim
+    return tuple(materialized_values_to_buffer(part) for part in parts)
+
+
+def _build_vllm_sharedkv_callable(ctx):
     metadata_op, attention_op = ctx.backend._custom_op_pair(
         ctx.torch,
         "npu_sparse_attn_sharedkv_metadata",

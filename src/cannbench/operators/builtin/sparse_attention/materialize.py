@@ -4,6 +4,22 @@ import random
 
 from .cases import SparseAttentionCase
 
+_MAX_HOST_MATERIALIZED_ELEMENTS = 64 * 1024 * 1024
+
+
+def _requires_direct_device_inputs(case: SparseAttentionCase) -> bool:
+    query_size = (
+        case.batch * case.query_heads * case.query_tokens * case.qk_head_dim
+    )
+    key_size = case.batch * case.kv_heads * case.context_tokens * case.qk_head_dim
+    value_size = (
+        case.batch * case.kv_heads * case.context_tokens * case.value_head_dim
+    )
+    indices_size = case.batch * case.query_tokens * case.selected_tokens
+    return max(query_size, key_size, value_size, indices_size) > (
+        _MAX_HOST_MATERIALIZED_ELEMENTS
+    )
+
 
 def materialize_sparse_attention_inputs(
     case: SparseAttentionCase, *, dtype: str, seed: int
