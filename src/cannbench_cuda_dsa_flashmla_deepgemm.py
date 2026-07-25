@@ -10,20 +10,22 @@ def lightning_indexer(**kwargs: Any) -> Any:
     phase = _resolve_phase(kwargs)
     deep_gemm = _import_required("deep_gemm", op_name="lightning_indexer")
     if phase == "decode":
-        return _call_required(
+        logits = _call_required(
             deep_gemm,
             "fp8_paged_mqa_logits",
             op_name="lightning_indexer",
             kwargs=_deep_gemm_decode_indexer_kwargs(deep_gemm, kwargs),
         )
-    if phase == "prefill":
-        return _call_required(
+    elif phase == "prefill":
+        logits = _call_required(
             deep_gemm,
             "fp8_mqa_logits",
             op_name="lightning_indexer",
             kwargs=_deep_gemm_prefill_indexer_kwargs(kwargs),
         )
-    raise _unsupported_phase(phase, "lightning_indexer")
+    else:
+        raise _unsupported_phase(phase, "lightning_indexer")
+    return _lightning_indexer_topk(kwargs, logits)
 
 
 def sparse_attention(**kwargs: Any) -> Any:
@@ -86,6 +88,21 @@ def _call_required(module, function_name: str, *, op_name: str, kwargs: dict[str
     return candidate(**kwargs)
 
 
+def _lightning_indexer_topk(kwargs: dict[str, Any], logits):
+    torch = _require_torch(kwargs)
+    payload = _require_payload(kwargs)
+    batch, query_tokens = payload["query_shape"][:2]
+    top_k = int(payload["top_k"])
+    indices = torch.topk(
+        logits,
+        top_k,
+        dim=-1,
+        largest=True,
+        sorted=True,
+    ).indices
+    return indices.reshape(batch, query_tokens, top_k)
+
+
 def _deep_gemm_prefill_indexer_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
     torch = _require_torch(kwargs)
     payload = _require_payload(kwargs)
@@ -120,7 +137,7 @@ def _deep_gemm_prefill_indexer_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
         ),
         "cu_seq_len_k_end": torch.tensor(ends, device=query.device, dtype=torch.int32),
         "clean_logits": False,
-        "max_seqlen_k": 0,
+        "max_seqlen_k": context_tokens,
     }
 
 

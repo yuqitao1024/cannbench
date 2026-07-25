@@ -152,6 +152,11 @@ def _build_profile_kernel_selection(ctx: ProfileKernelSelectionContext):
         return ProfileKernelSelection(
             kernel_name_patterns=("lightning_indexer", "aten_dsa_lightning_indexer")
         )
+    if ctx.backend == "nvidia" and ctx.implementation == "cuda_library":
+        return ProfileKernelSelection(
+            kernel_name_patterns=("mqa_logits", "topk"),
+            launch_count=2,
+        )
     return ProfileKernelSelection(kernel_name_patterns=("lightning", "indexer"))
 
 

@@ -40,16 +40,30 @@ class _FakeTorch:
         del device, dtype
         return _FakeTensor(shape, [[value] * shape[1] for _ in range(shape[0])])
 
+    @staticmethod
+    def tensor(values, *, device, dtype):
+        del device, dtype
+        return _FakeTensor((len(values),), values)
 
-def test_flashmla_deepgemm_adapter_routes_decode_indexer_to_paged_logits(
+
+def test_flashmla_deepgemm_adapter_routes_decode_indexer_logits_through_topk(
     monkeypatch,
 ):
     calls = []
+    logits = object()
+    topk_indices = _FakeTensor((4, 2), [[3, 1], [2, 0], [1, 0], [3, 2]])
+    topk_calls = []
+    fake_torch = SimpleNamespace(
+        topk=lambda tensor, top_k, **kwargs: topk_calls.append(
+            (tensor, top_k, kwargs)
+        )
+        or SimpleNamespace(indices=topk_indices)
+    )
     fake_deep_gemm = SimpleNamespace(
         fp8_paged_mqa_logits=lambda **kwargs: calls.append(
             ("fp8_paged_mqa_logits", kwargs)
         )
-        or "decode-indices",
+        or logits,
         fp8_mqa_logits=lambda **kwargs: calls.append(("fp8_mqa_logits", kwargs)),
     )
     monkeypatch.setitem(sys.modules, "deep_gemm", fake_deep_gemm)
@@ -61,30 +75,46 @@ def test_flashmla_deepgemm_adapter_routes_decode_indexer_to_paged_logits(
     )
 
     result = adapter.lightning_indexer(
-        payload={"top_k": 512},
+        torch=fake_torch,
+        payload={"top_k": 2, "query_shape": (2, 2, 64, 128)},
         case=SimpleNamespace(phase="decode"),
         query="q",
         keys="k",
         weights="w",
     )
 
-    assert result == "decode-indices"
+    assert result.shape == (2, 2, 2)
+    assert result.tolist() == [[3, 1], [2, 0], [1, 0], [3, 2]]
     assert calls == [
         (
             "fp8_paged_mqa_logits",
             {"q": "q_native", "kv_cache": "kv_native"},
         )
     ]
+    assert topk_calls == [
+        (logits, 2, {"dim": -1, "largest": True, "sorted": True})
+    ]
 
 
-def test_flashmla_deepgemm_adapter_routes_prefill_indexer_to_logits(monkeypatch):
+def test_flashmla_deepgemm_adapter_routes_prefill_indexer_logits_through_topk(
+    monkeypatch,
+):
     calls = []
+    logits = object()
+    topk_indices = _FakeTensor((2, 2), [[3, 1], [2, 0]])
+    topk_calls = []
+    fake_torch = SimpleNamespace(
+        topk=lambda tensor, top_k, **kwargs: topk_calls.append(
+            (tensor, top_k, kwargs)
+        )
+        or SimpleNamespace(indices=topk_indices)
+    )
     fake_deep_gemm = SimpleNamespace(
         fp8_paged_mqa_logits=lambda **kwargs: calls.append(
             ("fp8_paged_mqa_logits", kwargs)
         ),
         fp8_mqa_logits=lambda **kwargs: calls.append(("fp8_mqa_logits", kwargs))
-        or "prefill-indices",
+        or logits,
     )
     monkeypatch.setitem(sys.modules, "deep_gemm", fake_deep_gemm)
     adapter = _reload_adapter()
@@ -95,19 +125,51 @@ def test_flashmla_deepgemm_adapter_routes_prefill_indexer_to_logits(monkeypatch)
     )
 
     result = adapter.lightning_indexer(
-        payload={"phase": "prefill"},
+        torch=fake_torch,
+        payload={"phase": "prefill", "top_k": 2, "query_shape": (1, 2, 64, 128)},
         query="q",
         keys="k",
         weights="w",
     )
 
-    assert result == "prefill-indices"
+    assert result.shape == (1, 2, 2)
+    assert result.tolist() == [[3, 1], [2, 0]]
     assert calls == [
         (
             "fp8_mqa_logits",
             {"q": "q_native", "kv": "kv_native"},
         )
     ]
+    assert topk_calls == [
+        (logits, 2, {"dim": -1, "largest": True, "sorted": True})
+    ]
+
+
+def test_deepgemm_prefill_requests_per_query_compressed_logits(monkeypatch):
+    adapter = _reload_adapter()
+    torch = _FakeTorch()
+    monkeypatch.setattr(
+        adapter,
+        "_per_custom_dims_cast_to_fp8",
+        lambda *args, **kwargs: "kv-fp8",
+    )
+
+    result = adapter._deep_gemm_prefill_indexer_kwargs(
+        {
+            "torch": torch,
+            "payload": {
+                "query_shape": (2, 2, 64, 128),
+                "key_shape": (2, 4096, 128),
+                "weight_shape": (2, 2, 64),
+            },
+            "query": _FakeTensor((2, 2, 64, 128)),
+            "keys": _FakeTensor((2, 4096, 128)),
+            "weights": _FakeTensor((2, 2, 64)),
+        }
+    )
+
+    assert result["max_seqlen_k"] == 4096
+    assert result["clean_logits"] is False
 
 
 def test_flashmla_deepgemm_adapter_routes_decode_attention_to_flash_mla_decode(
