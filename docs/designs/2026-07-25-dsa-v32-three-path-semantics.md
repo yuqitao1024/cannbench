@@ -9,7 +9,8 @@ DSA 两阶段抽象和主要 shape，但还不能认为对外输入输出语义�
 - 三条路径的目标是从同一套逻辑输入生成各自后端需要的物理布局；当前
   shared-KV 公开接口和跨后端 conformance 还没有完全收敛。
 - 底层布局、存储精度和 kernel 数量可以不同，这些属于实现差异。
-- 当前仍存在因果有效长度、Indexer 输出 dtype 和 Attention 附加输出不一致。
+- 当前仍存在 shared-KV 公开合同、Indexer scaling/tie 行为和 Attention 附加
+  输出不一致。
 - 在这些差异修复前，性能测试只能作为初步数据，不能视为严格的同语义对标。
 
 本文只讨论 DeepSeek V3.2。V4/V4 Pro、attention sink、SWA 以及完整 Attention
@@ -163,35 +164,7 @@ FP8 cache 格式。FlashMLA 假定传入的 indices 已经满足有效范围，�
 
 以下是当前需要修复的逻辑差异。
 
-### 1. Prefill 因果有效范围
-
-当 `C` 表示包含当前 Query chunk 在内的总 KV 长度时，第 `q` 个 Query 对应
-的绝对位置为：
-
-```text
-position(q) = C - Q + q
-valid_k_length(q) = C - Q + q + 1
-```
-
-对于 `Q=4096, C=32768`：
-
-```text
-query 0    可见 28673 个 KV
-query 4095 可见 32768 个 KV
-```
-
-当前 vLLM-Ascend 的 `sparse_mode=3` 接近该语义。当前 SIMT 和 CUDA Indexer
-仍让每个 Query 搜索全部 `C` 个位置，可能将未来 Token 选入 TopK。当前 Torch
-和 SIMT reference 使用的左对齐 `indices <= q` 在 `C > Q` 时也不正确。
-
-这是会改变 TopK 和最终 Attention 输出的实质语义差异，不是单纯的布局问题。
-
-### 2. Indexer 输出 dtype
-
-SIMT 和 vLLM-Ascend 输出 INT32。CUDA `torch.topk` 原生输出 INT64，进入
-FlashMLA 前才转换为 INT32。目标公开契约应统一为 `INT32 [B,Q,S]`。
-
-### 3. Sparse Attention 返回值
+### 1. Sparse Attention 返回值
 
 SIMT 约定返回 `(out, lse)`。FlashMLA 的不同入口还可能返回 `max_logits`
 等统计量；vLLM-Ascend 原生算子返回 softmax 统计值，但当前 adapter 只保留
@@ -203,7 +176,7 @@ SIMT 约定返回 `(out, lse)`。FlashMLA 的不同入口还可能返回 `max_lo
 
 各 adapter 可丢弃其他后端私有统计量，或从原生统计量规范化出 LSE。
 
-### 4. 精度与结果比较
+### 2. 精度与结果比较
 
 虽然三条路径可以使用同一份 BF16 逻辑输入，CUDA 路径内部的 FP8 量化仍可能
 改变临界位置的 TopK 排序。因此验证不能只要求 indices 逐项完全相同：
@@ -235,8 +208,8 @@ Workflow:
   不包含 projection、RoPE 生成、cache scatter 和 SWA
 ```
 
-在完成 right-aligned causal、dtype 和返回值规范化之后，三条路径才可以称为
-“相同逻辑输入、相同逻辑输出、不同硬件实现”，并用于严格的 V3.2 性能对标。
+在完成 shared-KV、Indexer scaling/tie 行为和返回值规范化之后，三条路径才可以
+称为“相同逻辑输入、相同逻辑输出、不同硬件实现”，并用于严格的 V3.2 性能对标。
 
 ## V3.2 剩余工作
 
@@ -248,22 +221,16 @@ Materializer 和算子 ABI 仍暴露独立的 `keys` 和 `values`。需要收敛
 `shared_kv [B,1,C,576]` canonical 输入，由各后端内部使用完整 576 维作为 K，
 并使用前 512 维作为 V。
 
-### 2. 统一 Indexer 有效范围和输出
+### 2. 明确 Indexer scaling 和 tie 行为
 
-- 在 case 和三条 adapter 中建立 right-aligned causal 和逐 Query 有效长度。
-- Decode `q=2` 需要表达 MTP Token 之间逐行增长的可见范围，不能为两行都设置
-  完整 `context_tokens`。
-- 将公开输出统一为 `INT32 [B,Q,TopK]`；CUDA 不应把 `torch.topk` 的 INT64
-  结果直接暴露到 canonical 边界。
-- 明确 Indexer scaling，并定义跨后端同分数时的 tie 行为，或者明确允许比较
-  等价 Top-K 集合。
+明确 Indexer scaling，并定义跨后端同分数时的 tie 行为，或者明确允许比较
+等价 Top-K 集合。
 
 ### 3. 统一 Sparse Attention 数学合同
 
 - 将 softmax scale 写入 case/schema，并从 V3.2 模型合同验证其数值，而不是
   仅由 adapter 默认使用 `d_qk^-0.5`。
-- 统一 invalid indices、每行有效 `topk_length`、绝对 Query position 和
-  right-aligned causal。
+- 统一 invalid indices 和每行有效 `topk_length`。
 - 统一自然对数 LSE 的定义和特殊值处理。
 - 将三后端结果规范化为 `out [B,Q,H,Dv]` 和 `lse [B,Q,H]`；vLLM adapter
   不能继续只返回 `out`。

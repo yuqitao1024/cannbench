@@ -328,7 +328,7 @@ def test_ascend_vllm_adapter_calls_torch_npu_lightning_indexer(monkeypatch):
             self.float16 = "float16"
             self.int32 = "int32"
             self.long = "long"
-            self.tensor = lambda *args, **kwargs: FakeTensor()
+            self.tensor = lambda values, **kwargs: FakeTensor().reshape(len(values))
 
     def fake_lightning_indexer(**kwargs):
         calls.append(kwargs)
@@ -362,6 +362,8 @@ def test_ascend_vllm_adapter_calls_torch_npu_lightning_indexer(monkeypatch):
     assert calls[0]["weights"].shape == (2, 2)
     assert calls[0]["sparse_count"] == 4
     assert calls[0]["sparse_mode"] == 3
+    assert calls[0]["actual_seq_lengths_query"].shape == 2
+    assert calls[0]["actual_seq_lengths_key"].shape == 2
 
 
 def test_ascend_vllm_adapter_ignores_quant_lightning_indexer(monkeypatch):

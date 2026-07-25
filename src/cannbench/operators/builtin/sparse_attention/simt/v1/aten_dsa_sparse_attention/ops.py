@@ -49,10 +49,11 @@ def _prefill_reference(query, keys, values, indices, *, causal: bool):
     selected_values = _gather_selected(expanded_values, indices)
     scores = (query.unsqueeze(3) * selected_keys).sum(dim=-1) / math.sqrt(query.shape[-1])
     invalid_mask = None
-    if causal and query.shape[2] > 1:
-        positions = torch.arange(query.shape[2], device=getattr(query, "device", None)).reshape(
-            1, 1, query.shape[2], 1
-        )
+    if causal:
+        positions = (
+            torch.arange(query.shape[2], device=getattr(query, "device", None))
+            + (keys.shape[2] - query.shape[2])
+        ).reshape(1, 1, query.shape[2], 1)
         invalid_mask = indices[:, None, :, :] > positions
         scores = scores.masked_fill(invalid_mask, float("-inf"))
     scores_float = scores.float()

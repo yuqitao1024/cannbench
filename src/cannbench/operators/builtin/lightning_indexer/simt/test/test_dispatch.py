@@ -119,7 +119,10 @@ def test_build_simt_callable_passes_family_to_operator():
             )
             return tensor
 
-    def fake_forward(query, keys, weights, *, top_k, phase, family):
+    def fake_forward(
+        query, keys, weights, *, valid_context_lengths, top_k, phase, family
+    ):
+        captured["valid_context_lengths_shape"] = valid_context_lengths.shape
         captured["query_shape"] = query.shape
         captured["key_shape"] = keys.shape
         captured["weight_shape"] = weights.shape
@@ -140,7 +143,7 @@ def test_build_simt_callable_passes_family_to_operator():
 
     ctx = TorchOperatorContext(
         backend=FakeBackend(),
-        torch=SimpleNamespace(),
+        torch=SimpleNamespace(int32="int32"),
         request=request,
         case=get_lightning_indexer_case("realistic", "llama4_decode_32760_top2048"),
         device="npu",
@@ -155,6 +158,7 @@ def test_build_simt_callable_passes_family_to_operator():
     assert captured["query_shape"] == (16, 1, 4, 64)
     assert captured["key_shape"] == (16, 32760, 64)
     assert captured["weight_shape"] == (16, 1, 4)
+    assert captured["valid_context_lengths_shape"] == (16, 1)
     assert captured["top_k"] == 2048
     assert captured["phase"] == "decode"
     assert captured["family"] == "family_4x64"
@@ -164,18 +168,30 @@ def test_build_simt_callable_allocates_large_inputs_directly_on_device(monkeypat
     captured: dict[str, object] = {"allocations": []}
 
     class FakeTensor:
-        pass
+        def reshape(self, shape):
+            self.shape = shape
+            return self
 
     class FakeTorch:
         bfloat16 = "bfloat16"
+        int32 = "int32"
 
         @staticmethod
         def zeros(shape, *, device, dtype):
             captured["allocations"].append((shape, device, dtype))
             return FakeTensor()
 
-    def fake_forward(query, keys, weights, *, top_k, phase, family):
+    class FakeBackend:
+        @staticmethod
+        def _tensor(torch, values, *, device, dtype):
+            del torch, values, device, dtype
+            return FakeTensor()
+
+    def fake_forward(
+        query, keys, weights, *, valid_context_lengths, top_k, phase, family
+    ):
         del query, keys, weights
+        captured["valid_context_lengths_shape"] = valid_context_lengths.shape
         captured.update(top_k=top_k, phase=phase, family=family)
         return "ok"
 
@@ -194,7 +210,7 @@ def test_build_simt_callable_allocates_large_inputs_directly_on_device(monkeypat
         implementation="simt",
     )
     ctx = TorchOperatorContext(
-        backend=SimpleNamespace(),
+        backend=FakeBackend(),
         torch=FakeTorch(),
         request=request,
         case=get_lightning_indexer_case(
@@ -219,6 +235,7 @@ def test_build_simt_callable_allocates_large_inputs_directly_on_device(monkeypat
     assert captured["top_k"] == 1024
     assert captured["phase"] == "decode"
     assert captured["family"] == "family_64x128"
+    assert captured["valid_context_lengths_shape"] == (60, 1)
 
 
 def test_plugin_exposes_supported_prefill_and_decode_simt_cases():

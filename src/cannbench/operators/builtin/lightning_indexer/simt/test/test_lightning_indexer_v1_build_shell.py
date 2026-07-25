@@ -498,3 +498,21 @@ def test_lightning_indexer_topk_ub_capacity_covers_top2048_plus_context_tile():
     ).read_text(encoding="utf-8")
 
     assert "kFusedTopkSortCapacity = 4096" in source
+
+
+def test_lightning_indexer_fused_kernels_use_per_row_valid_context_lengths():
+    root = Path(
+        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
+        "aten_dsa_lightning_indexer/csrc"
+    )
+    bridge = (root / "lightning_indexer.asc").read_text(encoding="utf-8")
+
+    assert "Tensor valid_context_lengths" in bridge
+    assert "valid_context_lengths.const_data_ptr<int32_t>()" in bridge
+    for family in ("4x64", "64x128"):
+        source = (
+            root / "simt" / f"lightning_indexer_fused_family_{family}.asc"
+        ).read_text(encoding="utf-8")
+        assert "__gm__ const int32_t* valid_context_lengths" in source
+        assert "valid_context_lengths[linear_index]" in source
+        assert "context_start < row_context_count" in source

@@ -10,6 +10,7 @@
       "index_heads": 64,
       "index_dim": 128,
       "top_k": 2048,
+      "causal": true,
       "source_kind": "official_operator_test",
       "source_project": "DeepSeek-V3.2+FlashMLA",
       "source_model": "DeepSeek-V3.2",

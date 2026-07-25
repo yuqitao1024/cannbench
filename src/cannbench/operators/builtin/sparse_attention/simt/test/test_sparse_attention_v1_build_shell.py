@@ -13,6 +13,31 @@ def _function_body(source: str, start_marker: str, end_marker: str) -> str:
     return source.split(start_marker, 1)[1].split(end_marker, 1)[0]
 
 
+def test_sparse_attention_host_uses_right_aligned_absolute_query_start():
+    source = Path(
+        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+        "aten_dsa_sparse_attention/csrc/sparse_attention.asc"
+    ).read_text(encoding="utf-8")
+
+    assert source.count(
+        "const auto absolute_query_start = context_tokens - query_tokens + query_start;"
+    ) == 4
+    assert source.count(
+        "scale,\n        context_tokens - query_tokens,\n        causal"
+    ) == 4
+    assert source.count("scale,\n        absolute_query_start,\n        causal") == 4
+
+
+def test_sparse_attention_host_applies_causal_mask_to_nextn_decode():
+    source = Path(
+        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+        "aten_dsa_sparse_attention/csrc/sparse_attention.asc"
+    ).read_text(encoding="utf-8")
+
+    assert "const bool apply_causal_mask = causal;" in source
+    assert 'causal && phase == "prefill"' not in source
+
+
 def test_sparse_attention_simt_v1_setup_uses_bisheng_toolchain():
     setup_py = Path(
         "src/cannbench/operators/builtin/sparse_attention/simt/v1/setup.py"

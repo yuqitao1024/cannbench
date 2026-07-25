@@ -909,6 +909,7 @@ def test_lightning_indexer_simt_v1_prefers_custom_op_for_prefill_family_4x64(
             )
             self.device = lambda kind: kind
             self.float16 = "float16"
+            self.int32 = "int32"
             self.tensor = self._tensor
 
         def _tensor(self, values, device=None, dtype=None):
@@ -916,8 +917,10 @@ def test_lightning_indexer_simt_v1_prefers_custom_op_for_prefill_family_4x64(
             captured["tensor_dtypes"].append(dtype)
             return FakeTensor()
 
-    def fake_custom_forward(query, keys, weights, *, top_k, phase, family):
-        del query, keys, weights
+    def fake_custom_forward(
+        query, keys, weights, *, valid_context_lengths, top_k, phase, family
+    ):
+        del query, keys, weights, valid_context_lengths
         captured["custom_calls"] += 1
         captured["top_k"] = top_k
         captured["phase"] = phase
@@ -953,7 +956,12 @@ def test_lightning_indexer_simt_v1_prefers_custom_op_for_prefill_family_4x64(
 
     assert result.op == "lightning_indexer"
     assert captured["custom_calls"] == 1
-    assert captured["tensor_dtypes"] == ["float16", "float16", "float16"]
+    assert captured["tensor_dtypes"] == [
+        "float16",
+        "float16",
+        "float16",
+        "int32",
+    ]
     assert captured["top_k"] == 512
     assert captured["phase"] == "prefill"
     assert captured["family"] == "family_4x64"
@@ -984,6 +992,7 @@ def test_lightning_indexer_simt_v1_prefers_custom_op_for_prefill_family_64x128(
             )
             self.device = lambda kind: kind
             self.float16 = "float16"
+            self.int32 = "int32"
             self.tensor = self._tensor
 
         def _tensor(self, values, device=None, dtype=None):
@@ -991,8 +1000,10 @@ def test_lightning_indexer_simt_v1_prefers_custom_op_for_prefill_family_64x128(
             captured["tensor_dtypes"].append(dtype)
             return FakeTensor()
 
-    def fake_custom_forward(query, keys, weights, *, top_k, phase, family):
-        del query, keys, weights
+    def fake_custom_forward(
+        query, keys, weights, *, valid_context_lengths, top_k, phase, family
+    ):
+        del query, keys, weights, valid_context_lengths
         captured["custom_calls"] += 1
         captured["top_k"] = top_k
         captured["phase"] = phase
@@ -1028,7 +1039,12 @@ def test_lightning_indexer_simt_v1_prefers_custom_op_for_prefill_family_64x128(
 
     assert result.op == "lightning_indexer"
     assert captured["custom_calls"] == 1
-    assert captured["tensor_dtypes"] == ["float16", "float16", "float16"]
+    assert captured["tensor_dtypes"] == [
+        "float16",
+        "float16",
+        "float16",
+        "int32",
+    ]
     assert captured["top_k"] == 512
     assert captured["phase"] == "prefill"
     assert captured["family"] == "family_64x128"
@@ -1057,6 +1073,7 @@ def test_lightning_indexer_simt_v1_passes_decode_family_to_simt_module(monkeypat
             )
             self.device = lambda kind: kind
             self.float16 = "float16"
+            self.int32 = "int32"
             self.tensor = self._tensor
 
         def _tensor(self, values, device=None, dtype=None):
@@ -1064,8 +1081,10 @@ def test_lightning_indexer_simt_v1_passes_decode_family_to_simt_module(monkeypat
             captured["tensor_dtypes"].append(dtype)
             return FakeTensor()
 
-    def fake_simt_forward(query, keys, weights, *, top_k, phase, family):
-        del query, keys, weights
+    def fake_simt_forward(
+        query, keys, weights, *, valid_context_lengths, top_k, phase, family
+    ):
+        del query, keys, weights, valid_context_lengths
         captured["simt_calls"] += 1
         captured["top_k"] = top_k
         captured["phase"] = phase
@@ -1101,7 +1120,12 @@ def test_lightning_indexer_simt_v1_passes_decode_family_to_simt_module(monkeypat
 
     assert result.op == "lightning_indexer"
     assert captured["simt_calls"] == 1
-    assert captured["tensor_dtypes"] == ["float16", "float16", "float16"]
+    assert captured["tensor_dtypes"] == [
+        "float16",
+        "float16",
+        "float16",
+        "int32",
+    ]
     assert captured["top_k"] == 2048
     assert captured["phase"] == "decode"
     assert captured["family"] == "family_4x64"
@@ -1132,6 +1156,7 @@ def test_lightning_indexer_simt_v1_prefers_custom_op_for_decode_family_4x64(
             )
             self.device = lambda kind: kind
             self.float16 = "float16"
+            self.int32 = "int32"
             self.tensor = self._tensor
 
         def _tensor(self, values, device=None, dtype=None):
@@ -1139,8 +1164,10 @@ def test_lightning_indexer_simt_v1_prefers_custom_op_for_decode_family_4x64(
             captured["tensor_dtypes"].append(dtype)
             return FakeTensor()
 
-    def fake_custom_forward(query, keys, weights, *, top_k, phase, family):
-        del query, keys, weights
+    def fake_custom_forward(
+        query, keys, weights, *, valid_context_lengths, top_k, phase, family
+    ):
+        del query, keys, weights, valid_context_lengths
         captured["custom_calls"] += 1
         captured["top_k"] = top_k
         captured["phase"] = phase
@@ -1176,7 +1203,12 @@ def test_lightning_indexer_simt_v1_prefers_custom_op_for_decode_family_4x64(
 
     assert result.op == "lightning_indexer"
     assert captured["custom_calls"] == 1
-    assert captured["tensor_dtypes"] == ["float16", "float16", "float16"]
+    assert captured["tensor_dtypes"] == [
+        "float16",
+        "float16",
+        "float16",
+        "int32",
+    ]
     assert captured["top_k"] == 2048
     assert captured["phase"] == "decode"
     assert captured["family"] == "family_4x64"
@@ -1207,6 +1239,7 @@ def test_lightning_indexer_simt_v1_prefers_custom_op_for_decode_family_64x128(
             )
             self.device = lambda kind: kind
             self.float16 = "float16"
+            self.int32 = "int32"
             self.tensor = self._tensor
 
         def _tensor(self, values, device=None, dtype=None):
@@ -1214,8 +1247,10 @@ def test_lightning_indexer_simt_v1_prefers_custom_op_for_decode_family_64x128(
             captured["tensor_dtypes"].append(dtype)
             return FakeTensor()
 
-    def fake_custom_forward(query, keys, weights, *, top_k, phase, family):
-        del query, keys, weights
+    def fake_custom_forward(
+        query, keys, weights, *, valid_context_lengths, top_k, phase, family
+    ):
+        del query, keys, weights, valid_context_lengths
         captured["custom_calls"] += 1
         captured["top_k"] = top_k
         captured["phase"] = phase
@@ -1251,7 +1286,12 @@ def test_lightning_indexer_simt_v1_prefers_custom_op_for_decode_family_64x128(
 
     assert result.op == "lightning_indexer"
     assert captured["custom_calls"] == 1
-    assert captured["tensor_dtypes"] == ["float16", "float16", "float16"]
+    assert captured["tensor_dtypes"] == [
+        "float16",
+        "float16",
+        "float16",
+        "int32",
+    ]
     assert captured["top_k"] == 512
     assert captured["phase"] == "decode"
     assert captured["family"] == "family_64x128"

@@ -177,6 +177,26 @@ def test_prefill_reference_returns_int32_indices(monkeypatch):
     assert actual.dtype == "int32"
 
 
+def test_prefill_reference_masks_future_context_before_topk():
+    if ops.torch is None:
+        pytest.skip("torch is required for right-aligned mask coverage")
+
+    query = ops.torch.ones(1, 2, 1, 1)
+    keys = ops.torch.tensor([[[1.0], [2.0], [3.0], [100.0]]])
+    weights = ops.torch.ones(1, 2, 1)
+    valid_context_lengths = ops.torch.tensor([[3, 4]], dtype=ops.torch.int32)
+
+    actual = ops._prefill_reference(
+        query,
+        keys,
+        weights,
+        valid_context_lengths=valid_context_lengths,
+        top_k=1,
+    )
+
+    assert ops.torch.equal(actual, ops.torch.tensor([[[2], [3]]], dtype=ops.torch.int32))
+
+
 def test_lightning_indexer_forward_uses_fallback_reference_outside_fast_path(
     monkeypatch,
 ):
@@ -208,7 +228,10 @@ def test_lightning_indexer_forward_prefers_registered_custom_op_for_prefill_fami
 ):
     captured = {}
 
-    def fake_custom_op(query, keys, weights, top_k, phase, family):
+    def fake_custom_op(
+        query, keys, weights, valid_context_lengths, top_k, phase, family
+    ):
+        del query, keys, weights, valid_context_lengths
         captured["top_k"] = top_k
         captured["phase"] = phase
         captured["family"] = family
@@ -220,6 +243,7 @@ def test_lightning_indexer_forward_prefers_registered_custom_op_for_prefill_fami
         object(),
         object(),
         object(),
+        valid_context_lengths=object(),
         top_k=4,
         phase="prefill",
         family="family_4x64",
@@ -234,8 +258,10 @@ def test_lightning_indexer_forward_prefers_registered_custom_op_for_prefill_fami
 ):
     captured = {}
 
-    def fake_custom_op(query, keys, weights, top_k, phase, family):
-        del query, keys, weights
+    def fake_custom_op(
+        query, keys, weights, valid_context_lengths, top_k, phase, family
+    ):
+        del query, keys, weights, valid_context_lengths
         captured["top_k"] = top_k
         captured["phase"] = phase
         captured["family"] = family
@@ -247,6 +273,7 @@ def test_lightning_indexer_forward_prefers_registered_custom_op_for_prefill_fami
         object(),
         object(),
         object(),
+        valid_context_lengths=object(),
         top_k=512,
         phase="prefill",
         family="family_64x128",
@@ -256,13 +283,88 @@ def test_lightning_indexer_forward_prefers_registered_custom_op_for_prefill_fami
     assert captured == {"top_k": 512, "phase": "prefill", "family": "family_64x128"}
 
 
+def test_lightning_indexer_forward_passes_valid_context_lengths_to_custom_op(
+    monkeypatch,
+):
+    captured = {}
+    valid_context_lengths = object()
+
+    def fake_custom_op(
+        query, keys, weights, native_valid_context_lengths, top_k, phase, family
+    ):
+        del query, keys, weights, top_k, phase, family
+        captured["valid_context_lengths"] = native_valid_context_lengths
+        return "custom"
+
+    monkeypatch.setattr(ops, "_load_registered_op", lambda: fake_custom_op, raising=False)
+
+    actual = ops.lightning_indexer_forward(
+        object(),
+        object(),
+        object(),
+        valid_context_lengths=valid_context_lengths,
+        top_k=512,
+        phase="prefill",
+        family="family_64x128",
+    )
+
+    assert actual == "custom"
+    assert captured["valid_context_lengths"] is valid_context_lengths
+
+
+def test_lightning_indexer_forward_defaults_custom_op_to_full_context(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeTensor:
+        shape = (2, 3, 4, 8)
+        device = "npu"
+
+    class FakeKeys:
+        shape = (2, 5, 8)
+
+    def fake_full(shape, value, *, dtype, device):
+        captured["full"] = (shape, value, dtype, device)
+        return "full-context-lengths"
+
+    def fake_custom_op(
+        query, keys, weights, valid_context_lengths, top_k, phase, family
+    ):
+        del query, keys, weights, top_k, phase, family
+        captured["valid_context_lengths"] = valid_context_lengths
+        return "custom"
+
+    monkeypatch.setattr(
+        ops,
+        "torch",
+        SimpleNamespace(full=fake_full, int32="int32"),
+    )
+    monkeypatch.setattr(ops, "_load_registered_op", lambda: fake_custom_op)
+
+    actual = ops.lightning_indexer_forward(
+        FakeTensor(),
+        FakeKeys(),
+        object(),
+        top_k=2,
+        phase="prefill",
+        family="family_4x64",
+    )
+
+    assert actual == "custom"
+    assert captured == {
+        "full": ((2, 3), 5, "int32", "npu"),
+        "valid_context_lengths": "full-context-lengths",
+    }
+
+
 def test_lightning_indexer_forward_prefers_registered_custom_op_for_prefill_family_32x128(
     monkeypatch,
 ):
     captured = {}
 
-    def fake_custom_op(query, keys, weights, top_k, phase, family):
-        del query, keys, weights
+    def fake_custom_op(
+        query, keys, weights, valid_context_lengths, top_k, phase, family
+    ):
+        del query, keys, weights, valid_context_lengths
         captured["top_k"] = top_k
         captured["phase"] = phase
         captured["family"] = family
@@ -274,6 +376,7 @@ def test_lightning_indexer_forward_prefers_registered_custom_op_for_prefill_fami
         object(),
         object(),
         object(),
+        valid_context_lengths=object(),
         top_k=2048,
         phase="prefill",
         family="family_32x128",

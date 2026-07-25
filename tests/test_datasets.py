@@ -24,6 +24,7 @@ from cannbench.operators.builtin.lightning_indexer import (
     get_lightning_indexer_dataset,
 )
 from cannbench.operators.builtin.lightning_indexer.materialize import materialize_lightning_indexer_inputs
+from cannbench.operators.builtin.lightning_indexer import materialize as lightning_indexer_materialize
 from cannbench.operators.builtin.masked_select import (
     get_masked_select_case,
     get_masked_select_dataset,
@@ -43,6 +44,7 @@ from cannbench.operators.builtin.sparse_attention import (
     get_sparse_attention_dataset,
 )
 from cannbench.operators.builtin.sparse_attention.materialize import materialize_sparse_attention_inputs
+from cannbench.operators.builtin.sparse_attention import materialize as sparse_attention_materialize
 from cannbench.operators.builtin.take_along_dim import (
     get_take_along_dim_case,
     get_take_along_dim_dataset,
@@ -298,6 +300,37 @@ def test_materialized_lightning_indexer_inputs_are_deterministic_for_same_seed()
     assert left["query"] == right["query"]
     assert left["keys"] == right["keys"]
     assert left["weights"] == right["weights"]
+
+
+@pytest.mark.parametrize(
+    ("split", "case_id", "expected_first", "expected_last"),
+    (
+        (
+            "realistic_prefill",
+            "deepseek_v32_flashmla_prefill_q4096_ctx32768_top2048",
+            28673,
+            32768,
+        ),
+        (
+            "realistic_decode",
+            "deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048",
+            32767,
+            32768,
+        ),
+    ),
+)
+def test_v32_lightning_indexer_uses_right_aligned_valid_context_lengths(
+    split, case_id, expected_first, expected_last
+):
+    case = get_lightning_indexer_case(split, case_id)
+
+    lengths = lightning_indexer_materialize.valid_context_lengths(case)
+
+    assert case.causal is True
+    assert lengths[0] == expected_first
+    assert lengths[case.query_tokens - 1] == expected_last
+    assert lengths[-case.query_tokens] == expected_first
+    assert lengths[-1] == expected_last
 
 
 def test_lightning_indexer_smoke_includes_vllm_ascend_a5_case():
@@ -612,6 +645,41 @@ def test_materialized_v32_sparse_attention_uses_value_dimension_for_values():
         *payload["keys"][4:6],
     )
     assert "head_dim" not in payload
+
+
+@pytest.mark.parametrize("phase", ("prefill", "decode"))
+def test_materialized_causal_sparse_attention_indices_are_right_aligned(
+    monkeypatch, phase
+):
+    class MaxRandom:
+        def __init__(self, seed):
+            del seed
+
+        def uniform(self, lower, upper):
+            del lower, upper
+            return 0.0
+
+        def randrange(self, upper):
+            return upper - 1
+
+    monkeypatch.setattr(sparse_attention_materialize.random, "Random", MaxRandom)
+    case = replace(
+        get_sparse_attention_case("smoke", "tiny_decode_top4"),
+        batch=1,
+        query_heads=1,
+        kv_heads=1,
+        query_tokens=2,
+        context_tokens=4,
+        selected_tokens=2,
+        qk_head_dim=2,
+        value_head_dim=2,
+        causal=True,
+        phase=phase,
+    )
+
+    payload = materialize_sparse_attention_inputs(case, dtype="bfloat16", seed=7)
+
+    assert payload["indices"] == (2, 2, 3, 3)
 
 
 def test_sparse_attention_excludes_unverified_v32_paper_shapes():

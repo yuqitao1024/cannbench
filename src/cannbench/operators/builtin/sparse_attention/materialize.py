@@ -63,11 +63,14 @@ def materialize_sparse_attention_inputs(
         values = tuple(
             round(generator.uniform(-1.0, 1.0), 6) for _ in range(value_size)
         )
-    if case.causal and case.phase == "prefill":
+    if case.causal:
         generated_indices = []
         for _batch in range(case.batch):
             for query_index in range(case.query_tokens):
-                upper_bound = min(case.context_tokens, query_index + 1)
+                upper_bound = min(
+                    case.context_tokens,
+                    case.context_tokens - case.query_tokens + query_index + 1,
+                )
                 for _selected in range(case.selected_tokens):
                     generated_indices.append(generator.randrange(upper_bound))
         indices = tuple(generated_indices)

@@ -6,7 +6,7 @@ from .cases import (
 )
 from cannbench.core.profile import ProfileKernelSelection
 from cannbench.operators.materialize import materialized_values_to_buffer
-from .materialize import materialize_lightning_indexer_inputs
+from .materialize import materialize_lightning_indexer_inputs, valid_context_lengths
 from cannbench.operators.plugin import OperatorPlugin, ProfileKernelSelectionContext
 from cannbench.operators.spec import OperatorSpec
 from .external import build_cuda_library_callable, build_vllm_ascend_callable
@@ -36,11 +36,24 @@ def _build_torch_callable(ctx):
         device=ctx.device,
         dtype=ctx.dtype,
     ).reshape(payload["weight_shape"])
+    valid_lengths = ctx.backend._tensor(
+        ctx.torch,
+        payload["valid_context_lengths"],
+        device=ctx.device,
+        dtype=ctx.torch.int32,
+    ).reshape(payload["query_shape"][:2])
     def operator():
         index_scores = ctx.torch.einsum("bqhd,bcd->bqhc", query, keys)
         index_scores = ctx.torch.relu(index_scores)
         index_scores = index_scores * weights.unsqueeze(-1)
         index_scores = index_scores.sum(dim=2)
+        context_positions = ctx.torch.arange(
+            payload["key_shape"][1], device=query.device
+        ).reshape(1, 1, -1)
+        index_scores = index_scores.masked_fill(
+            context_positions >= valid_lengths.unsqueeze(-1),
+            float("-inf"),
+        )
         return ctx.torch.topk(
             index_scores,
             payload["top_k"],
@@ -93,6 +106,8 @@ def _build_simt_callable(ctx):
             "index_dim": ctx.case.index_dim,
             "top_k": ctx.case.top_k,
             "phase": ctx.case.phase,
+            "causal": ctx.case.causal,
+            "valid_context_lengths": valid_context_lengths(ctx.case),
         }
         query = ctx.torch.zeros(
             payload["query_shape"], device=ctx.device, dtype=ctx.dtype
@@ -127,11 +142,18 @@ def _build_simt_callable(ctx):
             device=ctx.device,
             dtype=ctx.dtype,
         ).reshape(payload["weight_shape"])
+    native_valid_context_lengths = ctx.backend._tensor(
+        ctx.torch,
+        payload["valid_context_lengths"],
+        device=ctx.device,
+        dtype=ctx.torch.int32,
+    ).reshape(payload["query_shape"][:2])
     family = _select_simt_family(payload)
     return lambda: ctx.implementation_module.ops.lightning_indexer_forward(
         query,
         keys,
         weights,
+        valid_context_lengths=native_valid_context_lengths,
         top_k=int(payload["top_k"]),
         phase=str(payload["phase"]),
         family=family,

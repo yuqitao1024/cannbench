@@ -5,6 +5,16 @@ import random
 from .cases import LightningIndexerCase
 
 
+def valid_context_lengths(case: LightningIndexerCase) -> tuple[int, ...]:
+    if not case.causal:
+        return (case.context_tokens,) * (case.batch * case.query_tokens)
+    first_length = case.context_tokens - case.query_tokens + 1
+    row_lengths = tuple(
+        first_length + query_index for query_index in range(case.query_tokens)
+    )
+    return row_lengths * case.batch
+
+
 def materialize_lightning_indexer_inputs(
     case: LightningIndexerCase, *, dtype: str, seed: int
 ) -> dict[str, object]:
@@ -31,6 +41,8 @@ def materialize_lightning_indexer_inputs(
         "index_heads": case.index_heads,
         "index_dim": case.index_dim,
         "top_k": case.top_k,
+        "causal": case.causal,
+        "valid_context_lengths": valid_context_lengths(case),
         "dtype": dtype,
         "query": query,
         "keys": keys,

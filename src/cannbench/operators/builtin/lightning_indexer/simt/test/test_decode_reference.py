@@ -80,8 +80,10 @@ def test_lightning_indexer_forward_prefers_registered_custom_op_for_decode_famil
 ):
     captured: dict[str, object] = {}
 
-    def fake_custom_op(query, keys, weights, top_k, phase, family):
-        del query, keys, weights
+    def fake_custom_op(
+        query, keys, weights, valid_context_lengths, top_k, phase, family
+    ):
+        del query, keys, weights, valid_context_lengths
         captured["top_k"] = top_k
         captured["phase"] = phase
         captured["family"] = family
@@ -93,6 +95,7 @@ def test_lightning_indexer_forward_prefers_registered_custom_op_for_decode_famil
         object(),
         object(),
         object(),
+        valid_context_lengths=object(),
         top_k=2048,
         phase="decode",
         family="family_4x64",
@@ -107,8 +110,10 @@ def test_lightning_indexer_forward_prefers_registered_custom_op_for_decode_famil
 ):
     captured: dict[str, object] = {}
 
-    def fake_custom_op(query, keys, weights, top_k, phase, family):
-        del query, keys, weights
+    def fake_custom_op(
+        query, keys, weights, valid_context_lengths, top_k, phase, family
+    ):
+        del query, keys, weights, valid_context_lengths
         captured["top_k"] = top_k
         captured["phase"] = phase
         captured["family"] = family
@@ -120,6 +125,7 @@ def test_lightning_indexer_forward_prefers_registered_custom_op_for_decode_famil
         object(),
         object(),
         object(),
+        valid_context_lengths=object(),
         top_k=512,
         phase="decode",
         family="family_64x128",

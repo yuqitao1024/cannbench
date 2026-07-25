@@ -99,7 +99,7 @@ def _lightning_indexer_topk(kwargs: dict[str, Any], logits):
         dim=-1,
         largest=True,
         sorted=True,
-    ).indices
+    ).indices.to(torch.int32)
     return indices.reshape(batch, query_tokens, top_k)
 
 
@@ -125,9 +125,18 @@ def _deep_gemm_prefill_indexer_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
     context_tokens = payload["key_shape"][1]
     starts: list[int] = []
     ends: list[int] = []
+    valid_context_lengths = payload.get(
+        "valid_context_lengths",
+        (context_tokens,) * (batch * query_tokens),
+    )
     for batch_index in range(batch):
-        starts.extend([batch_index * context_tokens] * query_tokens)
-        ends.extend([(batch_index + 1) * context_tokens] * query_tokens)
+        batch_start = batch_index * context_tokens
+        starts.extend([batch_start] * query_tokens)
+        row_start = batch_index * query_tokens
+        ends.extend(
+            batch_start + int(valid_context_lengths[row_start + query_index])
+            for query_index in range(query_tokens)
+        )
     return {
         "q": q_fp8,
         "kv": kv_fp8,
@@ -165,9 +174,14 @@ def _deep_gemm_decode_indexer_kwargs(deep_gemm, kwargs: dict[str, Any]) -> dict[
         max_context_len=max_context_len,
     ).to(torch.bfloat16)
     fused_kv_cache = _deep_gemm_fp8_kv_cache(torch, kv_cache_bf16)
-    context_lens = torch.full(
-        (batch, query_tokens), context_tokens, device=query.device, dtype=torch.int32
-    )
+    context_lens = torch.tensor(
+        payload.get(
+            "valid_context_lengths",
+            (context_tokens,) * (batch * query_tokens),
+        ),
+        device=query.device,
+        dtype=torch.int32,
+    ).reshape(batch, query_tokens)
     schedule_meta = deep_gemm.get_paged_mqa_logits_metadata(
         context_lens,
         block_kv,

@@ -76,10 +76,11 @@ def _build_torch_callable(ctx):
         scores = (query.unsqueeze(3) * selected_keys).sum(dim=-1) / math.sqrt(
             qk_head_dim
         )
-        if payload["causal"] and payload["phase"] == "prefill":
-            positions = ctx.torch.arange(query_tokens, device=query.device).reshape(
-                1, 1, query_tokens, 1
-            )
+        if payload["causal"]:
+            positions = (
+                ctx.torch.arange(query_tokens, device=query.device)
+                + (context_tokens - query_tokens)
+            ).reshape(1, 1, query_tokens, 1)
             scores = scores.masked_fill(indices[:, None, :, :] > positions, float("-inf"))
         probabilities = ctx.torch.softmax(scores.float(), dim=-1).to(dtype=query.dtype)
         return (probabilities.unsqueeze(-1) * selected_values).sum(dim=-2)

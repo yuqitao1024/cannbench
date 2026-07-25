@@ -21,6 +21,7 @@ class LightningIndexerCase:
     source_model: str
     source_file: str
     source_op: str
+    causal: bool = False
 
     def __post_init__(self) -> None:
         for name in (
@@ -35,6 +36,8 @@ class LightningIndexerCase:
                 raise ValueError(f"{name} must be positive")
         if self.top_k > self.context_tokens:
             raise ValueError("top_k must not exceed context_tokens")
+        if self.causal and self.query_tokens > self.context_tokens:
+            raise ValueError("causal query_tokens must not exceed context_tokens")
 
     @property
     def payload(self) -> dict[str, object]:
@@ -45,6 +48,7 @@ class LightningIndexerCase:
             "index_heads": self.index_heads,
             "index_dim": self.index_dim,
             "top_k": self.top_k,
+            "causal": self.causal,
         }
         if self.phase is not None:
             payload["phase"] = self.phase

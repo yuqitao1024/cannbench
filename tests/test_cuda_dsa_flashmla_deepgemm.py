@@ -54,6 +54,7 @@ def test_flashmla_deepgemm_adapter_routes_decode_indexer_logits_through_topk(
     topk_indices = _FakeTensor((4, 2), [[3, 1], [2, 0], [1, 0], [3, 2]])
     topk_calls = []
     fake_torch = SimpleNamespace(
+        int32="int32",
         topk=lambda tensor, top_k, **kwargs: topk_calls.append(
             (tensor, top_k, kwargs)
         )
@@ -104,6 +105,7 @@ def test_flashmla_deepgemm_adapter_routes_prefill_indexer_logits_through_topk(
     topk_indices = _FakeTensor((2, 2), [[3, 1], [2, 0]])
     topk_calls = []
     fake_torch = SimpleNamespace(
+        int32="int32",
         topk=lambda tensor, top_k, **kwargs: topk_calls.append(
             (tensor, top_k, kwargs)
         )
@@ -161,6 +163,7 @@ def test_deepgemm_prefill_requests_per_query_compressed_logits(monkeypatch):
                 "query_shape": (2, 2, 64, 128),
                 "key_shape": (2, 4096, 128),
                 "weight_shape": (2, 2, 64),
+                "valid_context_lengths": (4095, 4096, 4095, 4096),
             },
             "query": _FakeTensor((2, 2, 64, 128)),
             "keys": _FakeTensor((2, 4096, 128)),
@@ -170,6 +173,8 @@ def test_deepgemm_prefill_requests_per_query_compressed_logits(monkeypatch):
 
     assert result["max_seqlen_k"] == 4096
     assert result["clean_logits"] is False
+    assert result["cu_seq_len_k_start"].tolist() == [0, 0, 4096, 4096]
+    assert result["cu_seq_len_k_end"].tolist() == [4095, 4096, 8191, 8192]
 
 
 def test_flashmla_deepgemm_adapter_routes_decode_attention_to_flash_mla_decode(
@@ -359,6 +364,7 @@ def test_deepgemm_decode_indexer_supports_nextn_queries(monkeypatch):
                 "query_shape": (2, 2, 64, 128),
                 "key_shape": (2, 32768, 128),
                 "weight_shape": (2, 2, 64),
+                "valid_context_lengths": (32767, 32768, 32767, 32768),
             },
             "query": _FakeTensor((2, 2, 64, 128)),
             "keys": _FakeTensor((2, 32768, 128)),
@@ -369,10 +375,12 @@ def test_deepgemm_decode_indexer_supports_nextn_queries(monkeypatch):
     assert result["q"].shape == (2, 2, 64, 128)
     assert result["weights"].shape == (4, 64)
     assert result["context_lens"].shape == (2, 2)
-    assert result["context_lens"].tolist() == [
-        [32768, 32768],
-        [32768, 32768],
-    ]
+    assert result["context_lens"].tolist() == (
+        32767,
+        32768,
+        32767,
+        32768,
+    )
     assert metadata_calls[0][0][0] is result["context_lens"]
     assert result["schedule_meta"] == "metadata"
 

@@ -60,6 +60,9 @@ class FakeTensor:
     def __truediv__(self, scalar):
         return FakeTensor(_elementwise_scalar(self.data, lambda value: value / scalar), dtype=self.dtype)
 
+    def __add__(self, scalar):
+        return FakeTensor(_elementwise_scalar(self.data, lambda value: value + scalar), dtype=self.dtype)
+
     def __gt__(self, other):
         return FakeTensor(_elementwise_binary(self.data, other.data, lambda a, b: a > b), dtype="bool")
 
@@ -301,7 +304,7 @@ def test_prefill_reference_returns_output_and_lse(monkeypatch):
     assert lse.shape == (1, 2, 2)
 
 
-def test_prefill_reference_zeroes_all_masked_rows(monkeypatch):
+def test_prefill_reference_zeroes_all_masked_query_rows(monkeypatch):
     monkeypatch.setattr(ops, "torch", FakeTorch)
 
     all_masked_indices = FakeTensor([[[2, 2], [2, 2]]], dtype="int64")
@@ -314,24 +317,32 @@ def test_prefill_reference_zeroes_all_masked_rows(monkeypatch):
         causal=True,
     )
 
-    assert output == FakeTensor(
-        [
-            [
-                [[0.0, 0.0], [0.0, 0.0]],
-                [[0.0, 0.0], [0.0, 0.0]],
-            ]
-        ],
-        dtype="float32",
+    assert output.data[0][0][0] == [0.0, 0.0]
+    assert output.data[0][1][0] == [0.0, 0.0]
+    assert output.data[0][0][1] == [30.0, 3.0]
+    assert output.data[0][1][1] == [30.0, 3.0]
+    assert lse.data[0][0][0] == float("-inf")
+    assert lse.data[0][1][0] == float("-inf")
+    assert lse.data[0][0][1] != float("-inf")
+    assert lse.data[0][1][1] != float("-inf")
+
+
+def test_prefill_reference_uses_right_aligned_absolute_query_positions(monkeypatch):
+    monkeypatch.setattr(ops, "torch", FakeTorch)
+    query = FakeTensor([[[[1.0], [1.0]]]])
+    keys = FakeTensor([[[[0.0], [0.0], [0.0], [0.0]]]])
+    values = FakeTensor([[[[0.0], [0.0], [20.0], [40.0]]]])
+    indices = FakeTensor([[[2, 3], [2, 3]]], dtype="int64")
+
+    output, _ = ops._prefill_reference(
+        query,
+        keys,
+        values,
+        indices,
+        causal=True,
     )
-    assert lse == FakeTensor(
-        [
-            [
-                [float("-inf"), float("-inf")],
-                [float("-inf"), float("-inf")],
-            ]
-        ],
-        dtype="float32",
-    )
+
+    assert output == FakeTensor([[[[20.0], [30.0]]]], dtype="float32")
 
 
 def test_sparse_attention_forward_rejects_unsupported_family(monkeypatch):
