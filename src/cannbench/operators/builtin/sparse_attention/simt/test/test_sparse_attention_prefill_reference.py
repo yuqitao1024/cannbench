@@ -31,6 +31,27 @@ class FakeTensor:
         flat = _flatten(self.data)
         return FakeTensor(_reshape_flat(flat, shape), dtype=self.dtype)
 
+    def permute(self, *dims):
+        if dims == (0, 2, 1, 3):
+            data = [
+                [
+                    [batch[head][token] for head in range(len(batch))]
+                    for token in range(len(batch[0]))
+                ]
+                for batch in self.data
+            ]
+        elif dims == (0, 2, 1):
+            data = [
+                [
+                    [batch[head][token] for head in range(len(batch))]
+                    for token in range(len(batch[0]))
+                ]
+                for batch in self.data
+            ]
+        else:
+            raise AssertionError(f"unsupported fake permute: {dims}")
+        return FakeTensor(data, dtype=self.dtype)
+
     def sum(self, dim: int):
         if dim < 0:
             dim = len(self.shape) + dim
@@ -318,12 +339,12 @@ def test_prefill_reference_zeroes_all_masked_query_rows(monkeypatch):
     )
 
     assert output.data[0][0][0] == [0.0, 0.0]
-    assert output.data[0][1][0] == [0.0, 0.0]
-    assert output.data[0][0][1] == [1.0, 1.0]
+    assert output.data[0][0][1] == [0.0, 0.0]
+    assert output.data[0][1][0] == [1.0, 1.0]
     assert output.data[0][1][1] == [1.0, 1.0]
     assert lse.data[0][0][0] == float("-inf")
-    assert lse.data[0][1][0] == float("-inf")
-    assert lse.data[0][0][1] != float("-inf")
+    assert lse.data[0][0][1] == float("-inf")
+    assert lse.data[0][1][0] != float("-inf")
     assert lse.data[0][1][1] != float("-inf")
 
 
@@ -341,7 +362,7 @@ def test_prefill_reference_uses_right_aligned_absolute_query_positions(monkeypat
         causal=True,
     )
 
-    assert output == FakeTensor([[[[20.0], [30.0]]]], dtype="float32")
+    assert output == FakeTensor([[[[20.0]], [[30.0]]]], dtype="float32")
 
 
 def test_sparse_attention_forward_rejects_unsupported_family(monkeypatch):

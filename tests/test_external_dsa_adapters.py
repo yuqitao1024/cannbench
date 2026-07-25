@@ -41,8 +41,16 @@ def test_ascend_vllm_sparse_attention_uses_sparse_flash_attention_for_v32(
             self.shape = shape[0] if len(shape) == 1 else shape
             return self
 
+        def __add__(self, other):
+            del other
+            return FakeTensor("lse", self.shape)
+
     class FakeTorch:
         int32 = "int32"
+
+        @staticmethod
+        def log(tensor):
+            return tensor
 
     def fake_sparse_flash_attention(
         query,
@@ -60,6 +68,7 @@ def test_ascend_vllm_sparse_attention_uses_sparse_flash_attention_for_v32(
         layout_query="BSND",
         layout_kv="BSND",
         sparse_mode=3,
+        return_softmax_lse=False,
     ):
         calls["attention"] = {
             "query": query,
@@ -76,8 +85,13 @@ def test_ascend_vllm_sparse_attention_uses_sparse_flash_attention_for_v32(
             "layout_query": layout_query,
             "layout_kv": layout_kv,
             "sparse_mode": sparse_mode,
+            "return_softmax_lse": return_softmax_lse,
         }
-        return FakeTensor("out")
+        return (
+            FakeTensor("out", (1, 128, 512)),
+            FakeTensor("max", (1, 1, 128)),
+            FakeTensor("sum", (1, 1, 128)),
+        )
 
     payload = {
         "query_shape": (1, 128, 1, 576),
@@ -122,9 +136,11 @@ def test_ascend_vllm_sparse_attention_uses_sparse_flash_attention_for_v32(
         device="npu",
         dtype="bfloat16",
     )
-    output = operator()
+    output, lse = operator()
 
     assert output.name == "out"
+    assert output.shape == (1, 1, 128, 512)
+    assert lse.shape == (1, 1, 128)
     assert calls["attention"]["query"].shape == (1, 128, 512)
     assert calls["attention"]["query_rope"].shape == (1, 128, 64)
     assert calls["attention"]["key"].shape == (1, 16, 1, 512)
@@ -137,6 +153,7 @@ def test_ascend_vllm_sparse_attention_uses_sparse_flash_attention_for_v32(
     assert calls["attention"]["scale_value"] == pytest.approx(576**-0.5)
     assert calls["attention"]["layout_query"] == "TND"
     assert calls["attention"]["layout_kv"] == "PA_BSND"
+    assert calls["attention"]["return_softmax_lse"] is True
 
 
 def test_ascend_vllm_sparse_attention_uses_bound_indexer_output(monkeypatch):
@@ -152,8 +169,16 @@ def test_ascend_vllm_sparse_attention_uses_bound_indexer_output(monkeypatch):
             self.shape = shape[0] if len(shape) == 1 else shape
             return self
 
+        def __add__(self, other):
+            del other
+            return FakeTensor(self.shape)
+
     class FakeTorch:
         int32 = "int32"
+
+        @staticmethod
+        def log(tensor):
+            return tensor
 
     payload = {
         "query_shape": (1, 128, 1, 576),
@@ -172,7 +197,7 @@ def test_ascend_vllm_sparse_attention_uses_bound_indexer_output(monkeypatch):
     backend = SimpleNamespace(
         _ascend_custom_ops=lambda torch: SimpleNamespace(
             npu_sparse_flash_attention=lambda **kwargs: captured.update(kwargs)
-            or FakeTensor()
+            or (FakeTensor((1, 128, 512)), FakeTensor((1, 1, 128)), FakeTensor((1, 1, 128)))
         ),
         _tensor=lambda torch, values, *, device, dtype: FakeTensor((len(values),)),
         _custom_op_pair=lambda *args: pytest.fail("sharedkv ops must not be selected"),
@@ -217,8 +242,16 @@ def test_ascend_vllm_v32_prefill_allocates_large_inputs_on_device(monkeypatch):
             self.shape = shape[0] if len(shape) == 1 else shape
             return self
 
+        def __add__(self, other):
+            del other
+            return FakeTensor(self.shape)
+
     class FakeTorch:
         int32 = "int32"
+
+        @staticmethod
+        def log(tensor):
+            return tensor
 
         @staticmethod
         def zeros(shape, *, device, dtype):
@@ -228,7 +261,11 @@ def test_ascend_vllm_v32_prefill_allocates_large_inputs_on_device(monkeypatch):
 
     def fake_sparse_flash_attention(*args, **kwargs):
         del args, kwargs
-        return FakeTensor((4096, 128, 512))
+        return (
+            FakeTensor((4096, 128, 512)),
+            FakeTensor((1, 4096, 128)),
+            FakeTensor((1, 4096, 128)),
+        )
 
     monkeypatch.setattr(
         external,
@@ -261,9 +298,10 @@ def test_ascend_vllm_v32_prefill_allocates_large_inputs_on_device(monkeypatch):
         device="npu",
         dtype="bfloat16",
     )
-    output = operator()
+    output, lse = operator()
 
-    assert output.shape == (4096, 128, 512)
+    assert output.shape == (1, 4096, 128, 512)
+    assert lse.shape == (1, 4096, 128)
     assert allocations == [
         ((4096, 128, 512), "bfloat16"),
         ((4096, 128, 64), "bfloat16"),

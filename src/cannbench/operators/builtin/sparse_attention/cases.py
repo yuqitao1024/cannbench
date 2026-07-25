@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from functools import lru_cache
 from importlib.resources import files
@@ -26,6 +27,8 @@ class SparseAttentionCase:
     source_file: str
     source_op: str
     shared_kv: bool = True
+    softmax_scale: float | None = None
+    topk_lengths: tuple[int, ...] | None = None
 
     def __post_init__(self) -> None:
         for name in (
@@ -48,6 +51,32 @@ class SparseAttentionCase:
             raise ValueError("shared-KV requires value_head_dim <= qk_head_dim")
         if self.phase not in {"decode", "prefill"}:
             raise ValueError("phase must be decode or prefill")
+        softmax_scale = self.softmax_scale
+        if softmax_scale is None:
+            softmax_scale = self.qk_head_dim**-0.5
+            object.__setattr__(self, "softmax_scale", softmax_scale)
+        if not math.isfinite(softmax_scale) or softmax_scale <= 0.0:
+            raise ValueError("softmax_scale must be finite and positive")
+        if self.topk_lengths is not None:
+            topk_lengths = tuple(self.topk_lengths)
+            if len(topk_lengths) != self.batch * self.query_tokens:
+                raise ValueError(
+                    "topk_lengths must contain one value per query"
+                )
+            if any(
+                length < 0 or length > self.selected_tokens
+                for length in topk_lengths
+            ):
+                raise ValueError(
+                    "topk_lengths values must be between 0 and selected_tokens"
+                )
+            object.__setattr__(self, "topk_lengths", topk_lengths)
+
+    @property
+    def resolved_topk_lengths(self) -> tuple[int, ...]:
+        if self.topk_lengths is not None:
+            return self.topk_lengths
+        return (self.selected_tokens,) * (self.batch * self.query_tokens)
 
     @property
     def payload(self) -> dict[str, object]:
@@ -63,6 +92,8 @@ class SparseAttentionCase:
             "shared_kv": self.shared_kv,
             "causal": self.causal,
             "phase": self.phase,
+            "softmax_scale": self.softmax_scale,
+            "topk_lengths": self.resolved_topk_lengths,
         }
 
 

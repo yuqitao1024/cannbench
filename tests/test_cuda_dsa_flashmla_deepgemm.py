@@ -19,6 +19,10 @@ class _FakeTensor:
     def reshape(self, *shape):
         return _FakeTensor(shape, self.values)
 
+    def permute(self, *dims):
+        assert dims == (0, 2, 1)
+        return _FakeTensor((self.shape[0], self.shape[2], self.shape[1]), self.values)
+
     def to(self, dtype):
         return self
 
@@ -196,7 +200,7 @@ def test_flashmla_deepgemm_adapter_routes_decode_attention_to_flash_mla_decode(
         flash_mla_with_kvcache=lambda **kwargs: calls.append(
             ("flash_mla_with_kvcache", kwargs)
         )
-        or "decode-attn",
+        or (_FakeTensor((2, 2, 4, 8)), _FakeTensor((2, 4, 2))),
         flash_mla_sparse_fwd=lambda **kwargs: calls.append(
             ("flash_mla_sparse_fwd", kwargs)
         ),
@@ -214,14 +218,19 @@ def test_flashmla_deepgemm_adapter_routes_decode_attention_to_flash_mla_decode(
     )
 
     result = adapter.sparse_attention(
-        payload={"phase": "decode"},
+        payload={
+            "phase": "decode",
+            "query_shape": (2, 4, 2, 16),
+            "value_head_dim": 8,
+        },
         query="q",
         keys="k",
         values="v",
         indices="i",
     )
 
-    assert result == "decode-attn"
+    assert result[0].shape == (2, 2, 4, 8)
+    assert result[1].shape == (2, 2, 4)
     assert calls == [
         (
             "flash_mla_with_kvcache",
@@ -241,7 +250,11 @@ def test_flashmla_deepgemm_adapter_routes_prefill_attention_to_flash_mla_sparse_
         flash_mla_sparse_fwd=lambda **kwargs: calls.append(
             ("flash_mla_sparse_fwd", kwargs)
         )
-        or "prefill-attn",
+        or (
+            _FakeTensor((2, 4, 8)),
+            _FakeTensor((2, 4)),
+            _FakeTensor((2, 4)),
+        ),
     )
     monkeypatch.setitem(sys.modules, "flash_mla", fake_flash_mla)
     adapter = _reload_adapter()
@@ -252,14 +265,19 @@ def test_flashmla_deepgemm_adapter_routes_prefill_attention_to_flash_mla_sparse_
     )
 
     result = adapter.sparse_attention(
-        payload={"phase": "prefill"},
+        payload={
+            "phase": "prefill",
+            "query_shape": (1, 4, 2, 16),
+            "value_head_dim": 8,
+        },
         query="q",
         keys="k",
         values="v",
         indices="i",
     )
 
-    assert result == "prefill-attn"
+    assert result[0].shape == (1, 2, 4, 8)
+    assert result[1].shape == (1, 2, 4)
     assert calls == [
         (
             "flash_mla_sparse_fwd",

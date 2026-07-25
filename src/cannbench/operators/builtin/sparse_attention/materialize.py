@@ -41,26 +41,29 @@ def materialize_sparse_attention_inputs(
     shared_kv_size = (
         case.batch * case.kv_heads * case.context_tokens * case.qk_head_dim
     )
-    indices_size = case.batch * case.query_tokens * case.selected_tokens
-
     query = tuple(round(generator.uniform(-1.0, 1.0), 6) for _ in range(query_size))
     shared_kv = tuple(
         round(generator.uniform(-1.0, 1.0), 6)
         for _ in range(shared_kv_size)
     )
-    if case.causal:
-        generated_indices = []
-        for _batch in range(case.batch):
-            for query_index in range(case.query_tokens):
+    generated_indices = []
+    topk_lengths = case.resolved_topk_lengths
+    for batch_index in range(case.batch):
+        for query_index in range(case.query_tokens):
+            row_index = batch_index * case.query_tokens + query_index
+            if case.causal:
                 upper_bound = min(
                     case.context_tokens,
                     case.context_tokens - case.query_tokens + query_index + 1,
                 )
-                for _selected in range(case.selected_tokens):
+            else:
+                upper_bound = case.context_tokens
+            for selected_index in range(case.selected_tokens):
+                if selected_index < topk_lengths[row_index]:
                     generated_indices.append(generator.randrange(upper_bound))
-        indices = tuple(generated_indices)
-    else:
-        indices = tuple(generator.randrange(case.context_tokens) for _ in range(indices_size))
+                else:
+                    generated_indices.append(-1)
+    indices = tuple(generated_indices)
     return {
         "query_shape": query_shape,
         "shared_kv_shape": shared_kv_shape,
@@ -72,6 +75,8 @@ def materialize_sparse_attention_inputs(
         "value_head_dim": case.value_head_dim,
         "causal": case.causal,
         "phase": case.phase,
+        "softmax_scale": case.softmax_scale,
+        "topk_lengths": topk_lengths,
         "dtype": dtype,
         "query": query,
         "shared_kv": shared_kv,

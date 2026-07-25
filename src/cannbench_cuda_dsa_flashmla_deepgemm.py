@@ -33,19 +33,21 @@ def sparse_attention(**kwargs: Any) -> Any:
     phase = _resolve_phase(kwargs)
     flash_mla = _import_required("flash_mla", op_name="sparse_attention")
     if phase == "decode":
-        return _call_required(
+        result = _call_required(
             flash_mla,
             "flash_mla_with_kvcache",
             op_name="sparse_attention",
             kwargs=_flash_mla_decode_attention_kwargs(flash_mla, kwargs),
         )
+        return _normalize_flash_mla_attention_result(kwargs, result, phase=phase)
     if phase == "prefill":
-        return _call_required(
+        result = _call_required(
             flash_mla,
             "flash_mla_sparse_fwd",
             op_name="sparse_attention",
             kwargs=_flash_mla_prefill_attention_kwargs(kwargs),
         )
+        return _normalize_flash_mla_attention_result(kwargs, result, phase=phase)
     raise _unsupported_phase(phase, "sparse_attention")
 
 
@@ -232,6 +234,11 @@ def _flash_mla_prefill_attention_kwargs(kwargs: dict[str, Any]) -> dict[str, Any
         "indices": indices.contiguous(),
         "sm_scale": float(kwargs.get("softmax_scale", qk_head_dim ** -0.5)),
         "d_v": value_head_dim,
+        "topk_length": (
+            None
+            if kwargs.get("topk_lengths") is None
+            else kwargs["topk_lengths"].reshape(batch * query_tokens)
+        ),
     }
 
 
@@ -287,7 +294,51 @@ def _flash_mla_decode_attention_kwargs(
         "causal": False,
         "is_fp8_kvcache": True,
         "indices": indices_in_kvcache.contiguous(),
+        "topk_length": _decode_topk_lengths(
+            kwargs.get("topk_lengths"), batch=batch, query_tokens=query_tokens
+        ),
     }
+
+
+def _decode_topk_lengths(topk_lengths, *, batch: int, query_tokens: int):
+    del query_tokens
+    if topk_lengths is None:
+        return None
+    return topk_lengths.reshape(batch)
+
+
+def _normalize_flash_mla_attention_result(
+    kwargs: dict[str, Any], result, *, phase: str
+):
+    payload = _require_payload(kwargs)
+    batch, query_heads, query_tokens, _ = payload["query_shape"]
+    value_head_dim = int(payload["value_head_dim"])
+    if phase == "prefill":
+        if not isinstance(result, tuple) or len(result) < 3:
+            raise RuntimeError(
+                "FlashMLA sparse prefill must return output, max_logits, and lse"
+            )
+        output, _, lse = result[:3]
+        output = output.reshape(batch, query_tokens, query_heads, value_head_dim)
+        lse = lse.reshape(batch, query_tokens, query_heads)
+        return _normalize_all_invalid_rows(kwargs, output, lse)
+    if not isinstance(result, tuple) or len(result) < 2:
+        raise RuntimeError("FlashMLA sparse decode must return output and lse")
+    output, lse = result[:2]
+    output = output.reshape(batch, query_tokens, query_heads, value_head_dim)
+    lse = lse.permute(0, 2, 1)
+    return _normalize_all_invalid_rows(kwargs, output, lse)
+
+
+def _normalize_all_invalid_rows(kwargs: dict[str, Any], output, lse):
+    indices = kwargs.get("indices")
+    if indices is None or not hasattr(indices, "lt"):
+        return output, lse
+    context_tokens = _require_payload(kwargs)["shared_kv_shape"][2]
+    all_invalid = indices.lt(0).logical_or(indices.ge(context_tokens)).all(dim=-1)
+    output = output.masked_fill(all_invalid.unsqueeze(-1).unsqueeze(-1), 0.0)
+    lse = lse.masked_fill(all_invalid.unsqueeze(-1), float("-inf"))
+    return output, lse
 
 
 def _require_torch(kwargs: dict[str, Any]):

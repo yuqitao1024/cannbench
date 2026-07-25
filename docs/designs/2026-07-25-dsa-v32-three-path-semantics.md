@@ -98,14 +98,19 @@ lowest-index 顺序只是确定性实现细节，不作为厂商原生 Top-K 的
   keys = shared_kv
   values = shared_kv[..., :512]
   selected_kv = gather(keys, values, indices)
-  scores = query @ selected_keys^T / sqrt(576)
+  scores = softmax_scale * (query @ selected_keys^T)
   probabilities = softmax(scores)
   out = probabilities @ selected_values
 
 输出:
-  out [B, H, Q, 512] BF16
-  lse [B, H, Q]      FP32
+  out [B, Q, H, 512] BF16
+  lse [B, Q, H]      FP32 (natural-log logsumexp)
 ```
+
+V3.2 的 `softmax_scale` 固定为 `576^-0.5`。每个 `[B,Q]` 行通过
+`topk_lengths` 声明有效候选数，长度外或超出 KV 范围的 index 使用 `-1`
+语义处理。全无效行的 output 为 0，LSE 为 `-inf`。当前 V3.2 realistic case
+均使用完整 2048 个候选；SIMT 融合 kernel 因此只接受满 Top-K 行和默认 scale。
 
 Workflow 由两个独立算子组成，只把 Indexer 产生的 `indices` 直接绑定给
 Sparse Attention。当前目标不是把整个 workflow 合并为一个 kernel。
@@ -165,21 +170,16 @@ FP8 cache 格式。FlashMLA 假定传入的 indices 已经满足有效范围，�
 这些差异不应改变对外张量代表的数学对象。Adapter 应负责布局和存储格式的
 转换。
 
-以下是当前需要修复的逻辑差异。
-
-### 1. Sparse Attention 返回值
-
-SIMT 约定返回 `(out, lse)`。FlashMLA 的不同入口还可能返回 `max_logits`
-等统计量；vLLM-Ascend 原生算子返回 softmax 统计值，但当前 adapter 只保留
-`out`。目标公开契约应统一为：
+三条路径的公开返回值已统一为：
 
 ```text
-(out: BF16 [B,H,Q,512], lse: FP32 [B,H,Q])
+(out: BF16 [B,Q,H,512], lse: FP32 [B,Q,H])
 ```
 
-各 adapter 可丢弃其他后端私有统计量，或从原生统计量规范化出 LSE。
+FlashMLA prefill adapter 丢弃私有 `max_logits`；vLLM-Ascend adapter 从原生
+`softmax_max + log(softmax_sum)` 规范化出自然对数 LSE。
 
-### 2. 精度与结果比较
+### 精度与结果比较
 
 虽然三条路径可以使用同一份 BF16 逻辑输入，CUDA 路径内部的 FP8 量化仍可能
 改变临界位置的 TopK 排序。因此验证不能只要求 indices 逐项完全相同：
@@ -203,7 +203,9 @@ Sparse Attention:
   K = shared_kv
   V = shared_kv[..., :512]
   INT32 indices
-  normalized (BF16 out, FP32 lse)
+  softmax_scale = 576^-0.5
+  invalid index = -1
+  normalized (BF16 out [B,Q,H,Dv], FP32 natural-log lse [B,Q,H])
 
 Workflow:
   indices 在设备侧从 Indexer 传给 Sparse Attention
@@ -211,39 +213,30 @@ Workflow:
   不包含 projection、RoPE 生成、cache scatter 和 SWA
 ```
 
-在完成返回值规范化之后，三条路径才可以
-称为“相同逻辑输入、相同逻辑输出、不同硬件实现”，并用于严格的 V3.2 性能对标。
+三条路径现在具有相同的逻辑输入和输出合同。进入严格性能对标前，仍需完成
+真实序列元数据、量化计时边界、rank-local shape 和 conformance 门禁。
 
 ## V3.2 剩余工作
 
 本节只记录尚未闭环的事项，不保留已完成事项或历史提交清单。
 
-### 1. 统一 Sparse Attention 数学合同
-
-- 将 softmax scale 写入 case/schema，并从 V3.2 模型合同验证其数值，而不是
-  仅由 adapter 默认使用 `d_qk^-0.5`。
-- 统一 invalid indices 和每行有效 `topk_length`。
-- 统一自然对数 LSE 的定义和特殊值处理。
-- 将三后端结果规范化为 `out [B,Q,H,Dv]` 和 `lse [B,Q,H]`；vLLM adapter
-  不能继续只返回 `out`。
-
-### 2. 增加真实序列元数据
+### 1. 增加真实序列元数据
 
 Case schema 需要表达每条请求的 `query_len`、`context_len`、绝对 Query
 position、`cu_seqlens` 和 block table，并支持 ragged batch。Prefill 不能默认
 Query 从位置 0 开始。
 
-### 3. 明确生产量化的计时边界
+### 2. 明确生产量化的计时边界
 
 需要区分静态 KV cache packing/metadata 准备与每步动态 Q 量化。静态准备应放在
 计时外；动态量化是否计时应以真实推理调用边界为准，并在三条路径中保持可比。
 
-### 4. 建立 rank-local shape 合同
+### 3. 建立 rank-local shape 合同
 
 Case 需要记录 TP/DP/CP、local heads、local batch 和 KV shard。否则无法证明
 vLLM 多卡路径与单卡 FlashMLA/SIMT 路径处理了相同的数据量。
 
-### 5. 建立三后端 Conformance 门禁
+### 4. 建立三后端 Conformance 门禁
 
 - Indexer 在相同输入下比较 Top-K recall、集合重叠和分数误差。
 - Sparse Attention 使用同一份合法 indices 比较 output 和自然对数 LSE。

@@ -15,6 +15,7 @@
       "shared_kv": true,
       "causal": true,
       "phase": "prefill",
+      "softmax_scale": 0.041666666666666664,
       "source_kind": "official_operator_test",
       "source_project": "DeepSeek-V3.2+FlashMLA",
       "source_model": "DeepSeek-V3.2",

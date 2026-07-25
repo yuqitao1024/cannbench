@@ -40,7 +40,34 @@ def build_cuda_library_callable(ctx):
             device=ctx.device,
             dtype=ctx.torch.int32,
         ).reshape(payload["indices_shape"])
-    softmax_scale = payload["query_shape"][-1] ** -0.5
+    softmax_scale = payload["softmax_scale"]
+    topk_lengths = None
+    if any(
+        length != payload["selected_tokens"]
+        for length in payload["topk_lengths"]
+    ):
+        topk_length_values = payload["topk_lengths"]
+        topk_length_shape = (
+            payload["query_shape"][0], payload["query_shape"][2]
+        )
+        if payload["phase"] == "decode":
+            batch, query_tokens = topk_length_shape
+            rows = tuple(
+                topk_length_values[index * query_tokens : (index + 1) * query_tokens]
+                for index in range(batch)
+            )
+            if any(len(set(row)) != 1 for row in rows):
+                raise RuntimeError(
+                    "FlashMLA decode requires one topk_length per request"
+                )
+            topk_length_values = tuple(row[0] for row in rows)
+            topk_length_shape = (batch,)
+        topk_lengths = ctx.backend._tensor(
+            ctx.torch,
+            topk_length_values,
+            device=ctx.device,
+            dtype=ctx.torch.int32,
+        ).reshape(topk_length_shape)
 
     def operator():
         return adapter_op(
@@ -56,6 +83,7 @@ def build_cuda_library_callable(ctx):
             causal=payload["causal"],
             phase=payload["phase"],
             softmax_scale=softmax_scale,
+            topk_lengths=topk_lengths,
         )
 
     return operator
@@ -132,6 +160,9 @@ def _build_vllm_sparse_flash_attention_callable(ctx):
         rope_head_dim,
     )
     indices_shape = (batch * query_tokens, kv_heads, selected_tokens)
+    softmax_scale = float(
+        getattr(ctx.case, "softmax_scale", None) or qk_head_dim**-0.5
+    )
 
     if direct_device_inputs:
         query = ctx.torch.zeros(query_shape, device=ctx.device, dtype=ctx.dtype)
@@ -221,7 +252,7 @@ def _build_vllm_sparse_flash_attention_callable(ctx):
             key=key,
             value=value,
             sparse_indices=sparse_indices,
-            scale_value=qk_head_dim**-0.5,
+            scale_value=softmax_scale,
             block_table=block_table,
             actual_seq_lengths_query=actual_seq_lengths_query,
             actual_seq_lengths_kv=actual_seq_lengths_kv,
@@ -231,8 +262,16 @@ def _build_vllm_sparse_flash_attention_callable(ctx):
             layout_query="TND",
             layout_kv="PA_BSND",
             sparse_mode=3,
+            return_softmax_lse=True,
         )
-        return result[0] if isinstance(result, tuple) else result
+        return _normalize_ascend_sfa_result(
+            ctx.torch,
+            result,
+            batch=batch,
+            query_tokens=query_tokens,
+            query_heads=query_heads,
+            value_head_dim=value_head_dim,
+        )
 
     return operator
 
@@ -353,7 +392,7 @@ def _build_vllm_sharedkv_callable(ctx):
         device=ctx.device,
         dtype=ctx.torch.int32,
     )
-    softmax_scale = qk_head_dim ** -0.5
+    softmax_scale = payload["softmax_scale"]
 
     metadata = metadata_op(
         num_heads_q=query_heads,
@@ -382,7 +421,7 @@ def _build_vllm_sharedkv_callable(ctx):
     )
 
     def operator():
-        return attention_op(
+        result = attention_op(
             query,
             ori_kv=None,
             cmp_kv=cmp_kv,
@@ -406,6 +445,41 @@ def _build_vllm_sharedkv_callable(ctx):
             layout_q="TND",
             layout_kv="PA_ND",
             return_softmax_lse=True,
-        )[0]
+        )
+        return _normalize_ascend_sfa_result(
+            ctx.torch,
+            result,
+            batch=batch,
+            query_tokens=query_tokens,
+            query_heads=query_heads,
+            value_head_dim=qk_head_dim,
+        )
 
     return operator
+
+
+def _normalize_ascend_sfa_result(
+    torch,
+    result,
+    *,
+    batch: int,
+    query_tokens: int,
+    query_heads: int,
+    value_head_dim: int,
+):
+    if not isinstance(result, tuple) or len(result) < 2:
+        raise RuntimeError(
+            "vllm_ascend sparse_attention must return output and LSE statistics"
+        )
+    if len(result) == 2:
+        output, lse = result
+        return (
+            output.reshape(batch, query_tokens, query_heads, value_head_dim),
+            lse.reshape(batch, query_tokens, query_heads),
+        )
+    output, softmax_max, softmax_sum = result[:3]
+    output = output.reshape(batch, query_tokens, query_heads, value_head_dim)
+    lse = (softmax_max + torch.log(softmax_sum)).reshape(
+        batch, query_tokens, query_heads
+    )
+    return output, lse

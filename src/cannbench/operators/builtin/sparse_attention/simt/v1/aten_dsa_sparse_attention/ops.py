@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 from importlib import import_module
 
 try:
@@ -37,7 +36,7 @@ def sparse_attention_forward(
     custom_op = _load_registered_op()
     if custom_op is None:
         raise RuntimeError("aten_dsa_sparse_attention custom op is not registered")
-    return custom_op(
+    result = custom_op(
         query,
         shared_kv,
         indices,
@@ -46,6 +45,10 @@ def sparse_attention_forward(
         family,
         causal,
     )
+    if not isinstance(result, tuple):
+        return result
+    output, lse = result
+    return output.permute(0, 2, 1, 3), lse.permute(0, 2, 1)
 
 
 def _load_registered_op():
@@ -65,6 +68,8 @@ def _prefill_reference(
     *,
     value_head_dim: int,
     causal: bool,
+    softmax_scale: float | None = None,
+    topk_lengths=None,
 ):
     if torch is None:
         raise RuntimeError("torch is required for sparse_attention reference wrapper")
@@ -72,16 +77,40 @@ def _prefill_reference(
     expanded_keys, expanded_values = _expand_kv(
         shared_kv, values, query.shape[1]
     )
-    selected_keys = _gather_selected(expanded_keys, indices)
-    selected_values = _gather_selected(expanded_values, indices)
-    scores = (query.unsqueeze(3) * selected_keys).sum(dim=-1) / math.sqrt(query.shape[-1])
+    context_tokens = shared_kv.shape[2]
     invalid_mask = None
+    safe_indices = indices
+    if hasattr(indices, "clamp"):
+        invalid_mask = (indices < 0) | (indices >= context_tokens)
+        if topk_lengths is not None:
+            topk_positions = torch.arange(
+                indices.shape[2], device=getattr(indices, "device", None)
+            ).reshape(1, 1, indices.shape[2])
+            invalid_mask = invalid_mask | (
+                topk_positions >= topk_lengths.unsqueeze(-1)
+            )
+        safe_indices = indices.clamp(min=0, max=context_tokens - 1)
+    selected_keys = _gather_selected(expanded_keys, safe_indices)
+    selected_values = _gather_selected(expanded_values, safe_indices)
+    scores = (query.unsqueeze(3) * selected_keys).sum(dim=-1)
+    resolved_scale = (
+        query.shape[-1] ** -0.5 if softmax_scale is None else softmax_scale
+    )
+    scores = scores / (1.0 / resolved_scale)
     if causal:
         positions = (
             torch.arange(query.shape[2], device=getattr(query, "device", None))
             + (shared_kv.shape[2] - query.shape[2])
         ).reshape(1, 1, query.shape[2], 1)
-        invalid_mask = indices[:, None, :, :] > positions
+        causal_mask = indices[:, None, :, :] > positions
+        invalid_mask = (
+            causal_mask
+            if invalid_mask is None
+            else invalid_mask[:, None, :, :] | causal_mask
+        )
+    elif invalid_mask is not None:
+        invalid_mask = invalid_mask[:, None, :, :]
+    if invalid_mask is not None:
         scores = scores.masked_fill(invalid_mask, float("-inf"))
     scores_float = scores.float()
     probabilities = torch.softmax(scores_float, dim=-1)
@@ -91,7 +120,9 @@ def _prefill_reference(
         probabilities = probabilities.masked_fill(all_invalid.unsqueeze(-1), 0.0)
         lse = lse.masked_fill(all_invalid, float("-inf"))
     output = (probabilities.to(query.dtype).unsqueeze(-1) * selected_values).sum(dim=-2)
-    return output, lse
+    return output.permute(0, 2, 1, 3), lse.permute(0, 2, 1)
+
+
 def _decode_reference(
     query,
     shared_kv,
@@ -99,6 +130,8 @@ def _decode_reference(
     *,
     value_head_dim: int,
     causal: bool,
+    softmax_scale: float | None = None,
+    topk_lengths=None,
 ):
     return _prefill_reference(
         query,
@@ -106,6 +139,8 @@ def _decode_reference(
         indices,
         value_head_dim=value_head_dim,
         causal=causal,
+        softmax_scale=softmax_scale,
+        topk_lengths=topk_lengths,
     )
 
 

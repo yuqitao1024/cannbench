@@ -41,6 +41,12 @@ def _build_torch_callable(ctx):
             device=ctx.device,
             dtype=ctx.torch.long,
         ).reshape(payload["indices_shape"])
+    topk_lengths = ctx.backend._tensor(
+        ctx.torch,
+        payload["topk_lengths"],
+        device=ctx.device,
+        dtype=ctx.torch.int32,
+    ).reshape(payload["query_shape"][0], payload["query_shape"][2])
     def operator():
         batch, query_heads, query_tokens, qk_head_dim = query.shape
         value_head_dim = int(payload["value_head_dim"])
@@ -54,10 +60,18 @@ def _build_torch_callable(ctx):
             expanded_keys = expanded_keys.repeat_interleave(repeats, dim=1)
             expanded_values = expanded_values.repeat_interleave(repeats, dim=1)
 
-        key_gather_index = indices[:, None, :, :, None].expand(
+        invalid_indices = (indices < 0) | (indices >= context_tokens)
+        topk_positions = ctx.torch.arange(
+            selected_tokens, device=query.device
+        ).reshape(1, 1, selected_tokens)
+        invalid_indices = invalid_indices | (
+            topk_positions >= topk_lengths.unsqueeze(-1)
+        )
+        safe_indices = indices.clamp(min=0, max=context_tokens - 1)
+        key_gather_index = safe_indices[:, None, :, :, None].expand(
             batch, query_heads, query_tokens, selected_tokens, qk_head_dim
         )
-        value_gather_index = indices[:, None, :, :, None].expand(
+        value_gather_index = safe_indices[:, None, :, :, None].expand(
             batch, query_heads, query_tokens, selected_tokens, value_head_dim
         )
         key_source = expanded_keys[:, :, None, :, :].expand(
@@ -68,17 +82,26 @@ def _build_torch_callable(ctx):
         )
         selected_keys = ctx.torch.gather(key_source, 3, key_gather_index)
         selected_values = ctx.torch.gather(value_source, 3, value_gather_index)
-        scores = (query.unsqueeze(3) * selected_keys).sum(dim=-1) / math.sqrt(
-            qk_head_dim
-        )
+        scores = (query.unsqueeze(3) * selected_keys).sum(dim=-1)
+        scores = scores * payload["softmax_scale"]
+        invalid_mask = invalid_indices[:, None, :, :]
         if payload["causal"]:
             positions = (
                 ctx.torch.arange(query_tokens, device=query.device)
                 + (context_tokens - query_tokens)
             ).reshape(1, 1, query_tokens, 1)
-            scores = scores.masked_fill(indices[:, None, :, :] > positions, float("-inf"))
-        probabilities = ctx.torch.softmax(scores.float(), dim=-1).to(dtype=query.dtype)
-        return (probabilities.unsqueeze(-1) * selected_values).sum(dim=-2)
+            invalid_mask = invalid_mask | (indices[:, None, :, :] > positions)
+        scores = scores.masked_fill(invalid_mask, float("-inf"))
+        scores_float = scores.float()
+        probabilities = ctx.torch.softmax(scores_float, dim=-1)
+        lse = ctx.torch.logsumexp(scores_float, dim=-1)
+        all_invalid = invalid_mask.all(dim=-1)
+        probabilities = probabilities.masked_fill(all_invalid.unsqueeze(-1), 0.0)
+        lse = lse.masked_fill(all_invalid, float("-inf"))
+        output = (
+            probabilities.to(dtype=query.dtype).unsqueeze(-1) * selected_values
+        ).sum(dim=-2)
+        return output.permute(0, 2, 1, 3), lse.permute(0, 2, 1)
 
     return operator
 
@@ -136,6 +159,8 @@ def _build_simt_callable(ctx):
             "value_head_dim": ctx.case.value_head_dim,
             "causal": ctx.case.causal,
             "phase": ctx.case.phase,
+            "softmax_scale": ctx.case.softmax_scale,
+            "topk_lengths": ctx.case.resolved_topk_lengths,
         }
     else:
         payload = materialize_sparse_attention_inputs(
@@ -147,6 +172,19 @@ def _build_simt_callable(ctx):
     if family == "fallback":
         raise RuntimeError(
             "sparse_attention SIMT custom op does not support this shape family"
+        )
+    if any(
+        length != payload["selected_tokens"]
+        for length in payload["topk_lengths"]
+    ):
+        raise RuntimeError(
+            "sparse_attention SIMT custom op requires full topk_lengths"
+        )
+    expected_scale = payload["qk_head_dim"] ** -0.5
+    if not math.isclose(payload["softmax_scale"], expected_scale):
+        raise RuntimeError(
+            "sparse_attention SIMT custom op requires qk_head_dim**-0.5 "
+            "softmax_scale"
         )
 
     if direct_device_inputs:
