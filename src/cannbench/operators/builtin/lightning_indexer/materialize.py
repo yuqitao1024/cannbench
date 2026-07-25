@@ -42,6 +42,8 @@ def materialize_lightning_indexer_inputs(
         "index_dim": case.index_dim,
         "top_k": case.top_k,
         "causal": case.causal,
+        "score_scale": case.score_scale,
+        "tie_policy": case.tie_policy,
         "valid_context_lengths": valid_context_lengths(case),
         "dtype": dtype,
         "query": query,

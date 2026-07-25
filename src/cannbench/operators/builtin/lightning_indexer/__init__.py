@@ -47,6 +47,8 @@ def _build_torch_callable(ctx):
         index_scores = ctx.torch.relu(index_scores)
         index_scores = index_scores * weights.unsqueeze(-1)
         index_scores = index_scores.sum(dim=2)
+        if payload["score_scale"] != 1.0:
+            index_scores = index_scores * payload["score_scale"]
         context_positions = ctx.torch.arange(
             payload["key_shape"][1], device=query.device
         ).reshape(1, 1, -1)
@@ -107,6 +109,8 @@ def _build_simt_callable(ctx):
             "top_k": ctx.case.top_k,
             "phase": ctx.case.phase,
             "causal": ctx.case.causal,
+            "score_scale": ctx.case.score_scale,
+            "tie_policy": ctx.case.tie_policy,
             "valid_context_lengths": valid_context_lengths(ctx.case),
         }
         query = ctx.torch.zeros(

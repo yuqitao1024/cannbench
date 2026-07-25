@@ -47,6 +47,8 @@ def build_cuda_library_callable(ctx):
             keys=keys,
             weights=weights,
             top_k=payload["top_k"],
+            score_scale=payload["score_scale"],
+            tie_policy=payload["tie_policy"],
         )
 
     return operator

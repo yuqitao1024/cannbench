@@ -93,6 +93,8 @@ def _lightning_indexer_topk(kwargs: dict[str, Any], logits):
     payload = _require_payload(kwargs)
     batch, query_tokens = payload["query_shape"][:2]
     top_k = int(payload["top_k"])
+    if payload["score_scale"] != 1.0:
+        logits = logits * float(payload["score_scale"])
     indices = torch.topk(
         logits,
         top_k,

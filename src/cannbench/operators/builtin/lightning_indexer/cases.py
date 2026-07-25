@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from functools import lru_cache
 from importlib.resources import files
@@ -22,6 +23,8 @@ class LightningIndexerCase:
     source_file: str
     source_op: str
     causal: bool = False
+    score_scale: float = 1.0
+    tie_policy: str = "equivalent_score_set"
 
     def __post_init__(self) -> None:
         for name in (
@@ -38,6 +41,10 @@ class LightningIndexerCase:
             raise ValueError("top_k must not exceed context_tokens")
         if self.causal and self.query_tokens > self.context_tokens:
             raise ValueError("causal query_tokens must not exceed context_tokens")
+        if not math.isfinite(self.score_scale) or self.score_scale <= 0.0:
+            raise ValueError("score_scale must be finite and positive")
+        if self.tie_policy != "equivalent_score_set":
+            raise ValueError(f"unsupported tie_policy: {self.tie_policy}")
 
     @property
     def payload(self) -> dict[str, object]:
@@ -49,6 +56,8 @@ class LightningIndexerCase:
             "index_dim": self.index_dim,
             "top_k": self.top_k,
             "causal": self.causal,
+            "score_scale": self.score_scale,
+            "tie_policy": self.tie_policy,
         }
         if self.phase is not None:
             payload["phase"] = self.phase

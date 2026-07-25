@@ -9,7 +9,7 @@ DSA 两阶段抽象和主要 shape，但还不能认为对外输入输出语义�
 - 三条路径从同一套逻辑输入生成各自后端需要的物理布局；跨后端
   conformance 还没有完全收敛。
 - 底层布局、存储精度和 kernel 数量可以不同，这些属于实现差异。
-- 当前仍存在 Indexer scaling/tie 行为和 Attention 附加输出不一致。
+- 当前仍存在 Attention 附加输出不一致。
 - 在这些差异修复前，性能测试只能作为初步数据，不能视为严格的同语义对标。
 
 本文只讨论 DeepSeek V3.2。V4/V4 Pro、attention sink、SWA 以及完整 Attention
@@ -73,14 +73,18 @@ Indexer Query 与正式 Attention Query 不是同一个张量：
   weights [B, Q, G]      BF16
 
 计算:
-  score[b,q,c] =
+  raw_score[b,q,c] =
       sum_g(weights[b,q,g] * relu(dot(query[b,q,g], keys[b,c])))
+  score[b,q,c] = score_scale * raw_score[b,q,c]
 
 输出:
   indices [B, Q, S]      INT32
 ```
 
-`indices` 应按分数从高到低排列，并且只能包含当前 Query 可见的 KV 位置。
+V3.2 的 `score_scale` 固定为 `1.0`。`indices` 应按分数从高到低排列，并且
+只能包含当前 Query 可见的 KV 位置。不同分数必须保持降序；同分数边界按
+`equivalent_score_set` 比较，即任一同分候选集合均满足公开合同。SIMT 的
+lowest-index 顺序只是确定性实现细节，不作为厂商原生 Top-K 的接口要求。
 
 ### Sparse Attention
 
@@ -207,19 +211,14 @@ Workflow:
   不包含 projection、RoPE 生成、cache scatter 和 SWA
 ```
 
-在完成 Indexer scaling/tie 行为和返回值规范化之后，三条路径才可以
+在完成返回值规范化之后，三条路径才可以
 称为“相同逻辑输入、相同逻辑输出、不同硬件实现”，并用于严格的 V3.2 性能对标。
 
 ## V3.2 剩余工作
 
 本节只记录尚未闭环的事项，不保留已完成事项或历史提交清单。
 
-### 1. 明确 Indexer scaling 和 tie 行为
-
-明确 Indexer scaling，并定义跨后端同分数时的 tie 行为，或者明确允许比较
-等价 Top-K 集合。
-
-### 2. 统一 Sparse Attention 数学合同
+### 1. 统一 Sparse Attention 数学合同
 
 - 将 softmax scale 写入 case/schema，并从 V3.2 模型合同验证其数值，而不是
   仅由 adapter 默认使用 `d_qk^-0.5`。
@@ -228,23 +227,23 @@ Workflow:
 - 将三后端结果规范化为 `out [B,Q,H,Dv]` 和 `lse [B,Q,H]`；vLLM adapter
   不能继续只返回 `out`。
 
-### 3. 增加真实序列元数据
+### 2. 增加真实序列元数据
 
 Case schema 需要表达每条请求的 `query_len`、`context_len`、绝对 Query
 position、`cu_seqlens` 和 block table，并支持 ragged batch。Prefill 不能默认
 Query 从位置 0 开始。
 
-### 4. 明确生产量化的计时边界
+### 3. 明确生产量化的计时边界
 
 需要区分静态 KV cache packing/metadata 准备与每步动态 Q 量化。静态准备应放在
 计时外；动态量化是否计时应以真实推理调用边界为准，并在三条路径中保持可比。
 
-### 5. 建立 rank-local shape 合同
+### 4. 建立 rank-local shape 合同
 
 Case 需要记录 TP/DP/CP、local heads、local batch 和 KV shard。否则无法证明
 vLLM 多卡路径与单卡 FlashMLA/SIMT 路径处理了相同的数据量。
 
-### 6. 建立三后端 Conformance 门禁
+### 5. 建立三后端 Conformance 门禁
 
 - Indexer 在相同输入下比较 Top-K recall、集合重叠和分数误差。
 - Sparse Attention 使用同一份合法 indices 比较 output 和自然对数 LSE。

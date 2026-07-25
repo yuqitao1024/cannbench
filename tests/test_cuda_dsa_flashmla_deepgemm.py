@@ -77,7 +77,12 @@ def test_flashmla_deepgemm_adapter_routes_decode_indexer_logits_through_topk(
 
     result = adapter.lightning_indexer(
         torch=fake_torch,
-        payload={"top_k": 2, "query_shape": (2, 2, 64, 128)},
+        payload={
+            "top_k": 2,
+            "query_shape": (2, 2, 64, 128),
+            "score_scale": 1.0,
+            "tie_policy": "equivalent_score_set",
+        },
         case=SimpleNamespace(phase="decode"),
         query="q",
         keys="k",
@@ -128,7 +133,13 @@ def test_flashmla_deepgemm_adapter_routes_prefill_indexer_logits_through_topk(
 
     result = adapter.lightning_indexer(
         torch=fake_torch,
-        payload={"phase": "prefill", "top_k": 2, "query_shape": (1, 2, 64, 128)},
+        payload={
+            "phase": "prefill",
+            "top_k": 2,
+            "query_shape": (1, 2, 64, 128),
+            "score_scale": 1.0,
+            "tie_policy": "equivalent_score_set",
+        },
         query="q",
         keys="k",
         weights="w",
