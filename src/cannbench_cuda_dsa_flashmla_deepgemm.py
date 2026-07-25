@@ -131,8 +131,6 @@ def _deep_gemm_decode_indexer_kwargs(deep_gemm, kwargs: dict[str, Any]) -> dict[
     query = kwargs["query"]
     batch, query_tokens, index_heads, index_dim = payload["query_shape"]
     context_tokens = payload["key_shape"][1]
-    if query_tokens != 1:
-        raise RuntimeError("DeepGEMM decode indexer requires query_tokens == 1")
     q_fp8 = query.reshape(batch, query_tokens, index_heads, index_dim).to(
         torch.float8_e4m3fn
     )
@@ -221,8 +219,6 @@ def _flash_mla_decode_attention_kwargs(
     batch, query_heads, query_tokens, qk_head_dim = payload["query_shape"]
     _, kv_heads, context_tokens, _ = payload["key_shape"]
     value_head_dim = payload["value_shape"][-1]
-    if query_tokens != 1:
-        raise RuntimeError("FlashMLA decode attention requires query_tokens == 1")
     if kv_heads != 1:
         raise RuntimeError("FlashMLA sparse decode requires kv_heads == 1")
     query = _bhtd_to_bthd(
