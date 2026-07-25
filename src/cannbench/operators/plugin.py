@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from cannbench.core.profile import ProfileKernelSelection
@@ -17,6 +17,7 @@ class TorchOperatorContext:
     device: Any
     dtype: Any
     implementation_module: Any | None = None
+    bound_inputs: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

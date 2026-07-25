@@ -37,6 +37,10 @@ def test_build_decode_workflow_uses_indexer_then_sparse_decode():
     assert workflow.steps[1].prepared.op == "sparse_attention"
     assert workflow.steps[0].prepared.case.payload["phase"] == "decode"
     assert workflow.steps[1].prepared.case.payload["phase"] == "decode"
+    assert workflow.steps[1].prepared.input_bindings["indices"].op == "lightning_indexer"
+    assert workflow.steps[1].prepared.input_bindings["indices"].dataset == "stress"
+    assert workflow.steps[1].prepared.input_bindings["indices"].case_id == workflow.case_id
+    assert workflow.steps[1].prepared.input_bindings["indices"].seed == 7
 
 
 def test_build_prefill_workflow_uses_indexer_then_sparse_prefill():
@@ -56,6 +60,10 @@ def test_build_prefill_workflow_uses_indexer_then_sparse_prefill():
     assert all(step.prepared.seed == 11 for step in workflow.steps)
     assert workflow.steps[0].prepared.case.payload["phase"] == "prefill"
     assert workflow.steps[1].prepared.case.payload["phase"] == "prefill"
+    assert workflow.steps[1].prepared.input_bindings["indices"].op == "lightning_indexer"
+    assert workflow.steps[1].prepared.input_bindings["indices"].dataset == "smoke"
+    assert workflow.steps[1].prepared.input_bindings["indices"].case_id == workflow.case_id
+    assert workflow.steps[1].prepared.input_bindings["indices"].seed == 11
 
 
 def test_dsa_prefill_components_support_simt_ready_shapes():

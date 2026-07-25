@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 
+from cannbench.core.prepared_input import OperatorInputBinding
 from cannbench.datasets import get_operator_case
 
 SUPPORTED_DTYPES = {"float32", "float16", "bfloat16"}
@@ -21,6 +22,7 @@ class OperatorBenchmarkRequest:
     implementation: str | None = None
     seed: int = 0
     implementation_version: str | None = None
+    input_bindings: dict[str, OperatorInputBinding] = field(default_factory=dict)
     case_payload: dict[str, object] = field(init=False)
     dimensions: tuple[int, ...] | None = field(init=False, default=None)
     dim: int | None = field(init=False, default=None)

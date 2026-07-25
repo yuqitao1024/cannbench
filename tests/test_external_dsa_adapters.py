@@ -8,7 +8,9 @@ from cannbench.operators import TorchOperatorContext, get_operator_plugin
 from cannbench.operators.builtin.sparse_attention.cases import SparseAttentionCase
 
 
-def _build_sparse_attention_vllm_callable(*, backend, torch, request, case, device, dtype):
+def _build_sparse_attention_vllm_callable(
+    *, backend, torch, request, case, device, dtype, bound_inputs=None
+):
     plugin = get_operator_plugin("sparse_attention")
     return plugin.build_vllm_ascend_callable(
         TorchOperatorContext(
@@ -18,6 +20,7 @@ def _build_sparse_attention_vllm_callable(*, backend, torch, request, case, devi
             case=case,
             device=device,
             dtype=dtype,
+            bound_inputs=bound_inputs or {},
         )
     )
 
@@ -135,6 +138,72 @@ def test_ascend_vllm_sparse_attention_uses_sparse_flash_attention_for_v32(
     assert calls["attention"]["scale_value"] == pytest.approx(576**-0.5)
     assert calls["attention"]["layout_query"] == "TND"
     assert calls["attention"]["layout_kv"] == "PA_BSND"
+
+
+def test_ascend_vllm_sparse_attention_uses_bound_indexer_output(monkeypatch):
+    import cannbench.operators.builtin.sparse_attention.external as external
+
+    captured: dict[str, object] = {}
+
+    class FakeTensor:
+        def __init__(self, shape=()):
+            self.shape = shape
+
+        def reshape(self, *shape):
+            self.shape = shape[0] if len(shape) == 1 else shape
+            return self
+
+    class FakeTorch:
+        int32 = "int32"
+
+    payload = {
+        "query_shape": (1, 128, 1, 576),
+        "key_shape": (1, 1, 16, 576),
+        "value_shape": (1, 1, 16, 512),
+        "indices_shape": (1, 1, 4),
+        "query": tuple(0.0 for _ in range(128 * 576)),
+        "keys": tuple(0.0 for _ in range(16 * 576)),
+        "values": tuple(0.0 for _ in range(16 * 512)),
+        "indices": (0, 1, 2, 3),
+    }
+    monkeypatch.setattr(
+        external,
+        "materialize_sparse_attention_inputs",
+        lambda *args, **kwargs: payload,
+    )
+    backend = SimpleNamespace(
+        _ascend_custom_ops=lambda torch: SimpleNamespace(
+            npu_sparse_flash_attention=lambda **kwargs: captured.update(kwargs)
+            or FakeTensor()
+        ),
+        _tensor=lambda torch, values, *, device, dtype: FakeTensor((len(values),)),
+        _custom_op_pair=lambda *args: pytest.fail("sharedkv ops must not be selected"),
+    )
+    case = SimpleNamespace(
+        batch=1,
+        query_heads=128,
+        kv_heads=1,
+        query_tokens=1,
+        context_tokens=16,
+        selected_tokens=4,
+        qk_head_dim=576,
+        value_head_dim=512,
+        shared_kv=True,
+    )
+    indexer_output = FakeTensor((1, 1, 4))
+
+    operator = _build_sparse_attention_vllm_callable(
+        backend=backend,
+        torch=FakeTorch(),
+        request=SimpleNamespace(dtype="bfloat16", seed=0),
+        case=case,
+        device="npu",
+        dtype="bfloat16",
+        bound_inputs={"indices": indexer_output},
+    )
+    operator()
+
+    assert captured["sparse_indices"] is indexer_output
 
 
 def test_ascend_vllm_v32_prefill_allocates_large_inputs_on_device(monkeypatch):

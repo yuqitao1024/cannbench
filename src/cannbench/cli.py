@@ -142,6 +142,7 @@ def _build_request_from_prepared(
         case_id=prepared.case.case_id,
         implementation=getattr(args, "implementation", None),
         seed=prepared.seed,
+        input_bindings=prepared.input_bindings,
         implementation_version=_resolve_implementation_version(
             getattr(args, "implementation", None),
             getattr(args, "implementation_version", None),

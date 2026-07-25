@@ -12,6 +12,7 @@ from .cases import (
     get_sparse_attention_case,
     get_sparse_attention_dataset,
 )
+from .bound_inputs import bound_indices
 from cannbench.operators.plugin import OperatorPlugin, ProfileKernelSelectionContext
 from cannbench.operators.spec import OperatorSpec
 from .external import build_cuda_library_callable, build_vllm_ascend_callable
@@ -38,12 +39,14 @@ def _build_torch_callable(ctx):
         device=ctx.device,
         dtype=ctx.dtype,
     ).reshape(payload["value_shape"])
-    indices = ctx.backend._tensor(
-        ctx.torch,
-        payload["indices"],
-        device=ctx.device,
-        dtype=ctx.torch.long,
-    ).reshape(payload["indices_shape"])
+    indices = bound_indices(ctx, payload["indices_shape"], dtype=ctx.torch.long)
+    if indices is None:
+        indices = ctx.backend._tensor(
+            ctx.torch,
+            payload["indices"],
+            device=ctx.device,
+            dtype=ctx.torch.long,
+        ).reshape(payload["indices_shape"])
     def operator():
         batch, query_heads, query_tokens, qk_head_dim = query.shape
         value_head_dim = values.shape[-1]
@@ -170,9 +173,11 @@ def _build_simt_callable(ctx):
             values = ctx.torch.zeros(
                 payload["value_shape"], device=ctx.device, dtype=ctx.dtype
             )
-        indices = ctx.torch.zeros(
-            payload["indices_shape"], device=ctx.device, dtype=ctx.torch.long
-        )
+        indices = bound_indices(ctx, payload["indices_shape"])
+        if indices is None:
+            indices = ctx.torch.zeros(
+                payload["indices_shape"], device=ctx.device, dtype=ctx.torch.long
+            )
     else:
         query = ctx.backend._tensor(
             ctx.torch,
@@ -192,12 +197,14 @@ def _build_simt_callable(ctx):
             device=ctx.device,
             dtype=ctx.dtype,
         ).reshape(payload["value_shape"])
-        indices = ctx.backend._tensor(
-            ctx.torch,
-            payload["indices"],
-            device=ctx.device,
-            dtype=ctx.torch.long,
-        ).reshape(payload["indices_shape"])
+        indices = bound_indices(ctx, payload["indices_shape"])
+        if indices is None:
+            indices = ctx.backend._tensor(
+                ctx.torch,
+                payload["indices"],
+                device=ctx.device,
+                dtype=ctx.torch.long,
+            ).reshape(payload["indices_shape"])
     return lambda: ctx.implementation_module.ops.sparse_attention_forward(
         query,
         keys,

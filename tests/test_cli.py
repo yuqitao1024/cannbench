@@ -2,11 +2,17 @@ import runpy
 import tomllib
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from cannbench.cli import build_parser, main
-from cannbench.cli import _build_canonical_run_name, _build_request_from_args
+from cannbench.cli import (
+    _build_canonical_run_name,
+    _build_request_from_args,
+    _build_request_from_prepared,
+)
+from cannbench.core.prepared_input import OperatorInputBinding
 from cannbench.core.execution import RemoteExecutionArtifacts, RemoteProfileArtifacts
 from cannbench.core.layout import build_run_layout
 from cannbench.core.operator_output import CapturedOperatorOutput, OutputComparisonResult
@@ -22,6 +28,36 @@ from cannbench.core.prepared_input import (
     write_prepared_operator_input,
 )
 from cannbench.datasets import get_operator_dataset
+
+
+def test_build_request_from_prepared_preserves_input_bindings():
+    binding = OperatorInputBinding(
+        op="softmax",
+        dtype="float16",
+        dataset="smoke",
+        case_id="tiny_attention_scores",
+        seed=3,
+    )
+    prepared = build_prepared_operator_input(
+        op="softmax",
+        dtype="float16",
+        dataset="smoke",
+        case_id="tiny_logits",
+        seed=7,
+        input_bindings={"indices": binding},
+    )
+
+    request = _build_request_from_prepared(
+        prepared,
+        SimpleNamespace(
+            backend="nvidia",
+            op="softmax",
+            implementation=None,
+            implementation_version=None,
+        ),
+    )
+
+    assert request.input_bindings == {"indices": binding}
 
 
 def sample_result() -> OperatorBenchmarkResult:

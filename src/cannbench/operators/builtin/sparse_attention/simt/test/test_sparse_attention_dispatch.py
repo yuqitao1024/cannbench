@@ -253,6 +253,69 @@ def test_build_simt_callable_allocates_large_inputs_directly_on_device(monkeypat
     assert captured["causal"] is True
 
 
+def test_build_simt_callable_uses_bound_indices_for_large_inputs(monkeypatch):
+    captured: dict[str, object] = {"allocations": []}
+
+    class FakeTensor:
+        def __init__(self, name):
+            self.name = name
+
+        def reshape(self, shape):
+            captured["bound_shape"] = shape
+            return self
+
+    class FakeTorch:
+        bfloat16 = "bfloat16"
+        long = "long"
+
+        @staticmethod
+        def zeros(shape, *, device, dtype):
+            captured["allocations"].append((shape, device, dtype))
+            return FakeTensor("allocated")
+
+    bound_indices = FakeTensor("indexer-output")
+
+    def fake_forward(query, keys, values, indices, *, phase, family, causal):
+        del query, keys, values, phase, family, causal
+        captured["indices"] = indices
+        return "ok"
+
+    monkeypatch.setattr(
+        sparse_attention,
+        "materialize_sparse_attention_inputs",
+        lambda *args, **kwargs: pytest.fail("large inputs must not use host materialization"),
+    )
+    request = OperatorBenchmarkRequest(
+        backend="ascend",
+        op="sparse_attention",
+        dtype="bfloat16",
+        dataset="realistic_decode",
+        case_id="deepseek_v4_pro_vllm_decode_b60_q1_ctx131072_top1024",
+        seed=7,
+        implementation="simt",
+    )
+    ctx = TorchOperatorContext(
+        backend=SimpleNamespace(),
+        torch=FakeTorch(),
+        request=request,
+        case=get_sparse_attention_case(
+            "realistic_decode",
+            "deepseek_v4_pro_vllm_decode_b60_q1_ctx131072_top1024",
+        ),
+        device="npu",
+        dtype="bfloat16",
+        implementation_module=SimpleNamespace(
+            ops=SimpleNamespace(sparse_attention_forward=fake_forward)
+        ),
+        bound_inputs={"indices": bound_indices},
+    )
+
+    assert _build_simt_callable(ctx)() == "ok"
+    assert captured["indices"] is bound_indices
+    assert captured["bound_shape"] == (60, 1, 1024)
+    assert len(captured["allocations"]) == 3
+
+
 def test_build_simt_callable_rejects_unsupported_family():
     request = OperatorBenchmarkRequest(
         backend="ascend",

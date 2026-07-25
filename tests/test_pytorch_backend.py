@@ -9,6 +9,7 @@ import pytest
 
 from cannbench.backends import get_backend
 from cannbench.core.config import OperatorBenchmarkRequest
+from cannbench.core.prepared_input import OperatorInputBinding
 from cannbench.core.profile import LocalDeviceProfileResult
 
 
@@ -25,6 +26,57 @@ def test_get_backend_returns_ascend_backend():
 def test_get_backend_rejects_unknown_backend():
     with pytest.raises(ValueError, match="Unsupported backend"):
         get_backend("unknown")
+
+
+def test_torch_backend_resolves_bound_operator_output_before_target(monkeypatch):
+    import cannbench.backends.torch_backend_base as backend_module
+    from cannbench.backends.pytorch_backend import NvidiaBackend
+
+    captured: dict[str, object] = {}
+    producer_output = object()
+
+    def build_callable(ctx):
+        if ctx.request.input_bindings:
+            captured["bound_inputs"] = ctx.bound_inputs
+            return lambda: "target-output"
+        captured["producer_request"] = ctx.request
+        return lambda: ("unused", producer_output)
+
+    monkeypatch.setattr(
+        backend_module,
+        "get_operator_plugin",
+        lambda op: SimpleNamespace(build_torch_callable=build_callable),
+    )
+    request = OperatorBenchmarkRequest(
+        backend="nvidia",
+        op="softmax",
+        dtype="float16",
+        dataset="smoke",
+        case_id="tiny_logits",
+        input_bindings={
+            "indices": OperatorInputBinding(
+                op="softmax",
+                dtype="float16",
+                dataset="smoke",
+                case_id="tiny_attention_scores",
+                seed=13,
+                output_index=1,
+            )
+        },
+    )
+
+    operator = NvidiaBackend()._operator_callable(
+        SimpleNamespace(float16="float16"),
+        request,
+        SimpleNamespace(),
+        device="cuda",
+        dtype="float16",
+    )
+
+    assert operator() == "target-output"
+    assert captured["bound_inputs"] == {"indices": producer_output}
+    assert captured["producer_request"].case_id == "tiny_attention_scores"
+    assert captured["producer_request"].seed == 13
 
 
 def test_backend_raises_clear_error_when_torch_is_missing(monkeypatch):

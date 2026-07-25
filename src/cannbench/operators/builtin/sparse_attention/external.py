@@ -5,6 +5,7 @@ import os
 
 from cannbench.operators.materialize import materialized_values_to_buffer
 
+from .bound_inputs import bound_indices
 from .materialize import (
     _requires_direct_device_inputs,
     materialize_sparse_attention_inputs,
@@ -37,12 +38,14 @@ def build_cuda_library_callable(ctx):
         device=ctx.device,
         dtype=ctx.dtype,
     ).reshape(payload["value_shape"])
-    indices = ctx.backend._tensor(
-        ctx.torch,
-        payload["indices"],
-        device=ctx.device,
-        dtype=ctx.torch.int32,
-    ).reshape(payload["indices_shape"])
+    indices = bound_indices(ctx, payload["indices_shape"], dtype=ctx.torch.int32)
+    if indices is None:
+        indices = ctx.backend._tensor(
+            ctx.torch,
+            payload["indices"],
+            device=ctx.device,
+            dtype=ctx.torch.int32,
+        ).reshape(payload["indices_shape"])
     softmax_scale = payload["query_shape"][-1] ** -0.5
 
     def operator():
@@ -147,9 +150,11 @@ def _build_vllm_sparse_flash_attention_callable(ctx):
             key_rope_shape, device=ctx.device, dtype=ctx.dtype
         )
         value = ctx.torch.zeros(key_shape, device=ctx.device, dtype=ctx.dtype)
-        sparse_indices = ctx.torch.zeros(
-            indices_shape, device=ctx.device, dtype=ctx.torch.int32
-        )
+        sparse_indices = bound_indices(ctx, indices_shape, dtype=ctx.torch.int32)
+        if sparse_indices is None:
+            sparse_indices = ctx.torch.zeros(
+                indices_shape, device=ctx.device, dtype=ctx.torch.int32
+            )
     else:
         payload = materialize_sparse_attention_inputs(
             ctx.case, dtype=ctx.request.dtype, seed=ctx.request.seed
@@ -190,12 +195,14 @@ def _build_vllm_sparse_flash_attention_callable(ctx):
         value = ctx.backend._tensor(
             ctx.torch, value_values, device=ctx.device, dtype=ctx.dtype
         ).reshape(key_shape)
-        sparse_indices = ctx.backend._tensor(
-            ctx.torch,
-            payload["indices"],
-            device=ctx.device,
-            dtype=ctx.torch.int32,
-        ).reshape(indices_shape)
+        sparse_indices = bound_indices(ctx, indices_shape, dtype=ctx.torch.int32)
+        if sparse_indices is None:
+            sparse_indices = ctx.backend._tensor(
+                ctx.torch,
+                payload["indices"],
+                device=ctx.device,
+                dtype=ctx.torch.int32,
+            ).reshape(indices_shape)
     block_table = ctx.backend._tensor(
         ctx.torch,
         tuple(range(batch * blocks_per_batch)),
@@ -323,12 +330,18 @@ def _build_vllm_sharedkv_callable(ctx):
     cmp_kv = cmp_kv.reshape(
         batch * blocks_per_batch, block_size, kv_heads, qk_head_dim
     )
-    cmp_sparse_indices = ctx.backend._tensor(
-        ctx.torch,
-        payload["indices"],
-        device=ctx.device,
+    cmp_sparse_indices = bound_indices(
+        ctx,
+        (batch * query_tokens, kv_heads, selected_tokens),
         dtype=ctx.torch.int32,
-    ).reshape(batch * query_tokens, kv_heads, selected_tokens)
+    )
+    if cmp_sparse_indices is None:
+        cmp_sparse_indices = ctx.backend._tensor(
+            ctx.torch,
+            payload["indices"],
+            device=ctx.device,
+            dtype=ctx.torch.int32,
+        ).reshape(batch * query_tokens, kv_heads, selected_tokens)
     cmp_block_table = ctx.backend._tensor(
         ctx.torch,
         tuple(range(batch * blocks_per_batch)),

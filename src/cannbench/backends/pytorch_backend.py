@@ -18,7 +18,7 @@ from cannbench.core.profile import (
     read_device_profile,
 )
 from cannbench.core.result import OperatorBenchmarkResult, OperatorCase
-from cannbench.operators import TorchOperatorContext, get_operator_plugin
+from cannbench.operators import get_operator_plugin
 from cannbench.operators.materialize import materialized_values_to_buffer
 
 _SKIP_SIMT_INSTALL_ENV = "CANNBENCH_SKIP_SIMT_INSTALL"
@@ -61,13 +61,8 @@ class NvidiaBackend(TorchOperatorBackend):
                     f"{request.op} does not provide a cuda_library implementation"
                 )
             return plugin.build_cuda_library_callable(
-                TorchOperatorContext(
-                    backend=self,
-                    torch=torch,
-                    request=request,
-                    case=case,
-                    device=device,
-                    dtype=dtype,
+                self._operator_context(
+                    torch, request, case, device=device, dtype=dtype
                 )
             )
         return super()._operator_callable(
@@ -93,6 +88,7 @@ class NvidiaBackend(TorchOperatorBackend):
             dataset=request.dataset,
             case_id=request.case_id,
             seed=request.seed,
+            input_bindings=request.input_bindings,
         )
         kernel_selection = get_operator_plugin(request.op).profile_kernel_selection(
             backend="nvidia",
@@ -247,6 +243,7 @@ class AscendBackend(TorchOperatorBackend):
             dataset=request.dataset,
             case_id=request.case_id,
             seed=request.seed,
+            input_bindings=request.input_bindings,
         )
         with tempfile.TemporaryDirectory(prefix="cannbench-msprof-") as temp_dir_name:
             temp_dir = Path(temp_dir_name)
@@ -465,13 +462,8 @@ class AscendBackend(TorchOperatorBackend):
                     f"{request.op} does not provide a vllm_ascend implementation"
                 )
             return plugin.build_vllm_ascend_callable(
-                TorchOperatorContext(
-                    backend=self,
-                    torch=torch,
-                    request=request,
-                    case=case,
-                    device=device,
-                    dtype=dtype,
+                self._operator_context(
+                    torch, request, case, device=device, dtype=dtype
                 )
             )
         if request.implementation == "simt":
@@ -480,11 +472,10 @@ class AscendBackend(TorchOperatorBackend):
                 raise RuntimeError(f"{request.op} does not provide a SIMT implementation")
             module = self._load_simt_op_module(request, request.op)
             return plugin.build_simt_callable(
-                TorchOperatorContext(
-                    backend=self,
-                    torch=torch,
-                    request=request,
-                    case=case,
+                self._operator_context(
+                    torch,
+                    request,
+                    case,
                     device=device,
                     dtype=dtype,
                     implementation_module=module,
@@ -503,6 +494,10 @@ class AscendBackend(TorchOperatorBackend):
             request.implementation == "simt"
             and os.environ.get(_SKIP_SIMT_INSTALL_ENV) != "1"
         ):
+            for binding in request.input_bindings.values():
+                self._before_run_operator(
+                    self._request_for_input_binding(request, binding)
+                )
             self._install_simt_op(request, request.op)
 
     def _simt_op_root(self, op_name: str):

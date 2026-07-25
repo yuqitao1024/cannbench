@@ -42,16 +42,79 @@ class TorchOperatorBackend(OperatorBackend):
     def _tensor(self, torch, values, *, device, dtype):
         return torch.tensor(values, device=device, dtype=dtype)
 
+    def _request_for_input_binding(self, request, binding):
+        return OperatorBenchmarkRequest(
+            backend=request.backend,
+            op=binding.op,
+            dtype=binding.dtype,
+            dataset=binding.dataset,
+            case_id=binding.case_id,
+            implementation=request.implementation,
+            seed=binding.seed,
+            implementation_version=request.implementation_version,
+        )
+
+    def _resolve_input_bindings(self, torch, request, *, device):
+        bound_inputs = {}
+        for name, binding in request.input_bindings.items():
+            producer_request = self._request_for_input_binding(request, binding)
+            self._before_run_operator(producer_request)
+            producer_case = get_operator_case(
+                producer_request.op,
+                producer_request.dataset,
+                producer_request.case_id,
+            )
+            producer = self._operator_callable(
+                torch,
+                producer_request,
+                producer_case,
+                device=device,
+                dtype=getattr(torch, producer_request.dtype),
+            )
+            output = producer()
+            if isinstance(output, (tuple, list)):
+                try:
+                    output = output[binding.output_index]
+                except IndexError as exc:
+                    raise RuntimeError(
+                        f"bound input {name!r} requested output index "
+                        f"{binding.output_index}, but {binding.op} returned "
+                        f"{len(output)} outputs"
+                    ) from exc
+            elif binding.output_index != 0:
+                raise RuntimeError(
+                    f"bound input {name!r} requested output index "
+                    f"{binding.output_index}, but {binding.op} returned one output"
+                )
+            bound_inputs[name] = output
+        return bound_inputs
+
+    def _operator_context(
+        self,
+        torch,
+        request,
+        case,
+        *,
+        device,
+        dtype,
+        implementation_module=None,
+    ):
+        return TorchOperatorContext(
+            backend=self,
+            torch=torch,
+            request=request,
+            case=case,
+            device=device,
+            dtype=dtype,
+            implementation_module=implementation_module,
+            bound_inputs=self._resolve_input_bindings(torch, request, device=device),
+        )
+
     def _operator_callable(self, torch, request, case, *, device, dtype):
         plugin = get_operator_plugin(request.op)
         return plugin.build_torch_callable(
-            TorchOperatorContext(
-                backend=self,
-                torch=torch,
-                request=request,
-                case=case,
-                device=device,
-                dtype=dtype,
+            self._operator_context(
+                torch, request, case, device=device, dtype=dtype
             )
         )
 
