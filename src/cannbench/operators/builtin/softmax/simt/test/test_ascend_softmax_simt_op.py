@@ -289,6 +289,25 @@ def test_ascend_softmax_v3_fast_path_has_register_cache_variant():
     assert "launch_row_fast_reg_forward_kernel" in source
 
 
+def test_ascend_softmax_v3_fast_path_uses_large_row_recompute_for_logits_scale_dims():
+    source = _read_v3_simt_source("row_fast.asc")
+
+    assert "inline bool use_large_row_recompute_row_softmax_fast(int64_t dim_size)" in source
+    assert "kMaxWholeRowElements = kFp16Path ? 32768 : 16384" in source
+    assert "return dim_size >= 8192 && dim_size <= kMaxWholeRowElements;" in source
+    assert "row_softmax_fast_large_row_recompute_impl" in source
+    assert "row_softmax_fast_large_row_recompute_kernel" in source
+    assert "launch_row_fast_large_recompute_forward_kernel" in source
+    assert "row_softmax_fast_large_row_forward_vf" in source
+    assert "asc_copy_gm2ub_align_sync" in source
+    assert "asc_copy_ub2gm_align_sync" in source
+    assert "const accscalar_t row_max = fast_block_reduce_warp<accscalar_t, Max>" in source
+    assert "const accscalar_t inv_sum = fast_block_reduce_warp_inverse<accscalar_t, Add>" in source
+    assert "dim3(kThreadsPerBlock)," in source
+    assert "32768>(" in source
+    assert "16384>(" in source
+
+
 def test_ascend_softmax_v3_uses_mixed_simd_simt_vf_launch_model():
     source = _read_v3_simt_sources(
         "row_persistent_fallback.asc",
