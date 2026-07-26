@@ -36,7 +36,11 @@ def test_ascend_msopprof_options_use_plugin_launch_count(tmp_path):
         ProfileKernelSelection(launch_count=64),
     )
 
-    assert options == [f"--output={tmp_path}", "--launch-count=64"]
+    assert options == [
+        f"--output={tmp_path}",
+        "--aic-metrics=BasicInfo",
+        "--launch-count=64",
+    ]
 
 
 def test_torch_backend_resolves_bound_operator_output_before_target(monkeypatch):
@@ -627,6 +631,7 @@ def test_ascend_backend_profiles_index_add_with_msopprof(monkeypatch):
 
     command = captured["command"]
     assert command[:2] == ["msopprof", f"--output={captured['cwd'] / 'profile'}"]
+    assert "--aic-metrics=BasicInfo" in command
     assert "--launch-skip-before-match=1" not in command
     assert "--warm-up=2" not in command
     assert "--launch-count=10" in command
@@ -2132,6 +2137,7 @@ def test_ascend_profile_operator_device_time_uses_msopprof_launch_controls(monke
     command = captured["profile_command"]
     assert command[0] == "msopprof"
     assert "op" not in command[:2]
+    assert "--aic-metrics=BasicInfo" in command
     assert "--warm-up=3" not in command
     assert "--launch-count=10" in command
     assert "--warmup" not in command

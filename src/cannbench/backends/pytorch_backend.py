@@ -42,6 +42,7 @@ def _ascend_msopprof_options(
 ) -> list[str]:
     return [
         f"--output={profile_dir}",
+        "--aic-metrics=BasicInfo",
         f"--launch-count={kernel_selection.launch_count or 10}",
     ]
 

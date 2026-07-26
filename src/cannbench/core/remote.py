@@ -257,6 +257,7 @@ def collect_remote_artifacts(
             profiled_operator = (
                 f"msopprof "
                 f"--output={shlex.quote(remote_profile)} "
+                f"--aic-metrics=BasicInfo "
                 f"--launch-count={launch_count} "
                 f"{base_operator}"
             )
