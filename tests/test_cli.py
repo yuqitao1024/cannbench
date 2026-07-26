@@ -2567,6 +2567,77 @@ def test_main_runs_dsa_decode_workflow_as_two_local_cases(tmp_path, monkeypatch,
     assert "mode=local-batch cases=2" in captured.out
 
 
+def test_main_preinstalls_each_remote_simt_workflow_component(tmp_path, monkeypatch):
+    endpoint = RemoteEndpoint(
+        name="ascend-a5",
+        backend="ascend",
+        host="user@ascend-host",
+        workdir="/opt/cannbench",
+        python="python3",
+        env={},
+    )
+    preinstalls: list[dict[str, object]] = []
+    collected_calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr("cannbench.cli.read_remote_endpoint", lambda path: endpoint)
+    monkeypatch.setattr(
+        "cannbench.cli.preinstall_remote_simt_op",
+        lambda **kwargs: preinstalls.append(kwargs),
+    )
+
+    def fake_collect_remote_artifacts(**kwargs):
+        collected_calls.append(kwargs)
+        prepared = read_prepared_operator_input(kwargs["prepared_input"])
+        return remote_collect_result(
+            endpoint=endpoint,
+            run_id=kwargs["run_id"],
+            output_dir=kwargs["output_dir"],
+            prepared=prepared,
+            profile_device_time=True,
+        )
+
+    monkeypatch.setattr(
+        "cannbench.cli.collect_remote_artifacts", fake_collect_remote_artifacts
+    )
+
+    exit_code = main(
+        [
+            "bench",
+            "--backend",
+            "ascend",
+            "--endpoint",
+            str(tmp_path / "ascend.json"),
+            "--output-dir",
+            str(tmp_path / "results"),
+            "--op",
+            "dsa_decode",
+            "--dataset",
+            "realistic",
+            "--dtype",
+            "bfloat16",
+            "--implementation",
+            "simt",
+            "--implementation-version",
+            "v1",
+        ]
+    )
+
+    assert exit_code == 0
+    assert preinstalls == [
+        {
+            "endpoint": endpoint,
+            "op": "lightning_indexer",
+            "implementation_version": "v1",
+        },
+        {
+            "endpoint": endpoint,
+            "op": "sparse_attention",
+            "implementation_version": "v1",
+        },
+    ]
+    assert all(call["preinstalled_simt"] is True for call in collected_calls)
+
+
 def test_main_runs_profiled_dsa_workflow_and_writes_workflow_benchmark_record(
     tmp_path, monkeypatch
 ):

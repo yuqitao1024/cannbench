@@ -910,16 +910,17 @@ def _run_remote_bench_with_plans(
     if (
         len(plans) > 1
         and args.implementation == "simt"
-        and args.op is not None
     ):
-        preinstall_remote_simt_op(
-            endpoint=endpoint,
-            op=args.op,
-            implementation_version=_resolve_implementation_version(
-                args.implementation,
-                args.implementation_version,
-            ),
+        implementation_version = _resolve_implementation_version(
+            args.implementation,
+            args.implementation_version,
         )
+        for op in dict.fromkeys(plan.op for plan in plans):
+            preinstall_remote_simt_op(
+                endpoint=endpoint,
+                op=op,
+                implementation_version=implementation_version,
+            )
         executor.mark_simt_preinstalled()
 
     for plan in plans:

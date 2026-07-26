@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
+import stat
 from types import SimpleNamespace
 
 import pytest
@@ -14,6 +16,13 @@ from cannbench.operators.builtin.sparse_attention import (
     get_sparse_attention_case,
 )
 from cannbench.operators.plugin import TorchOperatorContext
+
+
+def test_simt_install_scripts_are_executable():
+    project_dir = Path(__file__).parents[1] / "v1"
+
+    for script in (project_dir / "install.sh", project_dir / "scripts" / "install.sh"):
+        assert script.stat().st_mode & stat.S_IXUSR
 
 
 def test_select_simt_family_prefers_hd512():
