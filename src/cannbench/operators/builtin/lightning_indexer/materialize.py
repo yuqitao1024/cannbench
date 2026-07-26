@@ -67,4 +67,6 @@ def materialize_lightning_indexer_inputs(
     }
     if case.phase is not None:
         payload["phase"] = case.phase
+    if case.parallelism is not None:
+        payload["parallelism"] = case.parallelism
     return payload

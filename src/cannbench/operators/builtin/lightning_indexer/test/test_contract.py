@@ -22,6 +22,24 @@ def test_v32_case_exposes_indexer_score_contract():
     assert case.payload["tie_policy"] == "equivalent_score_set"
 
 
+def test_v32_indexer_case_declares_rank_local_shape():
+    case = get_lightning_indexer_case(
+        "realistic_decode",
+        "deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048",
+    )
+
+    assert case.shape_scope == "rank_local"
+    assert (case.tp_size, case.dp_size, case.cp_size) == (1, 1, 1)
+    assert case.kv_shard == "replicated"
+    assert case.payload["parallelism"] == {
+        "shape_scope": "rank_local",
+        "tp_size": 1,
+        "dp_size": 1,
+        "cp_size": 1,
+        "kv_shard": "replicated",
+    }
+
+
 @pytest.mark.parametrize("score_scale", [0.0, -1.0, float("inf"), float("nan")])
 def test_indexer_case_rejects_non_positive_or_non_finite_score_scale(score_scale):
     case = get_lightning_indexer_case("smoke", "tiny_decode_top4")

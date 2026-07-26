@@ -21,3 +21,15 @@ def test_prefill_workflow_rejects_mismatched_page_metadata():
 
     with pytest.raises(ValueError, match="page_block_size mismatch"):
         _validate_component_pair(sparse_case, indexer_case)
+
+
+def test_prefill_workflow_rejects_mismatched_rank_local_shape():
+    case_id = "deepseek_v32_flashmla_prefill_q4096_ctx32768_top2048"
+    sparse_case = get_sparse_attention_case("realistic_prefill", case_id)
+    indexer_case = replace(
+        get_lightning_indexer_case("realistic_prefill", case_id),
+        tp_size=2,
+    )
+
+    with pytest.raises(ValueError, match="tp_size mismatch"):
+        _validate_component_pair(sparse_case, indexer_case)

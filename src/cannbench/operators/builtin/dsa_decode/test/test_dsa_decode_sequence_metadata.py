@@ -21,3 +21,15 @@ def test_decode_workflow_rejects_mismatched_page_metadata():
 
     with pytest.raises(ValueError, match="page_block_size mismatch"):
         _validate_component_pair(sparse_case, indexer_case)
+
+
+def test_decode_workflow_rejects_mismatched_rank_local_shape():
+    case_id = "deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048"
+    sparse_case = get_sparse_attention_case("realistic_decode", case_id)
+    indexer_case = replace(
+        get_lightning_indexer_case("realistic_decode", case_id),
+        cp_size=2,
+    )
+
+    with pytest.raises(ValueError, match="cp_size mismatch"):
+        _validate_component_pair(sparse_case, indexer_case)

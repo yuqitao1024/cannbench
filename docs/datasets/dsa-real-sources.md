@@ -42,6 +42,11 @@ Case：`deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048`。
 `qk_head_dim=576` 和 `value_head_dim=512` 表示该接口，并从同一份
 shared-KV 数据生成 K 与 `V = K[..., :512]`。
 
+该 shape 来自单卡 FlashMLA 算子测试。CannBench 将 `batch=2`、
+`query_heads=128`、`index_heads=64` 和 `context_tokens=32768` 都解释为
+rank-local 维度，并显式记录 `TP=1`、`DP=1`、`CP=1`、shared-KV
+`replicated`。它不代表某个多卡 serving 部署经过切分后的 shape。
+
 <a id="deepseek-v32-flashmla-prefill"></a>
 
 ## DeepSeek V3.2 FlashMLA Prefill
@@ -52,6 +57,10 @@ Case：`deepseek_v32_flashmla_prefill_q4096_ctx32768_top2048`。
 `d_qk=576`、`d_v=512`、`h_q=128`、`topk=2048`、`s_q=4096`，
 测试的 KV 长度中包含 `32768`。该 case 使用与 decode 相同的 shared-KV
 生成规则。
+
+该 shape 同样是单卡算子测试的 rank-local workload，显式记录 `TP=1`、
+`DP=1`、`CP=1` 和 shared-KV `replicated`。因此三后端比较相同的单卡数据量，
+不从未知的生产并行配置反推 local batch、heads 或 KV shard。
 
 <a id="deepseek-v4-flash-vllm-decode"></a>
 

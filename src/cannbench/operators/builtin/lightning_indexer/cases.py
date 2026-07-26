@@ -29,6 +29,11 @@ class LightningIndexerCase:
     context_lens: tuple[int, ...] | None = None
     query_start_positions: tuple[int, ...] | None = None
     page_block_size: int | None = None
+    shape_scope: str | None = None
+    tp_size: int | None = None
+    dp_size: int | None = None
+    cp_size: int | None = None
+    kv_shard: str | None = None
 
     def __post_init__(self) -> None:
         for name in (
@@ -49,7 +54,27 @@ class LightningIndexerCase:
             raise ValueError("score_scale must be finite and positive")
         if self.tie_policy != "equivalent_score_set":
             raise ValueError(f"unsupported tie_policy: {self.tie_policy}")
+        self._validate_parallelism()
         self._validate_sequence_metadata()
+
+    def _validate_parallelism(self) -> None:
+        values = (
+            self.shape_scope,
+            self.tp_size,
+            self.dp_size,
+            self.cp_size,
+            self.kv_shard,
+        )
+        if all(value is None for value in values):
+            return
+        if any(value is None for value in values):
+            raise ValueError("rank-local shape metadata must be complete")
+        if self.shape_scope != "rank_local":
+            raise ValueError("shape_scope must be rank_local")
+        if any(size <= 0 for size in (self.tp_size, self.dp_size, self.cp_size)):
+            raise ValueError("parallel sizes must be positive")
+        if self.kv_shard not in {"replicated", "context_sharded"}:
+            raise ValueError(f"unsupported kv_shard: {self.kv_shard}")
 
     def _validate_sequence_metadata(self) -> None:
         for name, values, maximum, allow_zero in (
@@ -168,7 +193,21 @@ class LightningIndexerCase:
         }
         if self.phase is not None:
             payload["phase"] = self.phase
+        if self.shape_scope is not None:
+            payload["parallelism"] = self.parallelism
         return payload
+
+    @property
+    def parallelism(self) -> dict[str, object] | None:
+        if self.shape_scope is None:
+            return None
+        return {
+            "shape_scope": self.shape_scope,
+            "tp_size": self.tp_size,
+            "dp_size": self.dp_size,
+            "cp_size": self.cp_size,
+            "kv_shard": self.kv_shard,
+        }
 
     @property
     def phase(self) -> str | None:

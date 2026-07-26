@@ -11,8 +11,8 @@ DSA 两阶段抽象、逻辑输入输出和真实序列元数据合同。
 - Ascend SIMT 与 vLLM-Ascend 的完整 V3.2 prefill/decode 已通过门禁；CUDA
   路径尚缺可用 NVIDIA 节点，当前只有 adapter 与 runner 覆盖。
 - 底层布局、存储精度和 kernel 数量可以不同，这些属于实现差异。
-- 在生产量化计时边界、rank-local shape 和 conformance 收敛前，性能测试只能
-  作为初步数据，不能视为严格公平的生产实现对标。
+- 在 CUDA conformance 收敛前，性能测试只能作为初步数据，不能视为严格公平的
+  三后端生产实现对标。
 
 本文只讨论 DeepSeek V3.2。V4/V4 Pro、attention sink、SWA 以及完整 Attention
 Layer 的其他前后处理不在当前对齐范围内。
@@ -257,7 +257,20 @@ Workflow:
 ```
 
 三条路径现在具有相同的逻辑输入、输出和序列元数据合同。进入严格性能对标前，
-仍需完成 CUDA 实机 conformance、量化计时边界和 rank-local shape。
+仍需完成 CUDA 实机 conformance。
+
+两条 V3.2 case 均来自 FlashMLA 单卡算子测试。现有 `batch`、Indexer
+`index_heads`、Attention `query_heads/kv_heads` 和 `context_tokens` 都是
+rank-local 维度；case 显式记录：
+
+```text
+shape_scope = rank_local
+TP = 1, DP = 1, CP = 1
+kv_shard = replicated
+```
+
+Lightning Indexer 与 Sparse Attention 的 workflow 配对会校验上述字段完全一致。
+这保证三后端处理相同的单卡数据量，但不声称代表未知多卡部署的 local shape。
 
 ## 完整精度与 Conformance 状态
 
@@ -293,18 +306,7 @@ CUDA artifact 尚未生成，不能宣称三后端实机 conformance 已通过�
 
 本节只记录尚未闭环的事项，不保留已完成事项或历史提交清单。
 
-### 1. 明确生产量化的计时边界
-
-需要区分静态 KV cache packing/metadata 准备与每步动态 Q 量化。静态准备应放在
-计时外；每步动态 Q 量化和 Top-K 计入设备时间。详细边界见
-[DeepSeek V3.2 DSA 三后端性能计时边界设计](2026-07-26-dsa-v32-performance-timing-boundary-design.md)。
-
-### 2. 建立 rank-local shape 合同
-
-Case 需要记录 TP/DP/CP、local heads、local batch 和 KV shard。否则无法证明
-vLLM 多卡路径与单卡 FlashMLA/SIMT 路径处理了相同的数据量。
-
-### 3. 完成 CUDA 实机 Conformance
+### 1. 完成 CUDA 实机 Conformance
 
 在 NVIDIA 节点安装 DeepGEMM、FlashMLA 及 CannBench CUDA adapter 后，为完整
 V3.2 prefill/decode 生成 CUDA artifact，并分别与 SIMT artifact 比较 Indexer

@@ -26,6 +26,24 @@ def test_v32_case_exposes_softmax_and_topk_contract():
     assert case.payload["topk_lengths"] == (2048,) * 4
 
 
+def test_v32_attention_case_declares_rank_local_shape():
+    case = get_sparse_attention_case(
+        "realistic_prefill",
+        "deepseek_v32_flashmla_prefill_q4096_ctx32768_top2048",
+    )
+
+    assert case.shape_scope == "rank_local"
+    assert (case.tp_size, case.dp_size, case.cp_size) == (1, 1, 1)
+    assert case.kv_shard == "replicated"
+    assert case.payload["parallelism"] == {
+        "shape_scope": "rank_local",
+        "tp_size": 1,
+        "dp_size": 1,
+        "cp_size": 1,
+        "kv_shard": "replicated",
+    }
+
+
 @pytest.mark.parametrize("softmax_scale", [0.0, -1.0, math.inf, math.nan])
 def test_sparse_attention_case_rejects_invalid_softmax_scale(softmax_scale):
     case = get_sparse_attention_case("smoke", "tiny_decode_top4")

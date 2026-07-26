@@ -172,6 +172,11 @@ def _validate_component_pair(
             indexer_case.resolved_page_block_size,
         ),
         ("block_tables", sparse_case.block_tables, indexer_case.block_tables),
+        ("shape_scope", sparse_case.shape_scope, indexer_case.shape_scope),
+        ("tp_size", sparse_case.tp_size, indexer_case.tp_size),
+        ("dp_size", sparse_case.dp_size, indexer_case.dp_size),
+        ("cp_size", sparse_case.cp_size, indexer_case.cp_size),
+        ("kv_shard", sparse_case.kv_shard, indexer_case.kv_shard),
     ):
         if sparse_value != indexer_value:
             raise ValueError(f"DSA decode component {name} mismatch")

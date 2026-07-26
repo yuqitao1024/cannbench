@@ -70,7 +70,7 @@ def materialize_sparse_attention_inputs(
                 else:
                     generated_indices.append(-1)
     indices = tuple(generated_indices)
-    return {
+    payload = {
         "query_shape": query_shape,
         "shared_kv_shape": shared_kv_shape,
         "indices_shape": indices_shape,
@@ -95,3 +95,6 @@ def materialize_sparse_attention_inputs(
         "shared_kv": shared_kv,
         "indices": indices,
     }
+    if case.parallelism is not None:
+        payload["parallelism"] = case.parallelism
+    return payload

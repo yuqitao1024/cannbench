@@ -33,6 +33,11 @@ class SparseAttentionCase:
     context_lens: tuple[int, ...] | None = None
     query_start_positions: tuple[int, ...] | None = None
     page_block_size: int | None = None
+    shape_scope: str | None = None
+    tp_size: int | None = None
+    dp_size: int | None = None
+    cp_size: int | None = None
+    kv_shard: str | None = None
 
     def __post_init__(self) -> None:
         for name in (
@@ -61,6 +66,7 @@ class SparseAttentionCase:
             object.__setattr__(self, "softmax_scale", softmax_scale)
         if not math.isfinite(softmax_scale) or softmax_scale <= 0.0:
             raise ValueError("softmax_scale must be finite and positive")
+        self._validate_parallelism()
         if self.topk_lengths is not None:
             topk_lengths = tuple(self.topk_lengths)
             if len(topk_lengths) != self.batch * self.query_tokens:
@@ -82,6 +88,25 @@ class SparseAttentionCase:
             for query_index in range(query_len, self.query_tokens)
         ):
             raise ValueError("padding query rows must have zero topk_lengths")
+
+    def _validate_parallelism(self) -> None:
+        values = (
+            self.shape_scope,
+            self.tp_size,
+            self.dp_size,
+            self.cp_size,
+            self.kv_shard,
+        )
+        if all(value is None for value in values):
+            return
+        if any(value is None for value in values):
+            raise ValueError("rank-local shape metadata must be complete")
+        if self.shape_scope != "rank_local":
+            raise ValueError("shape_scope must be rank_local")
+        if any(size <= 0 for size in (self.tp_size, self.dp_size, self.cp_size)):
+            raise ValueError("parallel sizes must be positive")
+        if self.kv_shard not in {"replicated", "context_sharded"}:
+            raise ValueError(f"unsupported kv_shard: {self.kv_shard}")
 
     def _validate_sequence_metadata(self) -> None:
         for name, values, maximum, allow_zero in (
@@ -190,7 +215,7 @@ class SparseAttentionCase:
 
     @property
     def payload(self) -> dict[str, object]:
-        return {
+        payload = {
             "batch": self.batch,
             "query_heads": self.query_heads,
             "kv_heads": self.kv_heads,
@@ -211,6 +236,21 @@ class SparseAttentionCase:
             "cu_seqlens_kv": self.cu_seqlens_kv,
             "page_block_size": self.resolved_page_block_size,
             "block_tables": self.block_tables,
+        }
+        if self.shape_scope is not None:
+            payload["parallelism"] = self.parallelism
+        return payload
+
+    @property
+    def parallelism(self) -> dict[str, object] | None:
+        if self.shape_scope is None:
+            return None
+        return {
+            "shape_scope": self.shape_scope,
+            "tp_size": self.tp_size,
+            "dp_size": self.dp_size,
+            "cp_size": self.cp_size,
+            "kv_shard": self.kv_shard,
         }
 
 
