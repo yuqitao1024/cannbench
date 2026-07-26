@@ -149,8 +149,8 @@ Sparse Attention 为准备 bound input 而额外执行的一次 Indexer 重复�
 - 静态 Index-KV、shared-KV TND 布局在 callable 构造阶段准备一次。
 - 动态 Query lowering 移入被测 callable；若 lowering 只是 view，不产生额外
   device latency。
-- profile 汇总动态 lowering kernel 和目标 CANN 算子，但不包含静态 cache
-  packing。
+- msopprof/msprof 负责采集，operator plugin 使用固定 kernel 名规则筛选并汇总
+  动态 lowering kernel 和目标 CANN 算子，但不包含静态 cache packing。
 - 当前统一 output/LSE 合同使用一次 TND KV 调用；CANN 不支持
   `PA_BSND + return_softmax_lse=True`，不得用 paged output 和 TND LSE 两次
   Attention 调用拼接性能结果。
@@ -161,11 +161,11 @@ Sparse Attention 为准备 bound input 而额外执行的一次 Indexer 重复�
   移出重复调用路径。
 - 保留每步 Q FP8 量化、DeepGEMM、Top-K、动态 index lowering 和 FlashMLA 在
   被测路径内。
-- NCU 必须覆盖该组件完整动态 kernel 序列。远程执行必须遵守 operator plugin
-  声明的 kernel selection 与 launch count，不能固定只抓第一个 launch。
+- NCU 负责采集该组件的完整动态 kernel 序列。远程执行必须遵守 operator plugin
+  声明的固定 kernel selection 与 launch count，不能固定只抓第一个 launch。
 - CUDA 两个组件各自用 operator-local NVTX range 包住动态 closure。NCU 通过
-  plugin 声明的 range 采集范围内全部 kernel，不再用固定 launch-count 截断；
-  静态 cache preparation 位于 range 外。
+  plugin 声明的 range 限定动态采集边界，再由 plugin 的固定 kernel 名规则筛选
+  并汇总；静态 cache preparation 位于 range 外。
 
 ## 框架边界
 

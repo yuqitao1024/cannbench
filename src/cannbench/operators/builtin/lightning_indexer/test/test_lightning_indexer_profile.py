@@ -1,14 +1,23 @@
 from cannbench.operators import get_operator_plugin
 
 
-def test_cuda_library_profile_includes_complete_dynamic_nvtx_range():
+def test_cuda_library_profile_uses_fixed_dynamic_kernel_selection():
     selection = get_operator_plugin("lightning_indexer").profile_kernel_selection(
         backend="nvidia",
         implementation="cuda_library",
         implementation_version=None,
     )
 
-    assert selection.kernel_name_patterns == ()
+    assert selection.kernel_name_patterns == (
+        "lightning_indexer",
+        "mqa_logits",
+        "topk",
+        "radix",
+        "sort",
+        "elementwise",
+        "copy",
+        "cast",
+    )
     assert selection.launch_count is None
     assert selection.nvtx_range == "cannbench_lightning_indexer_dynamic"
     assert selection.aggregate_across_files is True

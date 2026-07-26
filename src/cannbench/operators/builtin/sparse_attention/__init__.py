@@ -335,6 +335,17 @@ def _build_profile_kernel_selection(ctx: ProfileKernelSelectionContext):
         )
     if ctx.backend == "nvidia" and ctx.implementation == "cuda_library":
         return ProfileKernelSelection(
+            kernel_name_patterns=(
+                "sparse_attention",
+                "flash_mla",
+                "flashmla",
+                "elementwise",
+                "copy",
+                "cast",
+                "index",
+                "arange",
+                "fill",
+            ),
             aggregate_across_files=True,
             nvtx_range="cannbench_sparse_attention_dynamic",
         )

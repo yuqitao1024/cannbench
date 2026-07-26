@@ -254,6 +254,16 @@ def _build_profile_kernel_selection(ctx: ProfileKernelSelectionContext):
         )
     if ctx.backend == "nvidia" and ctx.implementation == "cuda_library":
         return ProfileKernelSelection(
+            kernel_name_patterns=(
+                "lightning_indexer",
+                "mqa_logits",
+                "topk",
+                "radix",
+                "sort",
+                "elementwise",
+                "copy",
+                "cast",
+            ),
             aggregate_across_files=True,
             nvtx_range="cannbench_lightning_indexer_dynamic",
         )
