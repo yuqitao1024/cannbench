@@ -308,7 +308,50 @@ CUDA artifact 尚未生成，不能宣称三后端实机 conformance 已通过�
 
 ### 1. 完成 CUDA 实机 Conformance
 
-在 NVIDIA 节点安装 DeepGEMM、FlashMLA 及 CannBench CUDA adapter 后，为完整
-V3.2 prefill/decode 生成 CUDA artifact，并分别与 SIMT artifact 比较 Indexer
-Top-K recall、Sparse Attention output/LSE 和 workflow output/LSE。CUDA 两个
-case 通过同一门禁后，才可宣称三后端 conformance 闭环。
+当前没有可用 NVIDIA 节点，本项处于环境阻塞状态。获得 GPU 环境后执行以下实验，
+不再补充其他 V3.2 功能项。
+
+#### 实验环境
+
+- 使用支持当前 DeepGEMM 和 FlashMLA kernel 的 NVIDIA GPU，记录 GPU 型号、
+  CUDA、Driver、PyTorch、DeepGEMM、FlashMLA 和 CannBench 的精确版本或 commit。
+- 安装 DeepGEMM、FlashMLA 及 CannBench CUDA adapter，先运行 adapter 单测和
+  两个组件的最小 runtime smoke。
+- 使用与 Ascend artifact 相同的 case、seed 和 `splitmix64-period-v2` canonical
+  BF16 输入生成规则；禁止单独为 CUDA 重新随机生成输入。
+
+#### 必跑 Case
+
+| Phase | Case |
+| --- | --- |
+| decode | `deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048` |
+| prefill | `deepseek_v32_flashmla_prefill_q4096_ctx32768_top2048` |
+
+两个 case 都必须分别生成 CUDA Indexer、Sparse Attention 和完整 workflow
+artifact。单独验证 Attention 时使用与 Ascend 相同的合法 indices；验证 workflow
+时使用 CUDA Indexer 的设备侧 Top-K 输出，不能经 Host 重新物化 indices。
+
+#### 精度门禁
+
+- Indexer：逐行及整体 Top-K recall 均不低于 `0.95`，并保存 mean/min recall。
+- Sparse Attention：统一还原为 BF16 `[B,Q,H,512]` output 和 FP32
+  `[B,Q,H]` natural-log LSE，使用 `atol=0.05, rtol=0.05` 比较。
+- Workflow：比较最终 output/LSE，同时记录由 CUDA FP8 Indexer 引入的 Top-K
+  recall；两个 phase 都必须通过。
+
+#### Profile 审计
+
+- 使用 NCU 采集，不使用 Host wall time 作为正式 latency。
+- 核对 plugin 固定筛选规则覆盖 Q BF16-to-FP8 cast、DeepGEMM logits、
+  `torch.topk`、动态 cache-index lowering 和 FlashMLA Sparse Attention 的实际
+  kernel 名；发现未命中 kernel 时先修正规则再产出性能结果。
+- 确认静态 Index-KV/shared-KV packing、FP8 cache 和固定 metadata 位于计时外。
+- 分别保存 Indexer latency、Sparse Attention latency 和二者之和的 workflow
+  latency，并保留原始 NCU report、解析后的 profile summary 和 conformance
+  artifact。
+
+#### 完成标准
+
+只有 decode 与 prefill 的三层精度门禁全部通过、NCU 动态 kernel 列表审计完成，
+并且原始与汇总 artifact 均已保存，才可删除本节并宣称 V3.2 三后端 conformance
+和性能计时边界完全闭环。
