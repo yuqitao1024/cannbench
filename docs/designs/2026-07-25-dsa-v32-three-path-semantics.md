@@ -293,7 +293,8 @@ CUDA artifact 尚未生成，不能宣称三后端实机 conformance 已通过�
 ### 1. 明确生产量化的计时边界
 
 需要区分静态 KV cache packing/metadata 准备与每步动态 Q 量化。静态准备应放在
-计时外；动态量化是否计时应以真实推理调用边界为准，并在三条路径中保持可比。
+计时外；每步动态 Q 量化和 Top-K 计入设备时间。详细边界见
+[DeepSeek V3.2 DSA 三后端性能计时边界设计](2026-07-26-dsa-v32-performance-timing-boundary-design.md)。
 
 ### 2. 建立 rank-local shape 合同
 
