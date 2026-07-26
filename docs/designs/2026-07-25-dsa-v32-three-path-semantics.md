@@ -7,7 +7,9 @@ DSA 两阶段抽象、逻辑输入输出和真实序列元数据合同。
 
 - 三条路径都执行 `Lightning Indexer -> indices -> Sparse Attention`。
 - 三条路径从同一套 padded canonical 输入和逐请求长度生成各自后端需要的
-  物理布局；跨后端 conformance 门禁还没有建立。
+  物理布局；跨机器 artifact 和 conformance 门禁已经建立。
+- Ascend SIMT 与 vLLM-Ascend 的完整 V3.2 prefill/decode 已通过门禁；CUDA
+  路径尚缺可用 NVIDIA 节点，当前只有 adapter 与 runner 覆盖。
 - 底层布局、存储精度和 kernel 数量可以不同，这些属于实现差异。
 - 在生产量化计时边界、rank-local shape 和 conformance 收敛前，性能测试只能
   作为初步数据，不能视为严格公平的生产实现对标。
@@ -252,7 +254,37 @@ Workflow:
 ```
 
 三条路径现在具有相同的逻辑输入、输出和序列元数据合同。进入严格性能对标前，
-仍需完成量化计时边界、rank-local shape 和 conformance 门禁。
+仍需完成 CUDA 实机 conformance、量化计时边界和 rank-local shape。
+
+## 完整精度与 Conformance 状态
+
+Conformance runner 使用 `splitmix64-period-v2` 生成器，通过 case、seed 和固定
+周期在不同机器上重建同一份 canonical BF16 输入。Indexer 保存完整 INT32
+indices；Attention 和 workflow 对 decode 验证全部 Query，对 prefill 验证
+`0/1365/2730/4095` 四个 Query，并覆盖全部 128 个 Attention Head。
+
+旧的线性周期生成器会让不同 seed 只产生同一序列的循环平移，造成 BF16 Top-K
+边界出现数千个同分候选。它会把不同但合法的 tie 选择误报为低 recall，因此不再
+用于 conformance。
+
+SIMT 自身的完整 `576/512` 精度结果如下：
+
+| Phase | Case | Output mismatch | LSE mismatch |
+| --- | --- | ---: | ---: |
+| decode | `deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048` | 0 / 262144 | 0 / 512 |
+| prefill | `deepseek_v32_flashmla_prefill_q4096_ctx32768_top2048` | 0 / 262144 | 0 / 512 |
+
+SIMT 与 vLLM-Ascend 使用同 input 的门禁结果如下。Indexer 门槛要求每行及整体
+Top-K recall 都不低于 `0.95`；数值输出使用 `atol=0.05, rtol=0.05`。
+
+| Phase | Indexer mean recall | Indexer min recall | Attention output/LSE mismatch | Workflow output/LSE mismatch | 结果 |
+| --- | ---: | ---: | ---: | ---: | --- |
+| decode | 0.986938 | 0.979980 | 0 / 0 | 0 / 0 | 通过 |
+| prefill | 0.989263 | 0.973145 | 0 / 0 | 0 / 0 | 通过 |
+
+CUDA runner 已连接现有 DeepGEMM Indexer、`torch.topk` 和 FlashMLA adapter，
+但当前控制机没有 NVIDIA runtime，也没有可用 NVIDIA remote endpoint。因此
+CUDA artifact 尚未生成，不能宣称三后端实机 conformance 已通过。
 
 ## V3.2 剩余工作
 
@@ -268,9 +300,9 @@ Workflow:
 Case 需要记录 TP/DP/CP、local heads、local batch 和 KV shard。否则无法证明
 vLLM 多卡路径与单卡 FlashMLA/SIMT 路径处理了相同的数据量。
 
-### 3. 建立三后端 Conformance 门禁
+### 3. 完成 CUDA 实机 Conformance
 
-- Indexer 在相同输入下比较 Top-K recall、集合重叠和分数误差。
-- Sparse Attention 使用同一份合法 indices 比较 output 和自然对数 LSE。
-- 完整 workflow 比较最终输出，同时记录 Indexer recall。
-- 每个 case 通过 conformance 后才能进入正式性能对比。
+在 NVIDIA 节点安装 DeepGEMM、FlashMLA 及 CannBench CUDA adapter 后，为完整
+V3.2 prefill/decode 生成 CUDA artifact，并分别与 SIMT artifact 比较 Indexer
+Top-K recall、Sparse Attention output/LSE 和 workflow output/LSE。CUDA 两个
+case 通过同一门禁后，才可宣称三后端 conformance 闭环。

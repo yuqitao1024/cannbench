@@ -335,6 +335,20 @@ def test_sparse_attention_fused_launchers_submit_one_persistent_kernel():
         assert "row_index += shape.used_core_num" in source
 
 
+def test_sparse_attention_hd512_fused_kernel_uses_all_aicore_pairs():
+    source = _score_source(512)
+    fused = _function_body(
+        source,
+        "__aicore__ inline void sparse_attention_fused_family_hd512_aic(",
+        "__global__ __aicore__ void sparse_attention_fused_family_hd512_kernel(",
+    )
+
+    assert "constexpr int32_t kFusedMaxUsedCoreNum = 32;" in source
+    assert "constexpr uint8_t kScoreTileReadyFlag = 1;" in source
+    assert "kGatherKeysReadyFlagBase + block_idx" not in fused
+    assert "kScoreTileReadyFlagBase + block_idx" not in fused
+
+
 def test_sparse_attention_hd512_fused_score_ready_uses_vector_fixpipe_handshake():
     source = _score_source(512)
     body = _function_body(
