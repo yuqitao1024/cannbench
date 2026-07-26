@@ -2,252 +2,28 @@
   "records": [
     {
       "schema_version": 1,
-      "run_id": "opbench-ascend-950pr-vllm-ascend-dsa_prefill-realistic-bfloat16/dsa_prefill-realistic-deepseek_a5_prefill_b1_q64_ctx512_top512-bfloat16-seed0",
+      "run_id": "opbench-ascend-950pr-vllm-ascend-dsa_prefill-realistic-bfloat16/dsa_prefill-realistic-deepseek_v32_flashmla_prefill_q4096_ctx32768_top2048-bfloat16-seed0",
       "operator": "dsa_prefill",
       "dataset": "realistic",
-      "case_id": "deepseek_a5_prefill_b1_q64_ctx512_top512",
+      "case_id": "deepseek_v32_flashmla_prefill_q4096_ctx32768_top2048",
       "family": "prefill_workflow",
       "shape": [
-        64,
-        64,
-        512
-      ],
-      "dtype": "bfloat16",
-      "backend": "ascend",
-      "device_class": "950PR",
-      "implementation": "vllm_ascend",
-      "implementation_version": "vllm-ascend",
-      "source_kind": "library_compatible_realistic",
-      "source_project": "vllm-ascend",
-      "source_model": "DeepSeek-A5-compatible",
-      "source_file": "serving_buckets/deepseek_a5_dsa.json",
-      "source_op": "dsa_prefill",
-      "metrics": {
-        "latency_ms": 0.030352001
-      },
-      "accuracy": {
-        "passed": true,
-        "max_abs_error": 0.0,
-        "max_rel_error": 0.0
-      },
-      "diff_ref": null
-    },
-    {
-      "schema_version": 1,
-      "run_id": "opbench-ascend-950pr-vllm-ascend-dsa_prefill-realistic-bfloat16/dsa_prefill-realistic-deepseek_a5_prefill_b1_q128_ctx512_top512-bfloat16-seed0",
-      "operator": "dsa_prefill",
-      "dataset": "realistic",
-      "case_id": "deepseek_a5_prefill_b1_q128_ctx512_top512",
-      "family": "prefill_workflow",
-      "shape": [
+        4096,
         128,
-        64,
-        512
+        576
       ],
       "dtype": "bfloat16",
       "backend": "ascend",
       "device_class": "950PR",
       "implementation": "vllm_ascend",
       "implementation_version": "vllm-ascend",
-      "source_kind": "library_compatible_realistic",
-      "source_project": "vllm-ascend",
-      "source_model": "DeepSeek-A5-compatible",
-      "source_file": "serving_buckets/deepseek_a5_dsa.json",
+      "source_kind": "official_operator_test",
+      "source_project": "DeepSeek-V3.2+FlashMLA",
+      "source_model": "DeepSeek-V3.2",
+      "source_file": "docs/datasets/dsa-real-sources.md#deepseek-v32-flashmla-prefill",
       "source_op": "dsa_prefill",
       "metrics": {
-        "latency_ms": 0.04191400000000001
-      },
-      "accuracy": {
-        "passed": true,
-        "max_abs_error": 0.0,
-        "max_rel_error": 0.0
-      },
-      "diff_ref": null
-    },
-    {
-      "schema_version": 1,
-      "run_id": "opbench-ascend-950pr-vllm-ascend-dsa_prefill-realistic-bfloat16/dsa_prefill-realistic-deepseek_a5_prefill_b1_q256_ctx512_top512-bfloat16-seed0",
-      "operator": "dsa_prefill",
-      "dataset": "realistic",
-      "case_id": "deepseek_a5_prefill_b1_q256_ctx512_top512",
-      "family": "prefill_workflow",
-      "shape": [
-        256,
-        64,
-        512
-      ],
-      "dtype": "bfloat16",
-      "backend": "ascend",
-      "device_class": "950PR",
-      "implementation": "vllm_ascend",
-      "implementation_version": "vllm-ascend",
-      "source_kind": "library_compatible_realistic",
-      "source_project": "vllm-ascend",
-      "source_model": "DeepSeek-A5-compatible",
-      "source_file": "serving_buckets/deepseek_a5_dsa.json",
-      "source_op": "dsa_prefill",
-      "metrics": {
-        "latency_ms": 0.067847001
-      },
-      "accuracy": {
-        "passed": true,
-        "max_abs_error": 0.0,
-        "max_rel_error": 0.0
-      },
-      "diff_ref": null
-    },
-    {
-      "schema_version": 1,
-      "run_id": "opbench-ascend-950pr-vllm-ascend-dsa_prefill-realistic-bfloat16/dsa_prefill-realistic-deepseek_a5_prefill_b1_q512_ctx512_top512-bfloat16-seed0",
-      "operator": "dsa_prefill",
-      "dataset": "realistic",
-      "case_id": "deepseek_a5_prefill_b1_q512_ctx512_top512",
-      "family": "prefill_workflow",
-      "shape": [
-        512,
-        64,
-        512
-      ],
-      "dtype": "bfloat16",
-      "backend": "ascend",
-      "device_class": "950PR",
-      "implementation": "vllm_ascend",
-      "implementation_version": "vllm-ascend",
-      "source_kind": "library_compatible_realistic",
-      "source_project": "vllm-ascend",
-      "source_model": "DeepSeek-A5-compatible",
-      "source_file": "serving_buckets/deepseek_a5_dsa.json",
-      "source_op": "dsa_prefill",
-      "metrics": {
-        "latency_ms": 0.115434997
-      },
-      "accuracy": {
-        "passed": true,
-        "max_abs_error": 0.0,
-        "max_rel_error": 0.0
-      },
-      "diff_ref": null
-    },
-    {
-      "schema_version": 1,
-      "run_id": "opbench-ascend-950pr-vllm-ascend-dsa_prefill-realistic-bfloat16/dsa_prefill-realistic-deepseek_a5_prefill_b1_q512_ctx1024_top512-bfloat16-seed0",
-      "operator": "dsa_prefill",
-      "dataset": "realistic",
-      "case_id": "deepseek_a5_prefill_b1_q512_ctx1024_top512",
-      "family": "prefill_workflow",
-      "shape": [
-        512,
-        64,
-        512
-      ],
-      "dtype": "bfloat16",
-      "backend": "ascend",
-      "device_class": "950PR",
-      "implementation": "vllm_ascend",
-      "implementation_version": "vllm-ascend",
-      "source_kind": "library_compatible_realistic",
-      "source_project": "vllm-ascend",
-      "source_model": "DeepSeek-A5-compatible",
-      "source_file": "serving_buckets/deepseek_a5_dsa.json",
-      "source_op": "dsa_prefill",
-      "metrics": {
-        "latency_ms": 0.194954994
-      },
-      "accuracy": {
-        "passed": true,
-        "max_abs_error": 0.0,
-        "max_rel_error": 0.0
-      },
-      "diff_ref": null
-    },
-    {
-      "schema_version": 1,
-      "run_id": "opbench-ascend-950pr-vllm-ascend-dsa_prefill-realistic-bfloat16/dsa_prefill-realistic-deepseek_a5_prefill_b1_q512_ctx1024_top1024-bfloat16-seed0",
-      "operator": "dsa_prefill",
-      "dataset": "realistic",
-      "case_id": "deepseek_a5_prefill_b1_q512_ctx1024_top1024",
-      "family": "prefill_workflow",
-      "shape": [
-        512,
-        64,
-        512
-      ],
-      "dtype": "bfloat16",
-      "backend": "ascend",
-      "device_class": "950PR",
-      "implementation": "vllm_ascend",
-      "implementation_version": "vllm-ascend",
-      "source_kind": "library_compatible_realistic",
-      "source_project": "vllm-ascend",
-      "source_model": "DeepSeek-A5-compatible",
-      "source_file": "serving_buckets/deepseek_a5_dsa.json",
-      "source_op": "dsa_prefill",
-      "metrics": {
-        "latency_ms": 0.192272999
-      },
-      "accuracy": {
-        "passed": true,
-        "max_abs_error": 0.0,
-        "max_rel_error": 0.0
-      },
-      "diff_ref": null
-    },
-    {
-      "schema_version": 1,
-      "run_id": "opbench-ascend-950pr-vllm-ascend-dsa_prefill-realistic-bfloat16/dsa_prefill-realistic-deepseek_a5_prefill_b2_q128_ctx512_top512-bfloat16-seed0",
-      "operator": "dsa_prefill",
-      "dataset": "realistic",
-      "case_id": "deepseek_a5_prefill_b2_q128_ctx512_top512",
-      "family": "prefill_workflow",
-      "shape": [
-        128,
-        64,
-        512
-      ],
-      "dtype": "bfloat16",
-      "backend": "ascend",
-      "device_class": "950PR",
-      "implementation": "vllm_ascend",
-      "implementation_version": "vllm-ascend",
-      "source_kind": "library_compatible_realistic",
-      "source_project": "vllm-ascend",
-      "source_model": "DeepSeek-A5-compatible",
-      "source_file": "serving_buckets/deepseek_a5_dsa.json",
-      "source_op": "dsa_prefill",
-      "metrics": {
-        "latency_ms": 0.069138
-      },
-      "accuracy": {
-        "passed": true,
-        "max_abs_error": 0.0,
-        "max_rel_error": 0.0
-      },
-      "diff_ref": null
-    },
-    {
-      "schema_version": 1,
-      "run_id": "opbench-ascend-950pr-vllm-ascend-dsa_prefill-realistic-bfloat16/dsa_prefill-realistic-deepseek_a5_prefill_b2_q256_ctx512_top512-bfloat16-seed0",
-      "operator": "dsa_prefill",
-      "dataset": "realistic",
-      "case_id": "deepseek_a5_prefill_b2_q256_ctx512_top512",
-      "family": "prefill_workflow",
-      "shape": [
-        256,
-        64,
-        512
-      ],
-      "dtype": "bfloat16",
-      "backend": "ascend",
-      "device_class": "950PR",
-      "implementation": "vllm_ascend",
-      "implementation_version": "vllm-ascend",
-      "source_kind": "library_compatible_realistic",
-      "source_project": "vllm-ascend",
-      "source_model": "DeepSeek-A5-compatible",
-      "source_file": "serving_buckets/deepseek_a5_dsa.json",
-      "source_op": "dsa_prefill",
-      "metrics": {
-        "latency_ms": 0.11874900299999999
+        "latency_ms": 18.701060146
       },
       "accuracy": {
         "passed": true,

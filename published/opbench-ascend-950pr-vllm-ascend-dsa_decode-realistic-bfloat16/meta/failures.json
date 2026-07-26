@@ -1,0 +1,12 @@
+{
+  "failure_count": 0,
+  "records": [],
+  "metadata": {
+    "backend": "ascend",
+    "run_name": "opbench-ascend-950pr-vllm-ascend-dsa_decode-realistic-bfloat16",
+    "implementation": "vllm_ascend",
+    "total_cases": 2,
+    "success_count": 2,
+    "failure_count": 0
+  }
+}

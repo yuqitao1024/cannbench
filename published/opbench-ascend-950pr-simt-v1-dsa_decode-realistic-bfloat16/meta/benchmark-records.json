@@ -2,7 +2,7 @@
   "records": [
     {
       "schema_version": 1,
-      "run_id": "opbench-ascend-950pr-vllm-ascend-dsa_decode-realistic-bfloat16/dsa_decode-realistic-deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048-bfloat16-seed0",
+      "run_id": "opbench-ascend-950pr-simt-v1-dsa_decode-realistic-bfloat16/dsa_decode-realistic-deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048-bfloat16-seed0",
       "operator": "dsa_decode",
       "dataset": "realistic",
       "case_id": "deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048",
@@ -15,15 +15,15 @@
       "dtype": "bfloat16",
       "backend": "ascend",
       "device_class": "950PR",
-      "implementation": "vllm_ascend",
-      "implementation_version": "vllm-ascend",
+      "implementation": "simt",
+      "implementation_version": "v1",
       "source_kind": "official_operator_test",
       "source_project": "DeepSeek-V3.2+FlashMLA",
       "source_model": "DeepSeek-V3.2",
       "source_file": "docs/datasets/dsa-real-sources.md#deepseek-v32-flashmla-decode",
       "source_op": "dsa_decode",
       "metrics": {
-        "latency_ms": 0.16977699699999999
+        "latency_ms": 269.189539062
       },
       "accuracy": {
         "passed": true,
