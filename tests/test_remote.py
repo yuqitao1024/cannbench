@@ -215,7 +215,7 @@ def test_collect_remote_artifacts_runs_ascend_profile_and_downloads_profile(tmp_
         [
             "ssh",
             "user@ascend-host",
-            "cd /opt/cannbench && source /usr/local/Ascend/cann/set_env.sh && ASCEND_VISIBLE_DEVICES=0 msprof op --output=/opt/cannbench/.cannbench-runs/softmax-run/profile --launch-count=10 python3 -m cannbench internal-run --backend ascend --prepared-input .cannbench-runs/softmax-run/prepared.json --output-dir .cannbench-runs/softmax-run/perf --run-name benchmark",
+            "cd /opt/cannbench && source /usr/local/Ascend/cann/set_env.sh && ASCEND_VISIBLE_DEVICES=0 msopprof --output=/opt/cannbench/.cannbench-runs/softmax-run/profile --launch-count=10 python3 -m cannbench internal-run --backend ascend --prepared-input .cannbench-runs/softmax-run/prepared.json --output-dir .cannbench-runs/softmax-run/perf --run-name benchmark",
         ],
         [
             "scp",
@@ -399,7 +399,7 @@ def test_collect_remote_artifacts_can_use_predeployed_simt_op_without_deploying(
         "cd /opt/cannbench && src/cannbench/operators/builtin/softmax/simt/v2/install.sh",
     ]
     assert (
-        "CANNBENCH_SKIP_SIMT_INSTALL=1 msprof op --output=/opt/cannbench/.cannbench-runs/softmax-run/profile --launch-count=10 "
+        "CANNBENCH_SKIP_SIMT_INSTALL=1 msopprof --output=/opt/cannbench/.cannbench-runs/softmax-run/profile --launch-count=10 "
         "python3 -m cannbench internal-run --backend ascend --prepared-input .cannbench-runs/softmax-run/prepared.json "
         "--output-dir .cannbench-runs/softmax-run/perf --run-name benchmark --implementation simt --implementation-version v2"
     ) in commands[3][2]
@@ -498,7 +498,7 @@ def test_collect_remote_artifacts_skips_simt_install_when_preinstalled(tmp_path)
         [
             "ssh",
             "user@ascend-host",
-            "cd /opt/cannbench && ASCEND_VISIBLE_DEVICES=0 CANNBENCH_SKIP_SIMT_INSTALL=1 msprof op --output=/opt/cannbench/.cannbench-runs/softmax-run/profile --launch-count=10 python3 -m cannbench internal-run --backend ascend --prepared-input .cannbench-runs/softmax-run/prepared.json --output-dir .cannbench-runs/softmax-run/perf --run-name benchmark --implementation simt --implementation-version v3",
+            "cd /opt/cannbench && ASCEND_VISIBLE_DEVICES=0 CANNBENCH_SKIP_SIMT_INSTALL=1 msopprof --output=/opt/cannbench/.cannbench-runs/softmax-run/profile --launch-count=10 python3 -m cannbench internal-run --backend ascend --prepared-input .cannbench-runs/softmax-run/prepared.json --output-dir .cannbench-runs/softmax-run/perf --run-name benchmark --implementation simt --implementation-version v3",
         ],
         [
             "scp",

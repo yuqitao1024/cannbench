@@ -68,7 +68,7 @@ The controller uploads each prepared manifest, starts remote execution, and down
 
 `bench` is expected to collect device-side time by default.
 
-- Ascend remote profiling wraps execution with `msprof op`.
+- Ascend remote profiling wraps execution with `msopprof`.
 - NVIDIA remote profiling uses `ncu`.
 - Raw profiler outputs are stored under `profile/`.
 - Parsed frontend-facing records are stored under `meta/benchmark-records.json`.

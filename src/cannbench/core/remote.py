@@ -255,7 +255,7 @@ def collect_remote_artifacts(
         if endpoint.backend == "ascend":
             launch_count = kernel_selection.launch_count or 10
             profiled_operator = (
-                f"msprof op "
+                f"msopprof "
                 f"--output={shlex.quote(remote_profile)} "
                 f"--launch-count={launch_count} "
                 f"{base_operator}"

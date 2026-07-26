@@ -28,10 +28,10 @@ def test_get_backend_rejects_unknown_backend():
         get_backend("unknown")
 
 
-def test_ascend_msprof_options_use_plugin_launch_count(tmp_path):
-    from cannbench.backends.pytorch_backend import _ascend_msprof_op_options
+def test_ascend_msopprof_options_use_plugin_launch_count(tmp_path):
+    from cannbench.backends.pytorch_backend import _ascend_msopprof_options
 
-    options = _ascend_msprof_op_options(
+    options = _ascend_msopprof_options(
         tmp_path,
         ProfileKernelSelection(launch_count=64),
     )
@@ -570,7 +570,7 @@ def test_ascend_backend_resolves_simt_op_under_plugin_directory(monkeypatch, tmp
     assert backend._simt_op_base_dir(request, "softmax") == op_dir
 
 
-def test_ascend_backend_profiles_index_add_with_msprof(monkeypatch):
+def test_ascend_backend_profiles_index_add_with_msopprof(monkeypatch):
     captured: dict[str, object] = {}
 
     class FakeNpu:
@@ -608,7 +608,7 @@ def test_ascend_backend_profiles_index_add_with_msprof(monkeypatch):
             encoding="utf-8",
         )
         (perf_dir / "benchmark.json").write_text("{}\n", encoding="utf-8")
-        return SimpleNamespace(returncode=0, stdout="[msprof]\n", stderr="")
+        return SimpleNamespace(returncode=0, stdout="[msopprof]\n", stderr="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
 
@@ -626,7 +626,7 @@ def test_ascend_backend_profiles_index_add_with_msprof(monkeypatch):
     result = AscendBackend().profile_operator_device_time(request)
 
     command = captured["command"]
-    assert command[:3] == ["msprof", "op", f"--output={captured['cwd'] / 'profile'}"]
+    assert command[:2] == ["msopprof", f"--output={captured['cwd'] / 'profile'}"]
     assert "--launch-skip-before-match=1" not in command
     assert "--warm-up=2" not in command
     assert "--launch-count=10" in command
@@ -703,7 +703,7 @@ def test_ascend_backend_profiles_cann_index_add_past_tensor_move(monkeypatch):
     assert result.profile.profile_summary.latency_ms == 0.00975
 
 
-def test_ascend_backend_installs_simt_before_msprof_without_deploying_inside(monkeypatch):
+def test_ascend_backend_installs_simt_before_msopprof_without_deploying_inside(monkeypatch):
     captured: dict[str, object] = {}
 
     class FakeNpu:
@@ -2075,7 +2075,7 @@ def test_nvidia_backend_profile_raises_when_ncu_fails(monkeypatch):
         backend.profile_operator_device_time(request)
 
 
-def test_ascend_profile_operator_device_time_uses_msprof_launch_controls(monkeypatch):
+def test_ascend_profile_operator_device_time_uses_msopprof_launch_controls(monkeypatch):
     captured: dict[str, object] = {}
 
     class FakeNpu:
@@ -2130,7 +2130,8 @@ def test_ascend_profile_operator_device_time_uses_msprof_launch_controls(monkeyp
     result = AscendBackend().profile_operator_device_time(request)
 
     command = captured["profile_command"]
-    assert command[:2] == ["msprof", "op"]
+    assert command[0] == "msopprof"
+    assert "op" not in command[:2]
     assert "--warm-up=3" not in command
     assert "--launch-count=10" in command
     assert "--warmup" not in command

@@ -123,7 +123,7 @@ for the `realistic` split.
 Measurement settings:
 
 - Backend: Ascend NPU
-- Profiler: `msprof op`
+- Profiler: `msopprof`
 - Dtype: `float32`
 - Seed: `7`
 - Warmup: `0`

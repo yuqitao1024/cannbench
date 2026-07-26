@@ -36,7 +36,7 @@ def _subprocess_pythonpath() -> str:
     return os.pathsep.join((src_root, existing))
 
 
-def _ascend_msprof_op_options(
+def _ascend_msopprof_options(
     profile_dir: Path,
     kernel_selection,
 ) -> list[str]:
@@ -250,7 +250,7 @@ class AscendBackend(TorchOperatorBackend):
             implementation=request.implementation,
             implementation_version=request.implementation_version,
         )
-        with tempfile.TemporaryDirectory(prefix="cannbench-msprof-") as temp_dir_name:
+        with tempfile.TemporaryDirectory(prefix="cannbench-msopprof-") as temp_dir_name:
             temp_dir = Path(temp_dir_name)
             prepared_path = temp_dir / "prepared.json"
             profile_dir = temp_dir / "profile"
@@ -259,9 +259,8 @@ class AscendBackend(TorchOperatorBackend):
             perf_dir.mkdir(parents=True, exist_ok=True)
             write_prepared_operator_input(prepared_path, prepared)
             command = [
-                "msprof",
-                "op",
-                *_ascend_msprof_op_options(profile_dir, kernel_selection),
+                "msopprof",
+                *_ascend_msopprof_options(profile_dir, kernel_selection),
                 sys.executable,
                 "-m",
                 "cannbench",
@@ -297,7 +296,7 @@ class AscendBackend(TorchOperatorBackend):
                 if result.stderr:
                     print(result.stderr, end="", file=sys.stderr, flush=True)
                 raise RuntimeError(
-                    f"msprof profiling failed (exit {result.returncode}): {result.stderr.strip()}"
+                    f"msopprof profiling failed (exit {result.returncode}): {result.stderr.strip()}"
                 )
             if result.stdout:
                 print(result.stdout, end="", flush=True)
