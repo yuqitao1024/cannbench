@@ -11,6 +11,23 @@ def test_lightning_indexer_simt_v1_setup_uses_bisheng_toolchain():
     assert 'library_name = "aten_dsa_lightning_indexer"' in setup_py
 
 
+def test_lightning_indexer_build_isolates_each_fused_family_device_library():
+    setup_py = Path(
+        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/setup.py"
+    ).read_text(encoding="utf-8")
+
+    assert '"liblightning_indexer_family_4x64_kernel.so"' in setup_py
+    assert '"liblightning_indexer_family_64x128_kernel.so"' in setup_py
+    assert "for kernel_library, kernel_source in KERNEL_LIBRARIES.items()" in setup_py
+    assert "self._build_kernel_library(" in setup_py
+    assert '"-Wl,-rpath,$ORIGIN"' in setup_py
+    assert "outputs.extend(self._kernel_outputs)" in setup_py
+    assert "def copy_extensions_to_source(self):" in setup_py
+    assert "def get_output_mapping(self):" in setup_py
+    assert "sources=HOST_SOURCES" in setup_py
+    assert "glob.glob(os.path.join(EXTENSIONS_DIR, \"simt\", \"*.asc\"))" not in setup_py
+
+
 def test_lightning_indexer_simt_v1_register_has_python_module_entry():
     source = Path(
         "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"

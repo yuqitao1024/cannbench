@@ -48,6 +48,31 @@ def test_sparse_attention_simt_v1_setup_uses_bisheng_toolchain():
     assert "\"-shared\"" in setup_py
 
 
+def test_sparse_attention_build_isolates_each_device_source_library():
+    setup_py = Path(
+        "src/cannbench/operators/builtin/sparse_attention/simt/v1/setup.py"
+    ).read_text(encoding="utf-8")
+
+    expected_libraries = (
+        "libsparse_attention_postprocess_family_hd128_kernel.so",
+        "libsparse_attention_postprocess_family_hd512_kernel.so",
+        "libsparse_attention_query_pack_hd128_kernel.so",
+        "libsparse_attention_query_pack_hd512_kernel.so",
+        "libsparse_attention_score_family_hd128_kernel.so",
+        "libsparse_attention_score_family_hd512_kernel.so",
+    )
+    for library in expected_libraries:
+        assert f'"{library}"' in setup_py
+
+    assert "for kernel_library, kernel_source in KERNEL_LIBRARIES.items()" in setup_py
+    assert "self._build_kernel_library(" in setup_py
+    assert '"-Wl,-rpath,$ORIGIN"' in setup_py
+    assert "outputs.extend(self._kernel_outputs)" in setup_py
+    assert "def copy_extensions_to_source(self):" in setup_py
+    assert "def get_output_mapping(self):" in setup_py
+    assert "sources=HOST_SOURCES" in setup_py
+
+
 def test_sparse_attention_simt_v1_setup_does_not_force_enable_simt():
     setup_py = Path(
         "src/cannbench/operators/builtin/sparse_attention/simt/v1/setup.py"

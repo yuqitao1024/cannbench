@@ -18,6 +18,20 @@ BASE_DIR = os.path.dirname(os.path.realpath(__file__))
 EXTENSIONS_DIR = os.path.join(BASE_DIR, library_name, "csrc")
 NPU_ARCH = os.getenv("NPU_ARCH")
 
+HOST_SOURCES = [
+    os.path.join(EXTENSIONS_DIR, "register.asc"),
+    os.path.join(EXTENSIONS_DIR, "lightning_indexer.asc"),
+]
+# Keep one VF entry per device ELF so msopprof can replay mixed kernels reliably.
+KERNEL_LIBRARIES = {
+    "liblightning_indexer_family_4x64_kernel.so": os.path.join(
+        EXTENSIONS_DIR, "simt", "lightning_indexer_fused_family_4x64.asc"
+    ),
+    "liblightning_indexer_family_64x128_kernel.so": os.path.join(
+        EXTENSIONS_DIR, "simt", "lightning_indexer_fused_family_64x128.asc"
+    ),
+}
+
 
 def get_dependency_paths():
     python_include = sysconfig.get_config_var("INCLUDEPY")
@@ -59,6 +73,10 @@ def get_dependency_paths():
 
 
 class AscendBuildExtension(build_ext):
+    def initialize_options(self):
+        super().initialize_options()
+        self._kernel_outputs = []
+
     def _check_bisheng_compiler(self):
         if not which("bisheng"):
             raise RuntimeError("bisheng command not found")
@@ -76,8 +94,7 @@ class AscendBuildExtension(build_ext):
         abi_value = "1" if use_cxx11_abi else "0"
         debug_mode = os.getenv("DEBUG", "0") == "1"
         opt_flag = "-O0" if debug_mode else "-O3"
-
-        compile_cmd = [
+        common_compile_cmd = [
             "bisheng",
             "-x",
             "asc",
@@ -87,44 +104,110 @@ class AscendBuildExtension(build_ext):
             "-std=c++17",
             opt_flag,
             f"-D_GLIBCXX_USE_CXX11_ABI={abi_value}",
-            *ext.sources,
         ]
-
         if debug_mode:
-            compile_cmd.append("-g")
+            common_compile_cmd.append("-g")
 
-        for include_dir in dep_paths["include_dirs"]:
-            compile_cmd.append(f"-I{include_dir}")
+        include_flags = [f"-I{path}" for path in dep_paths["include_dirs"]]
+        library_flags = [f"-L{path}" for path in dep_paths["library_dirs"]]
+        dependency_flags = [
+            "-ltorch_npu",
+            "-ltorch_python",
+            "-ltorch_cpu",
+            "-ltorch",
+            "-lc10",
+            "-lm",
+        ]
+        kernel_output_dir = os.path.dirname(ext_fullpath)
+        self._kernel_outputs.clear()
 
-        for library_dir in dep_paths["library_dirs"]:
-            compile_cmd.append(f"-L{library_dir}")
+        try:
+            for kernel_library, kernel_source in KERNEL_LIBRARIES.items():
+                kernel_output = os.path.join(kernel_output_dir, kernel_library)
+                self._build_kernel_library(
+                    common_compile_cmd,
+                    include_flags,
+                    library_flags,
+                    dependency_flags,
+                    kernel_library,
+                    kernel_source,
+                    kernel_output,
+                )
+                self._kernel_outputs.append(kernel_output)
 
-        compile_cmd.extend(
-            [
-                "-ltorch_npu",
-                "-ltorch_python",
-                "-ltorch_cpu",
-                "-ltorch",
-                "-lc10",
-                "-lm",
+            compile_cmd = [
+                *common_compile_cmd,
+                *ext.sources,
+                *include_flags,
+                *library_flags,
+                f"-L{kernel_output_dir}",
+                *(f"-l:{name}" for name in KERNEL_LIBRARIES),
+                "-Wl,-rpath,$ORIGIN",
+                *dependency_flags,
                 "-o",
                 ext_fullpath,
             ]
-        )
-
-        try:
             self.spawn(compile_cmd)
         except Exception as exc:
             raise CompileError(str(exc)) from exc
 
+    def _build_kernel_library(
+        self,
+        common_compile_cmd,
+        include_flags,
+        library_flags,
+        dependency_flags,
+        kernel_library,
+        kernel_source,
+        kernel_output,
+    ):
+        compile_cmd = [
+            *common_compile_cmd,
+            kernel_source,
+            *include_flags,
+            *library_flags,
+            f"-Wl,-soname,{kernel_library}",
+            *dependency_flags,
+            "-o",
+            kernel_output,
+        ]
+        self.spawn(compile_cmd)
+
+    def copy_extensions_to_source(self):
+        super().copy_extensions_to_source()
+        build_py = self.get_finalized_command("build_py")
+        source_package_dir = build_py.get_package_dir(library_name)
+        build_package_dir = os.path.join(self.build_lib, library_name)
+        for kernel_library in KERNEL_LIBRARIES:
+            self.copy_file(
+                os.path.join(build_package_dir, kernel_library),
+                os.path.join(source_package_dir, kernel_library),
+                level=self.verbose,
+            )
+
+    def get_output_mapping(self):
+        mapping = super().get_output_mapping()
+        if self.inplace:
+            build_py = self.get_finalized_command("build_py")
+            source_package_dir = build_py.get_package_dir(library_name)
+            build_package_dir = os.path.join(self.build_lib, library_name)
+            for kernel_library in KERNEL_LIBRARIES:
+                mapping[os.path.join(build_package_dir, kernel_library)] = (
+                    os.path.join(source_package_dir, kernel_library)
+                )
+        return dict(sorted(mapping.items()))
+
+    def get_outputs(self):
+        outputs = super().get_outputs()
+        outputs.extend(self._kernel_outputs)
+        return list(dict.fromkeys(outputs))
+
 
 def get_extensions():
-    sources = list(glob.glob(os.path.join(EXTENSIONS_DIR, "*.asc")))
-    sources += list(glob.glob(os.path.join(EXTENSIONS_DIR, "simt", "*.asc")))
     return [
         Extension(
             name=f"{library_name}._C",
-            sources=sources,
+            sources=HOST_SOURCES,
             language="asc",
         )
     ]
