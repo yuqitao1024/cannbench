@@ -1,10 +1,11 @@
 import json
+from types import SimpleNamespace
 
 import pytest
 
 from cannbench.core.execution import RemoteExecutionArtifacts, RemoteProfileArtifacts
 from cannbench.core.prepared_input import build_prepared_operator_input, write_prepared_operator_input
-from cannbench.core.profile import DeviceProfileSummary
+from cannbench.core.profile import DeviceProfileSummary, ProfileKernelSelection
 from cannbench.core.remote import (
     RemoteCollectionResult,
     RemoteEndpoint,
@@ -514,7 +515,7 @@ def test_collect_remote_artifacts_skips_simt_install_when_preinstalled(tmp_path)
     ]
 
 
-def test_collect_remote_artifacts_runs_nvidia_ncu_profile(tmp_path):
+def test_collect_remote_artifacts_runs_nvidia_ncu_profile(tmp_path, monkeypatch):
     commands: list[list[str]] = []
 
     def fake_runner(command):
@@ -551,6 +552,15 @@ def test_collect_remote_artifacts_runs_nvidia_ncu_profile(tmp_path):
     )
     prepared_input = tmp_path / "prepared.json"
     _write_softmax_prepared(prepared_input)
+    monkeypatch.setattr(
+        "cannbench.core.remote.get_operator_plugin",
+        lambda op: SimpleNamespace(
+            profile_kernel_selection=lambda **kwargs: ProfileKernelSelection(
+                kernel_name_patterns=(op,),
+                launch_count=7,
+            )
+        ),
+    )
 
     collect_remote_artifacts(
         endpoint=endpoint,
@@ -567,7 +577,7 @@ def test_collect_remote_artifacts_runs_nvidia_ncu_profile(tmp_path):
         "user@nvidia-host",
     ]
     command = commands[2][2]
-    assert "ncu --target-processes all --force-overwrite --launch-count 1 --csv" in command
+    assert "ncu --target-processes all --force-overwrite --launch-count 7 --csv" in command
     assert "python3 -m cannbench internal-run --backend nvidia" in command
 
 

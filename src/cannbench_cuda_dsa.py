@@ -25,6 +25,26 @@ def lightning_indexer(**kwargs: Any) -> Any:
     )(**kwargs)
 
 
+def prepare_lightning_indexer(**kwargs: Any):
+    """Prepare a configured Indexer adapter when it exposes a prepare hook."""
+    adapter = _resolve_configured_callable(
+        env_var=_LIGHTNING_INDEXER_ENV,
+        fallback_names=(
+            "cannbench_cuda_dsa_flashmla_deepgemm:lightning_indexer",
+            "flash_mla:lightning_indexer",
+            "flashmla:lightning_indexer",
+            "deep_gemm:lightning_indexer",
+            "deepgemm:lightning_indexer",
+        ),
+        op_name="lightning_indexer",
+    )
+    return _prepare_configured_callable(
+        adapter,
+        prepare_name="prepare_lightning_indexer",
+        kwargs=kwargs,
+    )
+
+
 def sparse_attention(**kwargs: Any) -> Any:
     """Dispatch CannBench sparse attention to a configured CUDA library wrapper."""
     return _resolve_configured_callable(
@@ -40,6 +60,52 @@ def sparse_attention(**kwargs: Any) -> Any:
         ),
         op_name="sparse_attention",
     )(**kwargs)
+
+
+def prepare_sparse_attention(**kwargs: Any):
+    """Prepare a configured attention adapter when it exposes a prepare hook."""
+    adapter = _resolve_configured_callable(
+        env_var=_SPARSE_ATTENTION_ENV,
+        fallback_names=(
+            "cannbench_cuda_dsa_flashmla_deepgemm:sparse_attention",
+            "flash_mla:sparse_attention",
+            "flash_mla:sparse_mla_decode",
+            "flash_mla:sparse_mla_prefill",
+            "flashmla:sparse_attention",
+            "flashmla:sparse_mla_decode",
+            "flashmla:sparse_mla_prefill",
+        ),
+        op_name="sparse_attention",
+    )
+    return _prepare_configured_callable(
+        adapter,
+        prepare_name="prepare_sparse_attention",
+        kwargs=kwargs,
+    )
+
+
+def _prepare_configured_callable(
+    adapter: Callable[..., Any],
+    *,
+    prepare_name: str,
+    kwargs: dict[str, Any],
+):
+    module_name = getattr(adapter, "__module__", None)
+    prepare = None
+    if isinstance(module_name, str) and module_name:
+        try:
+            module = importlib.import_module(module_name)
+        except ModuleNotFoundError:
+            module = None
+        if module is not None:
+            prepare = getattr(module, prepare_name, None)
+    if callable(prepare):
+        return prepare(**kwargs)
+
+    def operator():
+        return adapter(**kwargs)
+
+    return operator
 
 
 def _resolve_configured_callable(

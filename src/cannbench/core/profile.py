@@ -18,6 +18,19 @@ class ProfileKernelSelection:
     kernel_name_patterns: tuple[str, ...] = ()
     launch_count: int | None = None
     aggregate_across_files: bool = False
+    nvtx_range: str | None = None
+
+
+def ncu_profile_options(
+    kernel_selection: ProfileKernelSelection,
+) -> tuple[str, ...]:
+    if kernel_selection.nvtx_range:
+        return (
+            "--nvtx",
+            "--nvtx-include",
+            f"{kernel_selection.nvtx_range}/",
+        )
+    return ("--launch-count", str(kernel_selection.launch_count or 1))
 
 
 @dataclass(frozen=True)

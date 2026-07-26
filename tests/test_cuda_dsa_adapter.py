@@ -8,7 +8,9 @@ def test_default_cuda_dsa_adapter_exports_required_callables():
     adapter = importlib.import_module("cannbench_cuda_dsa")
 
     assert callable(adapter.lightning_indexer)
+    assert callable(adapter.prepare_lightning_indexer)
     assert callable(adapter.sparse_attention)
+    assert callable(adapter.prepare_sparse_attention)
 
 
 def test_default_cuda_dsa_adapter_reports_missing_lightning_indexer_dependency(monkeypatch):

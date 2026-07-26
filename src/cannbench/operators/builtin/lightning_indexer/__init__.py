@@ -254,8 +254,14 @@ def _build_profile_kernel_selection(ctx: ProfileKernelSelectionContext):
         )
     if ctx.backend == "nvidia" and ctx.implementation == "cuda_library":
         return ProfileKernelSelection(
-            kernel_name_patterns=("mqa_logits", "topk"),
-            launch_count=2,
+            aggregate_across_files=True,
+            nvtx_range="cannbench_lightning_indexer_dynamic",
+        )
+    if ctx.backend == "ascend" and ctx.implementation == "vllm_ascend":
+        return ProfileKernelSelection(
+            kernel_name_patterns=("lightning", "indexer", "cat", "cast"),
+            launch_count=64,
+            aggregate_across_files=True,
         )
     return ProfileKernelSelection(kernel_name_patterns=("lightning", "indexer"))
 

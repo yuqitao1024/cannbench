@@ -10,7 +10,7 @@ import pytest
 from cannbench.backends import get_backend
 from cannbench.core.config import OperatorBenchmarkRequest
 from cannbench.core.prepared_input import OperatorInputBinding
-from cannbench.core.profile import LocalDeviceProfileResult
+from cannbench.core.profile import LocalDeviceProfileResult, ProfileKernelSelection
 
 
 def test_get_backend_returns_nvidia_backend():
@@ -26,6 +26,17 @@ def test_get_backend_returns_ascend_backend():
 def test_get_backend_rejects_unknown_backend():
     with pytest.raises(ValueError, match="Unsupported backend"):
         get_backend("unknown")
+
+
+def test_ascend_msprof_options_use_plugin_launch_count(tmp_path):
+    from cannbench.backends.pytorch_backend import _ascend_msprof_op_options
+
+    options = _ascend_msprof_op_options(
+        tmp_path,
+        ProfileKernelSelection(launch_count=64),
+    )
+
+    assert options == [f"--output={tmp_path}", "--launch-count=64"]
 
 
 def test_torch_backend_resolves_bound_operator_output_before_target(monkeypatch):

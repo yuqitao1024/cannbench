@@ -11,6 +11,7 @@ from typing import Callable
 from cannbench.core.execution import RemoteExecutionArtifacts, RemoteProfileArtifacts, read_artifact_tree
 from cannbench.core.prepared_input import read_prepared_operator_input
 from cannbench.core.profile import (
+    ncu_profile_options,
     read_device_profile,
     write_device_profile_summary,
 )
@@ -237,6 +238,13 @@ def collect_remote_artifacts(
         output_artifacts = read_artifact_tree(output_dir / "output")
 
     if profile_device_time:
+        kernel_selection = get_operator_plugin(
+            prepared.op
+        ).profile_kernel_selection(
+            backend=endpoint.backend,
+            implementation=implementation,
+            implementation_version=implementation_version,
+        )
         base_operator = (
             f"{shlex.quote(endpoint.python)} -m cannbench internal-run "
             f"--backend {shlex.quote(endpoint.backend)} "
@@ -245,10 +253,11 @@ def collect_remote_artifacts(
             f"--run-name benchmark{implementation_arg}{implementation_version_arg}"
         )
         if endpoint.backend == "ascend":
+            launch_count = kernel_selection.launch_count or 10
             profiled_operator = (
                 f"msprof op "
                 f"--output={shlex.quote(remote_profile)} "
-                f"--launch-count=10 "
+                f"--launch-count={launch_count} "
                 f"{base_operator}"
             )
             command = (
@@ -258,10 +267,14 @@ def collect_remote_artifacts(
             )
         elif endpoint.backend == "nvidia":
             env_prefix = _remote_command_env(operator_env)
+            ncu_options = " ".join(
+                shlex.quote(option)
+                for option in ncu_profile_options(kernel_selection)
+            )
             ncu_operator = (
                 f"{env_prefix}"
                 "ncu --target-processes all --force-overwrite "
-                f"--launch-count 1 "
+                f"{ncu_options} "
                 "--csv "
                 f"--log-file {shlex.quote(remote_profile + '/ncu.csv')} "
                 f"--export {shlex.quote(remote_profile + '/ncu-report')} "
@@ -279,11 +292,7 @@ def collect_remote_artifacts(
         summary = read_device_profile(
             output_dir / "profile",
             backend=endpoint.backend,
-            kernel_selection=get_operator_plugin(prepared.op).profile_kernel_selection(
-                backend=endpoint.backend,
-                implementation=implementation,
-                implementation_version=implementation_version,
-            ),
+            kernel_selection=kernel_selection,
         )
         if summarize_profile:
             write_device_profile_summary(output_dir / "profile-summary.json", summary)

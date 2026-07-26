@@ -28,6 +28,35 @@ def lightning_indexer(**kwargs: Any) -> Any:
     return _lightning_indexer_topk(kwargs, logits)
 
 
+def prepare_lightning_indexer(**kwargs: Any):
+    """Prepare static Index-KV state and return the dynamic Indexer callable."""
+    phase = _resolve_phase(kwargs)
+    deep_gemm = _import_required("deep_gemm", op_name="lightning_indexer")
+    if phase == "decode":
+        static_kwargs = _prepare_deep_gemm_decode_indexer_kwargs(
+            deep_gemm, kwargs
+        )
+        dynamic_kwargs = _dynamic_deep_gemm_decode_indexer_kwargs
+        function_name = "fp8_paged_mqa_logits"
+    elif phase == "prefill":
+        static_kwargs = _prepare_deep_gemm_prefill_indexer_kwargs(kwargs)
+        dynamic_kwargs = _dynamic_deep_gemm_prefill_indexer_kwargs
+        function_name = "fp8_mqa_logits"
+    else:
+        raise _unsupported_phase(phase, "lightning_indexer")
+
+    def operator():
+        logits = _call_required(
+            deep_gemm,
+            function_name,
+            op_name="lightning_indexer",
+            kwargs={**static_kwargs, **dynamic_kwargs(kwargs)},
+        )
+        return _lightning_indexer_topk(kwargs, logits)
+
+    return operator
+
+
 def sparse_attention(**kwargs: Any) -> Any:
     """Route CannBench DSA sparse attention to FlashMLA by workflow phase."""
     phase = _resolve_phase(kwargs)
@@ -49,6 +78,43 @@ def sparse_attention(**kwargs: Any) -> Any:
         )
         return _normalize_flash_mla_attention_result(kwargs, result, phase=phase)
     raise _unsupported_phase(phase, "sparse_attention")
+
+
+def prepare_sparse_attention(**kwargs: Any):
+    """Prepare static FlashMLA cache state and return the dynamic callable."""
+    phase = _resolve_phase(kwargs)
+    flash_mla = _import_required("flash_mla", op_name="sparse_attention")
+    if phase == "decode":
+        prepared_kwargs = _prepare_flash_mla_decode_attention_kwargs(
+            flash_mla, kwargs
+        )
+        dynamic_kwargs = _dynamic_flash_mla_decode_attention_kwargs
+        function_name = "flash_mla_with_kvcache"
+    elif phase == "prefill":
+        prepared_kwargs = _prepare_flash_mla_prefill_attention_kwargs(kwargs)
+        dynamic_kwargs = _dynamic_flash_mla_prefill_attention_kwargs
+        function_name = "flash_mla_sparse_fwd"
+    else:
+        raise _unsupported_phase(phase, "sparse_attention")
+    static_kwargs = {
+        key: value
+        for key, value in prepared_kwargs.items()
+        if not key.startswith("_")
+    }
+
+    def operator():
+        result = _call_required(
+            flash_mla,
+            function_name,
+            op_name="sparse_attention",
+            kwargs={
+                **static_kwargs,
+                **dynamic_kwargs(kwargs, prepared_kwargs),
+            },
+        )
+        return _normalize_flash_mla_attention_result(kwargs, result, phase=phase)
+
+    return operator
 
 
 def _resolve_phase(kwargs: dict[str, Any]) -> str:
@@ -118,22 +184,21 @@ def _lightning_indexer_topk(kwargs: dict[str, Any], logits):
 
 
 def _deep_gemm_prefill_indexer_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **_prepare_deep_gemm_prefill_indexer_kwargs(kwargs),
+        **_dynamic_deep_gemm_prefill_indexer_kwargs(kwargs),
+    }
+
+
+def _prepare_deep_gemm_prefill_indexer_kwargs(
+    kwargs: dict[str, Any],
+) -> dict[str, Any]:
     torch = _require_torch(kwargs)
     payload = _require_payload(kwargs)
-    query = kwargs["query"].reshape(
-        payload["query_shape"][0] * payload["query_shape"][1],
-        payload["query_shape"][2],
-        payload["query_shape"][3],
-    )
     keys = kwargs["keys"].reshape(
         payload["key_shape"][0] * payload["key_shape"][1],
         payload["key_shape"][2],
     )
-    weights = kwargs["weights"].reshape(
-        payload["weight_shape"][0] * payload["weight_shape"][1],
-        payload["weight_shape"][2],
-    ).to(torch.float32)
-    q_fp8 = query.to(torch.float8_e4m3fn)
     kv_fp8 = _per_custom_dims_cast_to_fp8(torch, keys, dims=(0,), use_ue8m0=False)
     batch, query_tokens = payload["query_shape"][0], payload["query_shape"][1]
     context_tokens = payload["key_shape"][1]
@@ -152,35 +217,63 @@ def _deep_gemm_prefill_indexer_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
             for query_index in range(query_tokens)
         )
     return {
-        "q": q_fp8,
         "kv": kv_fp8,
-        "weights": weights,
         "cu_seq_len_k_start": torch.tensor(
-            starts, device=query.device, dtype=torch.int32
+            starts, device=keys.device, dtype=torch.int32
         ),
-        "cu_seq_len_k_end": torch.tensor(ends, device=query.device, dtype=torch.int32),
+        "cu_seq_len_k_end": torch.tensor(
+            ends, device=keys.device, dtype=torch.int32
+        ),
         "clean_logits": False,
         "max_seqlen_k": context_tokens,
     }
 
 
-def _deep_gemm_decode_indexer_kwargs(deep_gemm, kwargs: dict[str, Any]) -> dict[str, Any]:
+def _dynamic_deep_gemm_prefill_indexer_kwargs(
+    kwargs: dict[str, Any],
+) -> dict[str, Any]:
+    torch = _require_torch(kwargs)
+    payload = _require_payload(kwargs)
+    query = kwargs["query"].reshape(
+        payload["query_shape"][0] * payload["query_shape"][1],
+        payload["query_shape"][2],
+        payload["query_shape"][3],
+    )
+    weights = kwargs["weights"].reshape(
+        payload["weight_shape"][0] * payload["weight_shape"][1],
+        payload["weight_shape"][2],
+    )
+    return {
+        "q": query.to(torch.float8_e4m3fn),
+        "weights": weights.to(torch.float32),
+    }
+
+
+def _deep_gemm_decode_indexer_kwargs(
+    deep_gemm, kwargs: dict[str, Any]
+) -> dict[str, Any]:
+    return {
+        **_prepare_deep_gemm_decode_indexer_kwargs(deep_gemm, kwargs),
+        **_dynamic_deep_gemm_decode_indexer_kwargs(kwargs),
+    }
+
+
+def _prepare_deep_gemm_decode_indexer_kwargs(
+    deep_gemm, kwargs: dict[str, Any]
+) -> dict[str, Any]:
     torch = _require_torch(kwargs)
     payload = _require_payload(kwargs)
     block_kv = 64
-    query = kwargs["query"]
     batch, query_tokens, index_heads, index_dim = payload["query_shape"]
     context_tokens = payload["key_shape"][1]
-    q_fp8 = query.reshape(batch, query_tokens, index_heads, index_dim).to(
-        torch.float8_e4m3fn
-    )
+    keys = kwargs["keys"]
     block_table, max_context_len = _payload_or_sequential_block_table(
         torch,
         payload,
         batch=batch,
         context_tokens=context_tokens,
         block_size=block_kv,
-        device=query.device,
+        device=keys.device,
     )
     kv_cache_bf16 = _blocked_kv_cache(
         torch,
@@ -198,7 +291,7 @@ def _deep_gemm_decode_indexer_kwargs(deep_gemm, kwargs: dict[str, Any]) -> dict[
             "valid_context_lengths",
             (context_tokens,) * (batch * query_tokens),
         ),
-        device=query.device,
+        device=keys.device,
         dtype=torch.int32,
     ).reshape(batch, query_tokens)
     schedule_meta = deep_gemm.get_paged_mqa_logits_metadata(
@@ -207,11 +300,8 @@ def _deep_gemm_decode_indexer_kwargs(deep_gemm, kwargs: dict[str, Any]) -> dict[
         deep_gemm.get_num_sms(),
         indices=None,
     )
-    weights = kwargs["weights"].reshape(batch * query_tokens, index_heads).to(torch.float32)
     return {
-        "q": q_fp8,
         "kv_cache": fused_kv_cache,
-        "weights": weights,
         "context_lens": context_lens,
         "block_table": block_table,
         "schedule_meta": schedule_meta,
@@ -221,21 +311,70 @@ def _deep_gemm_decode_indexer_kwargs(deep_gemm, kwargs: dict[str, Any]) -> dict[
     }
 
 
+def _dynamic_deep_gemm_decode_indexer_kwargs(
+    kwargs: dict[str, Any],
+) -> dict[str, Any]:
+    torch = _require_torch(kwargs)
+    payload = _require_payload(kwargs)
+    batch, query_tokens, index_heads, index_dim = payload["query_shape"]
+    query = kwargs["query"].reshape(
+        batch, query_tokens, index_heads, index_dim
+    )
+    weights = kwargs["weights"].reshape(
+        batch * query_tokens, index_heads
+    )
+    return {
+        "q": query.to(torch.float8_e4m3fn),
+        "weights": weights.to(torch.float32),
+    }
+
+
 def _flash_mla_prefill_attention_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **_prepare_flash_mla_prefill_attention_kwargs(kwargs),
+        **_dynamic_flash_mla_prefill_attention_kwargs(kwargs, {}),
+    }
+
+
+def _prepare_flash_mla_prefill_attention_kwargs(
+    kwargs: dict[str, Any],
+) -> dict[str, Any]:
     torch = _require_torch(kwargs)
     payload = _require_payload(kwargs)
     batch, query_heads, query_tokens, qk_head_dim = payload["query_shape"]
     _, kv_heads, context_tokens, _ = payload["shared_kv_shape"]
     value_head_dim = int(payload["value_head_dim"])
-    query = _bhtd_to_bthd_flat(
-        kwargs["query"], batch, query_heads, query_tokens, qk_head_dim
-    )
     query_lens = tuple(payload.get("query_lens", (query_tokens,) * batch))
-    if query_lens != (query_tokens,) * batch:
-        query = _pack_bthd_tokens(torch, query, query_lens, query_tokens)
     kv = _bhtd_to_bthd_flat(
         kwargs["shared_kv"], batch, kv_heads, context_tokens, qk_head_dim
     )
+    return {
+        "kv": kv.to(torch.bfloat16),
+        "sm_scale": float(kwargs.get("softmax_scale", qk_head_dim ** -0.5)),
+        "d_v": value_head_dim,
+        "topk_length": _prefill_topk_lengths(
+            torch,
+            kwargs.get("topk_lengths"),
+            query_lens=query_lens,
+            padded_query_tokens=query_tokens,
+        ),
+    }
+
+
+def _dynamic_flash_mla_prefill_attention_kwargs(
+    kwargs: dict[str, Any], prepared_kwargs: dict[str, Any]
+) -> dict[str, Any]:
+    del prepared_kwargs
+    torch = _require_torch(kwargs)
+    payload = _require_payload(kwargs)
+    batch, query_heads, query_tokens, qk_head_dim = payload["query_shape"]
+    _, kv_heads, context_tokens, _ = payload["shared_kv_shape"]
+    query_lens = tuple(payload.get("query_lens", (query_tokens,) * batch))
+    query = _bhtd_to_bthd_flat(
+        kwargs["query"], batch, query_heads, query_tokens, qk_head_dim
+    )
+    if query_lens != (query_tokens,) * batch:
+        query = _pack_bthd_tokens(torch, query, query_lens, query_tokens)
     indices = kwargs["indices"].to(torch.int32)
     indices = _offset_prefill_indices(
         torch,
@@ -250,20 +389,27 @@ def _flash_mla_prefill_attention_kwargs(kwargs: dict[str, Any]) -> dict[str, Any
         indices = indices.expand(sum(query_lens), kv_heads, payload["indices_shape"][2])
     return {
         "q": query.to(torch.bfloat16),
-        "kv": kv.to(torch.bfloat16),
         "indices": indices.contiguous(),
-        "sm_scale": float(kwargs.get("softmax_scale", qk_head_dim ** -0.5)),
-        "d_v": value_head_dim,
-        "topk_length": _prefill_topk_lengths(
-            torch,
-            kwargs.get("topk_lengths"),
-            query_lens=query_lens,
-            padded_query_tokens=query_tokens,
-        ),
     }
 
 
 def _flash_mla_decode_attention_kwargs(
+    flash_mla, kwargs: dict[str, Any]
+) -> dict[str, Any]:
+    prepared_kwargs = _prepare_flash_mla_decode_attention_kwargs(
+        flash_mla, kwargs
+    )
+    return {
+        **{
+            key: value
+            for key, value in prepared_kwargs.items()
+            if not key.startswith("_")
+        },
+        **_dynamic_flash_mla_decode_attention_kwargs(kwargs, prepared_kwargs),
+    }
+
+
+def _prepare_flash_mla_decode_attention_kwargs(
     flash_mla, kwargs: dict[str, Any]
 ) -> dict[str, Any]:
     torch = _require_torch(kwargs)
@@ -274,19 +420,17 @@ def _flash_mla_decode_attention_kwargs(
     value_head_dim = int(payload["value_head_dim"])
     if kv_heads != 1:
         raise RuntimeError("FlashMLA sparse decode requires kv_heads == 1")
-    query = _bhtd_to_bthd(
-        kwargs["query"], batch, query_heads, query_tokens, qk_head_dim
-    )
     query_lens = tuple(payload.get("query_lens", (query_tokens,) * batch))
     if query_lens != (query_tokens,) * batch:
         raise RuntimeError("FlashMLA decode does not support ragged query batches")
+    shared_kv = kwargs["shared_kv"]
     block_table, max_context_len = _payload_or_sequential_block_table(
         torch,
         payload,
         batch=batch,
         context_tokens=context_tokens,
         block_size=block_size,
-        device=query.device,
+        device=shared_kv.device,
     )
     kv_cache_bf16 = _blocked_kv_cache(
         torch,
@@ -299,16 +443,8 @@ def _flash_mla_decode_attention_kwargs(
         max_context_len=max_context_len,
     ).to(torch.bfloat16)
     k_cache = _flash_mla_fp8_k_cache(torch, kv_cache_bf16)
-    abs_indices = kwargs["indices"].to(torch.int32)
-    indices_in_kvcache = _indices_to_kvcache_indices(
-        torch,
-        abs_indices,
-        block_table,
-        block_size=block_size,
-    )
     tile_scheduler_metadata, num_splits = flash_mla.get_mla_metadata()
     return {
-        "q": query.to(torch.bfloat16),
         "k_cache": k_cache,
         "block_table": None,
         "cache_seqlens": None,
@@ -318,10 +454,33 @@ def _flash_mla_decode_attention_kwargs(
         "softmax_scale": float(kwargs.get("softmax_scale", qk_head_dim ** -0.5)),
         "causal": False,
         "is_fp8_kvcache": True,
-        "indices": indices_in_kvcache.contiguous(),
         "topk_length": _decode_topk_lengths(
             kwargs.get("topk_lengths"), batch=batch, query_tokens=query_tokens
         ),
+        "_index_block_table": block_table,
+        "_index_block_size": block_size,
+    }
+
+
+def _dynamic_flash_mla_decode_attention_kwargs(
+    kwargs: dict[str, Any], prepared_kwargs: dict[str, Any]
+) -> dict[str, Any]:
+    torch = _require_torch(kwargs)
+    payload = _require_payload(kwargs)
+    batch, query_heads, query_tokens, qk_head_dim = payload["query_shape"]
+    query = _bhtd_to_bthd(
+        kwargs["query"], batch, query_heads, query_tokens, qk_head_dim
+    )
+    abs_indices = kwargs["indices"].to(torch.int32)
+    indices_in_kvcache = _indices_to_kvcache_indices(
+        torch,
+        abs_indices,
+        prepared_kwargs["_index_block_table"],
+        block_size=prepared_kwargs["_index_block_size"],
+    )
+    return {
+        "q": query.to(torch.bfloat16),
+        "indices": indices_in_kvcache.contiguous(),
     }
 
 

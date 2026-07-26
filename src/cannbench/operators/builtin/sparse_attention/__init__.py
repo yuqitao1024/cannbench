@@ -333,6 +333,27 @@ def _build_profile_kernel_selection(ctx: ProfileKernelSelectionContext):
         return ProfileKernelSelection(
             kernel_name_patterns=("sparse_attention", "aten_dsa_sparse_attention")
         )
+    if ctx.backend == "nvidia" and ctx.implementation == "cuda_library":
+        return ProfileKernelSelection(
+            aggregate_across_files=True,
+            nvtx_range="cannbench_sparse_attention_dynamic",
+        )
+    if ctx.backend == "ascend" and ctx.implementation == "vllm_ascend":
+        return ProfileKernelSelection(
+            kernel_name_patterns=(
+                "sparseflashattention",
+                "asstrided",
+                "transpose",
+                "slice",
+                "contiguous",
+                "cat",
+                "cast",
+                "log",
+                "add",
+            ),
+            launch_count=64,
+            aggregate_across_files=True,
+        )
     return ProfileKernelSelection(kernel_name_patterns=("sparse", "attention"))
 
 

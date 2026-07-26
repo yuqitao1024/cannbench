@@ -50,6 +50,145 @@ class _FakeTorch:
         return _FakeTensor((len(values),), values)
 
 
+@pytest.mark.parametrize(
+    ("phase", "deep_gemm_op"),
+    (
+        ("prefill", "fp8_mqa_logits"),
+        ("decode", "fp8_paged_mqa_logits"),
+    ),
+)
+def test_prepare_indexer_keeps_static_kv_outside_repeated_calls(
+    monkeypatch, phase, deep_gemm_op
+):
+    adapter = _reload_adapter()
+    calls = []
+    static_kwargs = {"kv": "static-kv"}
+    dynamic_kwargs = {"q": "dynamic-q", "weights": "dynamic-weights"}
+    static_helper = f"_prepare_deep_gemm_{phase}_indexer_kwargs"
+    dynamic_helper = f"_dynamic_deep_gemm_{phase}_indexer_kwargs"
+    monkeypatch.setattr(
+        adapter,
+        static_helper,
+        lambda *args: calls.append("prepare-static") or static_kwargs,
+    )
+    monkeypatch.setattr(
+        adapter,
+        dynamic_helper,
+        lambda *args: calls.append("prepare-dynamic") or dynamic_kwargs,
+    )
+    deep_gemm = SimpleNamespace(
+        **{
+            deep_gemm_op: lambda **kwargs: calls.append(
+                (deep_gemm_op, kwargs)
+            )
+            or "logits"
+        }
+    )
+    monkeypatch.setattr(
+        adapter,
+        "_import_required",
+        lambda *args, **kwargs: deep_gemm,
+    )
+    monkeypatch.setattr(
+        adapter,
+        "_lightning_indexer_topk",
+        lambda kwargs, logits: calls.append(("topk", logits)) or "indices",
+    )
+
+    operator = adapter.prepare_lightning_indexer(
+        torch=object(),
+        payload={"phase": phase},
+        query="query",
+        keys="keys",
+        weights="weights",
+    )
+
+    assert calls == ["prepare-static"]
+    assert operator() == "indices"
+    assert operator() == "indices"
+    assert calls == [
+        "prepare-static",
+        "prepare-dynamic",
+        (deep_gemm_op, {**static_kwargs, **dynamic_kwargs}),
+        ("topk", "logits"),
+        "prepare-dynamic",
+        (deep_gemm_op, {**static_kwargs, **dynamic_kwargs}),
+        ("topk", "logits"),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("phase", "flash_mla_op"),
+    (
+        ("prefill", "flash_mla_sparse_fwd"),
+        ("decode", "flash_mla_with_kvcache"),
+    ),
+)
+def test_prepare_attention_keeps_static_kv_outside_repeated_calls(
+    monkeypatch, phase, flash_mla_op
+):
+    adapter = _reload_adapter()
+    calls = []
+    static_kwargs = {"kv": "static-kv"}
+    dynamic_kwargs = {"q": "dynamic-q", "indices": "dynamic-indices"}
+    static_helper = f"_prepare_flash_mla_{phase}_attention_kwargs"
+    dynamic_helper = f"_dynamic_flash_mla_{phase}_attention_kwargs"
+    monkeypatch.setattr(
+        adapter,
+        static_helper,
+        lambda *args: calls.append("prepare-static") or static_kwargs,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        adapter,
+        dynamic_helper,
+        lambda *args: calls.append("prepare-dynamic") or dynamic_kwargs,
+        raising=False,
+    )
+    flash_mla = SimpleNamespace(
+        **{
+            flash_mla_op: lambda **kwargs: calls.append(
+                (flash_mla_op, kwargs)
+            )
+            or "raw-result"
+        }
+    )
+    monkeypatch.setattr(
+        adapter,
+        "_import_required",
+        lambda *args, **kwargs: flash_mla,
+    )
+    monkeypatch.setattr(
+        adapter,
+        "_normalize_flash_mla_attention_result",
+        lambda kwargs, result, *, phase: calls.append(
+            ("normalize", result, phase)
+        )
+        or "normalized-result",
+    )
+
+    operator = adapter.prepare_sparse_attention(
+        torch=object(),
+        payload={"phase": phase},
+        query="query",
+        shared_kv="shared-kv",
+        indices="indices",
+    )
+
+    assert calls == ["prepare-static"]
+    assert operator() == "normalized-result"
+    assert operator() == "normalized-result"
+    assert calls == [
+        "prepare-static",
+        "prepare-dynamic",
+        (flash_mla_op, {**static_kwargs, **dynamic_kwargs}),
+        ("normalize", "raw-result", phase),
+        "prepare-dynamic",
+        (flash_mla_op, {**static_kwargs, **dynamic_kwargs}),
+        ("normalize", "raw-result", phase),
+    ]
+
+
 def test_flashmla_deepgemm_adapter_routes_decode_indexer_logits_through_topk(
     monkeypatch,
 ):

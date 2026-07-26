@@ -25,6 +25,34 @@ def _build_sparse_attention_vllm_callable(
     )
 
 
+@pytest.mark.parametrize(
+    "module_name",
+    (
+        "cannbench.operators.builtin.lightning_indexer.external",
+        "cannbench.operators.builtin.sparse_attention.external",
+    ),
+)
+def test_cuda_dynamic_callable_is_scoped_by_nvtx(module_name):
+    module = __import__(module_name, fromlist=["_with_cuda_nvtx_range"])
+    calls = []
+    torch = SimpleNamespace(
+        cuda=SimpleNamespace(
+            nvtx=SimpleNamespace(
+                range_push=lambda name: calls.append(("push", name)),
+                range_pop=lambda: calls.append("pop"),
+            )
+        )
+    )
+    operator = module._with_cuda_nvtx_range(
+        torch,
+        "dynamic-range",
+        lambda: calls.append("operator") or "result",
+    )
+
+    assert operator() == "result"
+    assert calls == [("push", "dynamic-range"), "operator", "pop"]
+
+
 def test_ascend_vllm_sparse_attention_uses_sparse_flash_attention_for_v32(
     monkeypatch,
 ):
@@ -39,6 +67,21 @@ def test_ascend_vllm_sparse_attention_uses_sparse_flash_attention_for_v32(
 
         def reshape(self, *shape):
             self.shape = shape[0] if len(shape) == 1 else shape
+            return self
+
+        def permute(self, *dims):
+            self.shape = tuple(self.shape[index] for index in dims)
+            return self
+
+        def __getitem__(self, key):
+            last = key[-1]
+            if isinstance(last, slice):
+                start = last.start or 0
+                stop = last.stop or self.shape[-1]
+                return FakeTensor(self.name, (*self.shape[:-1], stop - start))
+            return self
+
+        def contiguous(self):
             return self
 
         def __add__(self, other):
@@ -68,6 +111,7 @@ def test_ascend_vllm_sparse_attention_uses_sparse_flash_attention_for_v32(
         layout_query="BSND",
         layout_kv="BSND",
         sparse_mode=3,
+        attention_mode=2,
         return_softmax_lse=False,
     ):
         calls["attention"] = {
@@ -85,6 +129,7 @@ def test_ascend_vllm_sparse_attention_uses_sparse_flash_attention_for_v32(
             "layout_query": layout_query,
             "layout_kv": layout_kv,
             "sparse_mode": sparse_mode,
+            "attention_mode": attention_mode,
             "return_softmax_lse": return_softmax_lse,
         }
         return (
@@ -143,17 +188,222 @@ def test_ascend_vllm_sparse_attention_uses_sparse_flash_attention_for_v32(
     assert lse.shape == (1, 1, 128)
     assert calls["attention"]["query"].shape == (1, 128, 512)
     assert calls["attention"]["query_rope"].shape == (1, 128, 64)
-    assert calls["attention"]["key"].shape == (1, 16, 1, 512)
-    assert calls["attention"]["key_rope"].shape == (1, 16, 1, 64)
-    assert calls["attention"]["value"].shape == (1, 16, 1, 512)
+    assert calls["attention"]["key"].shape == (16, 1, 512)
+    assert calls["attention"]["key_rope"].shape == (16, 1, 64)
+    assert calls["attention"]["value"].shape == (16, 1, 512)
     assert calls["attention"]["sparse_indices"].shape == (1, 1, 4)
-    assert calls["attention"]["block_table"].shape == (1, 1)
+    assert calls["attention"]["block_table"] is None
     assert calls["attention"]["actual_seq_lengths_query"].shape == (1,)
     assert calls["attention"]["actual_seq_lengths_kv"].shape == (1,)
     assert calls["attention"]["scale_value"] == pytest.approx(576**-0.5)
     assert calls["attention"]["layout_query"] == "TND"
-    assert calls["attention"]["layout_kv"] == "PA_BSND"
+    assert calls["attention"]["layout_kv"] == "TND"
+    assert calls["attention"]["attention_mode"] == 2
     assert calls["attention"]["return_softmax_lse"] is True
+
+
+def test_ascend_vllm_v32_attention_lowers_dynamic_inputs_per_call(monkeypatch):
+    import cannbench.operators.builtin.sparse_attention.external as external
+
+    calls: list[object] = []
+
+    class FakeTensor:
+        def __init__(self, shape=()):
+            self.shape = shape
+
+        def reshape(self, *shape):
+            self.shape = shape[0] if len(shape) == 1 else shape
+            return self
+
+        def permute(self, *dims):
+            self.shape = tuple(self.shape[index] for index in dims)
+            return self
+
+        def __getitem__(self, key):
+            last = key[-1]
+            if isinstance(last, slice):
+                start = last.start or 0
+                stop = last.stop or self.shape[-1]
+                return FakeTensor((*self.shape[:-1], stop - start))
+            return self
+
+        def contiguous(self):
+            return self
+
+        def __add__(self, other):
+            del other
+            return FakeTensor(self.shape)
+
+    class FakeTorch:
+        int32 = "int32"
+
+        @staticmethod
+        def log(tensor):
+            return tensor
+
+    payload = {
+        "query_shape": (1, 1, 1, 576),
+        "shared_kv_shape": (1, 1, 16, 576),
+        "value_head_dim": 512,
+        "indices_shape": (1, 1, 1),
+        "query": tuple(0.0 for _ in range(576)),
+        "shared_kv": tuple(0.0 for _ in range(16 * 576)),
+        "indices": (0,),
+    }
+    monkeypatch.setattr(
+        external,
+        "materialize_sparse_attention_inputs",
+        lambda *args, **kwargs: payload,
+    )
+    monkeypatch.setattr(
+        external,
+        "_lower_vllm_sparse_attention_query",
+        lambda *args, **kwargs: calls.append("lower-query")
+        or (FakeTensor((1, 1, 512)), FakeTensor((1, 1, 64))),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        external,
+        "_lower_vllm_sparse_attention_indices",
+        lambda *args, **kwargs: calls.append("lower-indices")
+        or FakeTensor((1, 1, 1)),
+        raising=False,
+    )
+    backend = SimpleNamespace(
+        _ascend_custom_ops=lambda torch: SimpleNamespace(
+            npu_sparse_flash_attention=lambda **kwargs: calls.append(
+                ("attention", kwargs["query"], kwargs["sparse_indices"])
+            )
+            or (
+                FakeTensor((1, 1, 512)),
+                FakeTensor((1, 1, 1)),
+                FakeTensor((1, 1, 1)),
+            )
+        ),
+        _tensor=lambda *args, **kwargs: FakeTensor(),
+    )
+    case = SimpleNamespace(
+        batch=1,
+        query_heads=1,
+        kv_heads=1,
+        query_tokens=1,
+        context_tokens=16,
+        selected_tokens=1,
+        qk_head_dim=576,
+        value_head_dim=512,
+        shared_kv=True,
+    )
+    ctx = SimpleNamespace(
+        backend=backend,
+        torch=FakeTorch(),
+        request=SimpleNamespace(dtype="bfloat16", seed=0),
+        case=case,
+        bound_inputs={},
+        device="npu",
+        dtype="bfloat16",
+    )
+
+    operator = external.build_vllm_ascend_callable(ctx)
+
+    assert calls == []
+    operator()
+    operator()
+    assert [entry if isinstance(entry, str) else entry[0] for entry in calls] == [
+        "lower-query",
+        "lower-indices",
+        "attention",
+        "lower-query",
+        "lower-indices",
+        "attention",
+    ]
+
+
+def test_ascend_vllm_v32_attention_falls_back_to_torch_npu_op(monkeypatch):
+    import cannbench.operators.builtin.sparse_attention.external as external
+
+    calls = []
+
+    class FakeTensor:
+        def __init__(self, shape=()):
+            self.shape = shape
+
+        def reshape(self, *shape):
+            self.shape = shape[0] if len(shape) == 1 else shape
+            return self
+
+        def __add__(self, other):
+            del other
+            return FakeTensor(self.shape)
+
+    class FakeTorch:
+        int32 = "int32"
+
+        @staticmethod
+        def log(tensor):
+            return tensor
+
+    payload = {
+        "query_shape": (1, 1, 1, 576),
+        "shared_kv_shape": (1, 1, 16, 576),
+        "value_head_dim": 512,
+        "indices_shape": (1, 1, 1),
+        "query": tuple(0.0 for _ in range(576)),
+        "shared_kv": tuple(0.0 for _ in range(16 * 576)),
+        "indices": (0,),
+    }
+    monkeypatch.setattr(
+        external,
+        "materialize_sparse_attention_inputs",
+        lambda *args, **kwargs: payload,
+    )
+    monkeypatch.setattr(
+        external,
+        "_lower_vllm_sparse_attention_query",
+        lambda *args, **kwargs: (FakeTensor(), FakeTensor()),
+    )
+    monkeypatch.setattr(
+        external,
+        "_lower_vllm_sparse_attention_indices",
+        lambda *args, **kwargs: FakeTensor(),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "torch_npu",
+        SimpleNamespace(
+            npu_sparse_flash_attention=lambda **kwargs: calls.append(kwargs)
+            or (FakeTensor(), FakeTensor(), FakeTensor())
+        ),
+    )
+    ctx = SimpleNamespace(
+        backend=SimpleNamespace(
+            _ascend_custom_ops=lambda torch: SimpleNamespace(),
+            _tensor=lambda *args, **kwargs: FakeTensor(),
+        ),
+        torch=FakeTorch(),
+        request=SimpleNamespace(dtype="bfloat16", seed=0),
+        case=SimpleNamespace(
+            batch=1,
+            query_heads=1,
+            kv_heads=1,
+            query_tokens=1,
+            context_tokens=16,
+            selected_tokens=1,
+            qk_head_dim=576,
+            value_head_dim=512,
+            shared_kv=True,
+        ),
+        bound_inputs={},
+        device="npu",
+        dtype="bfloat16",
+    )
+
+    operator = external.build_vllm_ascend_callable(ctx)
+    operator()
+
+    assert len(calls) == 1
+    assert calls[0]["layout_query"] == "TND"
+    assert calls[0]["layout_kv"] == "TND"
+    assert calls[0]["block_table"] is None
 
 
 def test_ascend_vllm_sparse_attention_uses_bound_indexer_output(monkeypatch):
@@ -167,6 +417,21 @@ def test_ascend_vllm_sparse_attention_uses_bound_indexer_output(monkeypatch):
 
         def reshape(self, *shape):
             self.shape = shape[0] if len(shape) == 1 else shape
+            return self
+
+        def permute(self, *dims):
+            self.shape = tuple(self.shape[index] for index in dims)
+            return self
+
+        def __getitem__(self, key):
+            last = key[-1]
+            if isinstance(last, slice):
+                start = last.start or 0
+                stop = last.stop or self.shape[-1]
+                return FakeTensor((*self.shape[:-1], stop - start))
+            return self
+
+        def contiguous(self):
             return self
 
         def __add__(self, other):
@@ -242,6 +507,21 @@ def test_ascend_vllm_v32_prefill_allocates_large_inputs_on_device(monkeypatch):
             self.shape = shape[0] if len(shape) == 1 else shape
             return self
 
+        def permute(self, *dims):
+            self.shape = tuple(self.shape[index] for index in dims)
+            return self
+
+        def __getitem__(self, key):
+            last = key[-1]
+            if isinstance(last, slice):
+                start = last.start or 0
+                stop = last.stop or self.shape[-1]
+                return FakeTensor((*self.shape[:-1], stop - start))
+            return self
+
+        def contiguous(self):
+            return self
+
         def __add__(self, other):
             del other
             return FakeTensor(self.shape)
@@ -303,12 +583,11 @@ def test_ascend_vllm_v32_prefill_allocates_large_inputs_on_device(monkeypatch):
     assert output.shape == (1, 4096, 128, 512)
     assert lse.shape == (1, 4096, 128)
     assert allocations == [
-        ((4096, 128, 512), "bfloat16"),
-        ((4096, 128, 64), "bfloat16"),
-        ((256, 128, 1, 512), "bfloat16"),
-        ((256, 128, 1, 64), "bfloat16"),
-        ((256, 128, 1, 512), "bfloat16"),
-        ((4096, 1, 2048), "int32"),
+        ((1, 128, 4096, 576), "bfloat16"),
+        ((32768, 1, 512), "bfloat16"),
+        ((32768, 1, 64), "bfloat16"),
+        ((32768, 1, 512), "bfloat16"),
+        ((1, 4096, 2048), "int32"),
     ]
 
 
@@ -400,6 +679,80 @@ def test_ascend_vllm_adapter_calls_torch_npu_lightning_indexer(monkeypatch):
     assert calls[0]["sparse_mode"] == 3
     assert calls[0]["actual_seq_lengths_query"].shape == 2
     assert calls[0]["actual_seq_lengths_key"].shape == 2
+
+
+def test_ascend_vllm_indexer_lowers_dynamic_inputs_per_call(monkeypatch):
+    import cannbench.operators.builtin.lightning_indexer.external as external
+
+    calls: list[object] = []
+
+    class FakeTensor:
+        def reshape(self, *shape):
+            del shape
+            return self
+
+    payload = {
+        "query": (0.0,),
+        "keys": (0.0,),
+        "weights": (0.0,),
+        "query_shape": (1, 1, 1, 1),
+        "key_shape": (1, 1, 1),
+        "weight_shape": (1, 1, 1),
+        "query_lens": (1,),
+        "context_lens": (1,),
+        "cu_seqlens_q": (0, 1),
+        "cu_seqlens_kv": (0, 1),
+        "top_k": 1,
+    }
+    monkeypatch.setattr(
+        external,
+        "materialize_lightning_indexer_inputs",
+        lambda *args, **kwargs: payload,
+    )
+    monkeypatch.setattr(
+        external,
+        "_lower_vllm_indexer_query",
+        lambda *args, **kwargs: calls.append("lower-query") or "query-tnd",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        external,
+        "_lower_vllm_indexer_weights",
+        lambda *args, **kwargs: calls.append("lower-weights") or "weights-tnd",
+        raising=False,
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "torch_npu",
+        SimpleNamespace(
+            npu_lightning_indexer=lambda **kwargs: calls.append(
+                ("indexer", kwargs["query"], kwargs["weights"])
+            )
+            or FakeTensor()
+        ),
+    )
+    ctx = SimpleNamespace(
+        backend=SimpleNamespace(_tensor=lambda *args, **kwargs: FakeTensor()),
+        torch=SimpleNamespace(int32="int32"),
+        request=SimpleNamespace(dtype="bfloat16", seed=0),
+        case=SimpleNamespace(),
+        device="npu",
+        dtype="bfloat16",
+    )
+
+    operator = external.build_vllm_ascend_callable(ctx)
+
+    assert calls == []
+    operator()
+    operator()
+    assert calls == [
+        "lower-query",
+        "lower-weights",
+        ("indexer", "query-tnd", "weights-tnd"),
+        "lower-query",
+        "lower-weights",
+        ("indexer", "query-tnd", "weights-tnd"),
+    ]
 
 
 def test_ascend_vllm_adapter_ignores_quant_lightning_indexer(monkeypatch):
@@ -888,6 +1241,74 @@ def test_nvidia_cuda_library_uses_external_lightning_indexer_adapter(monkeypatch
     assert calls[0]["weights"].shape == (2, 1, 2)
 
 
+def test_nvidia_cuda_library_prepares_lightning_indexer_once(monkeypatch):
+    import cannbench.operators.builtin.lightning_indexer.external as external
+
+    calls: list[object] = []
+
+    class FakeTensor:
+        def reshape(self, *shape):
+            del shape
+            return self
+
+    payload = {
+        "query": (0.0,),
+        "keys": (0.0,),
+        "weights": (0.0,),
+        "query_shape": (1, 1, 1, 1),
+        "key_shape": (1, 1, 1),
+        "weight_shape": (1, 1, 1),
+        "top_k": 1,
+        "score_scale": 1.0,
+        "tie_policy": "equivalent_score_set",
+    }
+    monkeypatch.setattr(
+        external,
+        "materialize_lightning_indexer_inputs",
+        lambda *args, **kwargs: payload,
+    )
+
+    def prepare_lightning_indexer(**kwargs):
+        calls.append(("prepare", kwargs))
+
+        def operator():
+            calls.append("dynamic")
+            return "indices"
+
+        return operator
+
+    monkeypatch.setitem(
+        sys.modules,
+        "fake_cuda_dsa_adapter",
+        SimpleNamespace(
+            lightning_indexer=lambda **kwargs: pytest.fail(
+                "legacy adapter entry point must not run"
+            ),
+            prepare_lightning_indexer=prepare_lightning_indexer,
+        ),
+    )
+    monkeypatch.setenv("CANNBENCH_CUDA_DSA_ADAPTER", "fake_cuda_dsa_adapter")
+    ctx = SimpleNamespace(
+        backend=SimpleNamespace(_tensor=lambda *args, **kwargs: FakeTensor()),
+        torch=SimpleNamespace(),
+        request=SimpleNamespace(dtype="bfloat16", seed=0),
+        case=SimpleNamespace(),
+        device="cuda",
+        dtype="bfloat16",
+    )
+
+    operator = external.build_cuda_library_callable(ctx)
+
+    assert [entry[0] for entry in calls] == ["prepare"]
+    assert operator() == "indices"
+    assert operator() == "indices"
+    assert [entry if isinstance(entry, str) else entry[0] for entry in calls] == [
+        "prepare",
+        "dynamic",
+        "dynamic",
+    ]
+
+
 def test_nvidia_cuda_library_uses_external_sparse_attention_adapter(monkeypatch):
     calls: list[dict[str, object]] = []
 
@@ -946,6 +1367,77 @@ def test_nvidia_cuda_library_uses_external_sparse_attention_adapter(monkeypatch)
     assert "keys" not in calls[0]
     assert "values" not in calls[0]
     assert calls[0]["indices"].shape == (2, 1, 4)
+
+
+def test_nvidia_cuda_library_prepares_sparse_attention_once(monkeypatch):
+    import cannbench.operators.builtin.sparse_attention.external as external
+
+    calls: list[object] = []
+
+    class FakeTensor:
+        def reshape(self, *shape):
+            del shape
+            return self
+
+    payload = {
+        "query": (0.0,),
+        "shared_kv": (0.0,),
+        "indices": (0,),
+        "query_shape": (1, 1, 1, 1),
+        "shared_kv_shape": (1, 1, 1, 1),
+        "indices_shape": (1, 1, 1),
+        "selected_tokens": 1,
+        "topk_lengths": (1,),
+        "softmax_scale": 1.0,
+        "causal": False,
+        "phase": "decode",
+    }
+    monkeypatch.setattr(
+        external,
+        "materialize_sparse_attention_inputs",
+        lambda *args, **kwargs: payload,
+    )
+
+    def prepare_sparse_attention(**kwargs):
+        calls.append(("prepare", kwargs))
+
+        def operator():
+            calls.append("dynamic")
+            return "output"
+
+        return operator
+
+    monkeypatch.setitem(
+        sys.modules,
+        "fake_cuda_dsa_adapter",
+        SimpleNamespace(
+            sparse_attention=lambda **kwargs: pytest.fail(
+                "legacy adapter entry point must not run"
+            ),
+            prepare_sparse_attention=prepare_sparse_attention,
+        ),
+    )
+    monkeypatch.setenv("CANNBENCH_CUDA_DSA_ADAPTER", "fake_cuda_dsa_adapter")
+    ctx = SimpleNamespace(
+        backend=SimpleNamespace(_tensor=lambda *args, **kwargs: FakeTensor()),
+        torch=SimpleNamespace(int32="int32"),
+        request=SimpleNamespace(dtype="bfloat16", seed=0),
+        case=SimpleNamespace(),
+        bound_inputs={},
+        device="cuda",
+        dtype="bfloat16",
+    )
+
+    operator = external.build_cuda_library_callable(ctx)
+
+    assert [entry[0] for entry in calls] == ["prepare"]
+    assert operator() == "output"
+    assert operator() == "output"
+    assert [entry if isinstance(entry, str) else entry[0] for entry in calls] == [
+        "prepare",
+        "dynamic",
+        "dynamic",
+    ]
 
 
 def test_nvidia_cuda_library_default_dsa_adapter_requires_flash_mla(monkeypatch):

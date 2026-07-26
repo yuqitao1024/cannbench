@@ -181,10 +181,13 @@ Lightning Indexer 调用 `torch_npu.npu_lightning_indexer`，使用 TND 布局�
 当前只保留 indices。
 
 V3.2 Sparse Attention 调用 `npu_sparse_flash_attention`。Adapter 将逻辑上的
-576 维 Q/K 拆成 512 维 NoPE 部分和 64 维 RoPE 部分，并将 KV 转换为分页布局。
+576 维 Q/K 拆成 512 维 NoPE 部分和 64 维 RoPE 部分。当前统一 output/LSE
+合同使用 TND KV 单次调用，因为 CANN 不支持 `PA_BSND` 在
+`return_softmax_lse=True` 时返回 LSE。
 
-这些 TND、分页 KV 和 NoPE/RoPE 拆分属于物理接口适配，不应改变逻辑算子
-语义。该路径目前最接近 V3.2 的 right-aligned causal 语义。
+这些 TND KV 和 NoPE/RoPE 拆分属于物理接口适配，不应改变逻辑算子语义。
+生产推理只需要 output 时仍可使用分页 KV，但不能把“paged output 一次 + TND
+LSE 一次”的重复计算计入统一单次性能结果。
 
 ### CUDA
 
@@ -203,7 +206,7 @@ FP8 cache 格式。FlashMLA 假定传入的 indices 已经满足有效范围，�
 以下物理差异是允许的：
 
 - SIMT 使用 Ascend Cube、UB 和 SIMT VF。
-- vLLM-Ascend 使用 TND、分页 KV 和 CANN 原生算子布局。
+- vLLM-Ascend 的统一 output/LSE 路径使用 TND 和 CANN 原生算子布局。
 - CUDA Indexer 和 Decode KV 内部使用 FP8，FlashMLA 使用自己的 cache 布局。
 - 三条路径的 kernel 数量和融合程度不同。
 

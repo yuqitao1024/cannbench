@@ -21,7 +21,10 @@ Lightning Indexer -> device indices -> Sparse Attention
 ### 计时内
 
 - 每个推理 step 都必须重新执行的 Query lowering。
-- CUDA Indexer 的 BF16 `Q_index` 到 FP8 的动态量化及 scale 生成。
+- CUDA Indexer 的 BF16 `Q_index` 到 FP8 的动态 cast。当前 DeepGEMM legacy
+  MQA 接口的 Q 不携带显式 scale；KV 的静态量化仍包含 scale 生成。
+- 每个推理 step 的动态 Indexer weights lowering；CUDA 的 BF16 到 FP32 转换
+  也在计时内。
 - vLLM-Ascend 对动态 Query 执行的 TND packing、NoPE/RoPE split 或 contiguous
   copy；纯 view/reshape 没有设备耗时。
 - Lightning Indexer 的 dot、ReLU、head weight、reduce 和 Top-K。
@@ -34,8 +37,8 @@ Lightning Indexer -> device indices -> Sparse Attention
 - case 解析、随机或确定性输入生成。
 - Host 到 Device 输入上传和输出 Device 到 Host 回读。
 - Tensor 分配以及 profiler 初始化。
-- Index KV cache 和 shared-KV cache 的 blocking、分页、NoPE/RoPE split、FP8
-  packing 及静态 scale 生成。
+- Index KV cache 和 shared-KV cache 的 blocking、TND/分页布局、NoPE/RoPE
+  split、FP8 packing 及静态 scale 生成。
 - block table、`cu_seqlens`、context length 和固定调度 metadata 的构造。
 - warmup、精度参考计算和结果比较。
 - Python/C++ Host launch 开销；正式指标保持为 profiler 观测到的设备时间。
@@ -62,15 +65,16 @@ Ascend SIMT
                                   -> [Q_attn BF16 fused CV Sparse Attention]
 
 vLLM-Ascend
-  OUT [Index-KV TND/page pack] [shared-KV page + NoPE/RoPE pack]
-   IN                          [dynamic Q_index TND pack]
+  OUT [Index-KV TND pack] [shared-KV TND + NoPE/RoPE pack]
+   IN                          [dynamic Q_index/weights TND pack]
                                   -> [npu_lightning_indexer + Top-K]
                                   -> [dynamic Q_attn TND + NoPE/RoPE lowering]
                                   -> [npu_sparse_flash_attention]
 
 CUDA
   OUT [Index-KV FP8 cache + scale] [FlashMLA KV cache FP8/BF16 pack]
-   IN                          [dynamic Q_index BF16 -> FP8 + scale]
+   IN                          [dynamic Q_index BF16 -> FP8 cast]
+                                  -> [dynamic weights BF16 -> FP32]
                                   -> [DeepGEMM logits]
                                   -> [torch.topk]
                                   -> [dynamic indices -> cache indices]
@@ -97,7 +101,8 @@ sequence metadata
 
 静态 `K_index` 可以在计时前转换成后端生产格式。动态 `Q_index` 必须从 BF16
 canonical tensor 开始计时；某后端不需要转换时没有额外成本，需要 FP8 或 TND
-lowering 时按实际设备执行计入。
+lowering 时按实际设备执行计入。weights 同样是每步动态输入，其布局转换和 CUDA
+BF16 到 FP32 转换也必须计入。
 
 Indexer latency 包含 Top-K。CUDA 的 DeepGEMM 只输出 logits，因此
 `torch.topk` 是 CUDA Indexer 合同的一部分，不能从 profile 中排除。
@@ -113,7 +118,7 @@ indices INT32 [B,Q,TopK]
 sequence metadata
 ```
 
-`shared_kv` 的分页、分块、FP8 cache 和静态 scale 都在计时前准备。`Q_attn`
+`shared_kv` 的 TND/分页布局、分块、FP8 cache 和静态 scale 都在计时前准备。`Q_attn`
 仍从 canonical BF16 tensor 开始计时；动态 TND packing、NoPE/RoPE split 或
 contiguous copy 计入对应后端。CUDA decode 根据本步 Top-K indices 生成
 FlashMLA cache indices 的转换也属于动态 Attention 路径。
@@ -141,11 +146,14 @@ Sparse Attention 为准备 bound input 而额外执行的一次 Indexer 重复�
 
 ### vLLM-Ascend
 
-- 静态 Index-KV、shared-KV 分页布局在 callable 构造阶段准备一次。
+- 静态 Index-KV、shared-KV TND 布局在 callable 构造阶段准备一次。
 - 动态 Query lowering 移入被测 callable；若 lowering 只是 view，不产生额外
   device latency。
 - profile 汇总动态 lowering kernel 和目标 CANN 算子，但不包含静态 cache
   packing。
+- 当前统一 output/LSE 合同使用一次 TND KV 调用；CANN 不支持
+  `PA_BSND + return_softmax_lse=True`，不得用 paged output 和 TND LSE 两次
+  Attention 调用拼接性能结果。
 
 ### CUDA
 
@@ -155,6 +163,9 @@ Sparse Attention 为准备 bound input 而额外执行的一次 Indexer 重复�
   被测路径内。
 - NCU 必须覆盖该组件完整动态 kernel 序列。远程执行必须遵守 operator plugin
   声明的 kernel selection 与 launch count，不能固定只抓第一个 launch。
+- CUDA 两个组件各自用 operator-local NVTX range 包住动态 closure。NCU 通过
+  plugin 声明的 range 采集范围内全部 kernel，不再用固定 launch-count 截断；
+  静态 cache preparation 位于 range 外。
 
 ## 框架边界
 

@@ -15,6 +15,7 @@ from cannbench.core.prepared_input import build_prepared_operator_input, write_p
 from cannbench.core.profile import (
     ProfileArtifacts,
     LocalDeviceProfileResult,
+    ncu_profile_options,
     read_device_profile,
 )
 from cannbench.core.result import OperatorBenchmarkResult, OperatorCase
@@ -37,12 +38,11 @@ def _subprocess_pythonpath() -> str:
 
 def _ascend_msprof_op_options(
     profile_dir: Path,
-    request: OperatorBenchmarkRequest,
+    kernel_selection,
 ) -> list[str]:
-    del request
     return [
         f"--output={profile_dir}",
-        f"--launch-count=10",
+        f"--launch-count={kernel_selection.launch_count or 10}",
     ]
 
 
@@ -95,7 +95,6 @@ class NvidiaBackend(TorchOperatorBackend):
             implementation=request.implementation,
             implementation_version=request.implementation_version,
         )
-        launch_count = kernel_selection.launch_count or 1
         with tempfile.TemporaryDirectory(prefix="cannbench-ncu-") as temp_dir_name:
             temp_dir = Path(temp_dir_name)
             prepared_path = temp_dir / "prepared.json"
@@ -109,8 +108,7 @@ class NvidiaBackend(TorchOperatorBackend):
                 "--target-processes",
                 "all",
                 "--force-overwrite",
-                "--launch-count",
-                str(launch_count),
+                *ncu_profile_options(kernel_selection),
                 "--export",
                 str(profile_dir / "ncu-report"),
                 sys.executable,
@@ -245,6 +243,13 @@ class AscendBackend(TorchOperatorBackend):
             seed=request.seed,
             input_bindings=request.input_bindings,
         )
+        kernel_selection = get_operator_plugin(
+            request.op
+        ).profile_kernel_selection(
+            backend="ascend",
+            implementation=request.implementation,
+            implementation_version=request.implementation_version,
+        )
         with tempfile.TemporaryDirectory(prefix="cannbench-msprof-") as temp_dir_name:
             temp_dir = Path(temp_dir_name)
             prepared_path = temp_dir / "prepared.json"
@@ -256,7 +261,7 @@ class AscendBackend(TorchOperatorBackend):
             command = [
                 "msprof",
                 "op",
-                *_ascend_msprof_op_options(profile_dir, request),
+                *_ascend_msprof_op_options(profile_dir, kernel_selection),
                 sys.executable,
                 "-m",
                 "cannbench",
@@ -301,11 +306,7 @@ class AscendBackend(TorchOperatorBackend):
             summary = read_device_profile(
                 profile_dir,
                 backend="ascend",
-                kernel_selection=get_operator_plugin(request.op).profile_kernel_selection(
-                    backend="ascend",
-                    implementation=request.implementation,
-                    implementation_version=request.implementation_version,
-                ),
+                kernel_selection=kernel_selection,
             )
             profile = ProfileArtifacts(
                 device_name=self._device_name(torch, self._device(torch)),

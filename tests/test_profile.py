@@ -4,10 +4,23 @@ import pytest
 
 from cannbench.core.profile import (
     ProfileKernelSelection,
+    ncu_profile_options,
     read_device_profile,
     write_device_profile_summary,
 )
 from cannbench.operators import get_operator_plugin
+
+
+def test_ncu_profile_options_select_nvtx_range_without_launch_limit():
+    options = ncu_profile_options(
+        ProfileKernelSelection(nvtx_range="cannbench_operator_dynamic")
+    )
+
+    assert options == (
+        "--nvtx",
+        "--nvtx-include",
+        "cannbench_operator_dynamic/",
+    )
 
 
 def test_read_ascend_msprof_csv_duration_summary(tmp_path):
