@@ -40,8 +40,9 @@ PV: [64, S_tile] x [S_tile, 512]
 3. MIX task 的两个 AIV 都参与稳定、对称的有效工作。
 4. QK 和 PV 都使用 Cube/Tensor API MMAD。
 5. softmax 使用在线归一化，最终直接输出 attention output 和 LSE。
-6. legacy 路径继续作为默认值；`head64` 只能通过算子本地实验参数显式启用。
-7. launch plan 从一开始保留 selected-token partition 字段，为后续方案 B 复用。
+6. 每个 AIV 使用 1024 个 SIMT threads，不沿用 CUDA 风格的 256-thread 配置。
+7. legacy 路径继续作为默认值；`head64` 只能通过算子本地实验参数显式启用。
+8. launch plan 从一开始保留 selected-token partition 字段，为后续方案 B 复用。
 
 ## 2. 非目标
 
@@ -55,8 +56,9 @@ PV: [64, S_tile] x [S_tile, 512]
 - 不优化 prefill。
 - 不修改公共 CLI、Backend、Workflow 或全局配置。
 - 不在 benchmark 前将 `head64` 设为默认。
-- 除 kernel-local Mutex 所需的 `basic_api/kernel_common.h` 外，不新增 C++ Basic
-  API、`SetFlag`、`WaitFlag`、`PipeBarrier` 或跨核 flag 依赖。
+- 除 kernel-local Mutex 所需的 `basic_api/kernel_common.h`，以及 AIC/AIV握手所需的
+  `basic_api/kernel_operator_block_sync_intf.h` 外，不新增 C++ Basic API、
+  `SetFlag`、`WaitFlag` 或 `PipeBarrier` 依赖。
 
 ## 3. 实现策略
 
@@ -227,6 +229,18 @@ AIV0: local heads 0..31
 AIV1: local heads 32..63
 ```
 
+每个 AIV 启动 1024 个 SIMT threads，并固定采用下面的二维逻辑映射：
+
+```text
+threads_per_head = 32
+local_head = threadIdx.x / 32     # 0..31
+lane = threadIdx.x % 32           # 0..31
+```
+
+因此一个 AIV 的 32 个 Head 各由 32 个线程协作。对 `S_tile=64`，每个线程处理两个
+selected positions；对 `Dv=512`，每个线程处理 16 个 Value dimensions。不得将
+线程数降为 256，也不得参考 CUDA warp-block 配置直接套用线程组织。
+
 每个 AIV 维护自己的：
 
 - 32 行 online max。
@@ -329,9 +343,16 @@ Q、K、probability 和 V 在 L1 中按阶段复用。最终布局以 `dav-3510`
 
 ## 8. 同步边界
 
-新 Head64 kernel 只允许 kernel-local `AscendC::Mutex::Lock/Unlock` 协调同一个 MIX
-task 内的 AIC/AIV流水。允许包含 `basic_api/kernel_common.h` 以取得 Mutex 定义；
-不得从该 header 使用其他 Basic API。
+新 Head64 kernel 使用两类同步：
+
+1. `AscendC::CrossCoreSetFlag/CrossCoreWaitFlag` 使用 mode 2，负责同一个 MIX task
+   内 AIC 与两个 AIV 的阶段握手。
+2. kernel-local `AscendC::Mutex::Lock/Unlock` 负责 AIC或AIV内部异步流水对同一
+   buffer 的复用顺序。
+
+允许包含 `basic_api/kernel_operator_block_sync_intf.h` 取得 CrossCore API，允许
+包含 `basic_api/kernel_common.h` 取得 Mutex 定义。不得从这两个 header 使用其他
+Basic API。
 
 逻辑阶段为：
 
@@ -341,6 +362,21 @@ SCORE_READY
 P_READY
 PV_READY
 ```
+
+所有阶段都成对调用 set/wait。mode 2 的 flag ID 合法范围是 `0..15`；高级 Matmul
+占用 `0..7`，`SyncAll` 保留 `11..14`，因此 Head64 只使用 `8` 和 `9`：
+
+```cpp
+constexpr uint8_t kAivToAicReady = 8;
+constexpr uint8_t kAicToAivReady = 9;
+```
+
+`8` 只用于 AIV 到 AIC，`9` 只用于 AIC 到 AIV。每次复用前必须先完成同方向的完整
+set/wait 配对，任一时刻每个方向最多只有一个未消费事件。不要使用 `16` 以上的 ID；
+mode 2 只编码低 4 bit，这类值会折返并与其他 ID 冲突。
+
+mode 2 的语义为：两个 AIV 都上报后 AIC 才继续，或者 AIC 上报后两个 AIV 才继续。
+方案 A 不使用 mode 0 做全核同步，也不让不同逻辑 task 共享状态。
 
 第一版使用单 buffer 顺序状态机：
 
@@ -355,10 +391,8 @@ gather 与当前 tile 的 QK/softmax/PV 重叠。
 
 - AIC 之间共享状态。
 - 使用 GM flag 自旋同步。
-- 新增 `CrossCoreSetFlag/CrossCoreWaitFlag`。
 - 新增 `SetFlag/WaitFlag/PipeBarrier`。
-- 引入 `basic_api/kernel_common.h` 之外的 Basic API header 或
-  `kernel_operator.h`。
+- 引入上述两个例外之外的 Basic API header 或 `kernel_operator.h`。
 
 ## 9. 文件边界
 
@@ -406,7 +440,7 @@ src/cannbench/operators/builtin/dsa_decode/
 - Host launch plan。
 - `8` 个逻辑 task 的映射测试。
 - 新 device ELF 构建入口。
-- 双 AIV和 kernel-local Mutex 的最小编译验证。
+- 1024-thread 双 AIV、CrossCore mode 2 和 kernel-local Mutex 的最小编译验证。
 - 新源码 API 边界测试。
 
 ### 10.2 检查点二：Head64 QK
@@ -479,10 +513,13 @@ pytest -q
 源码契约测试需要确认：
 
 - 新 kernel 的 Basic API header 只能有提供 Mutex 的
-  `basic_api/kernel_common.h`。
-- 新 kernel 从该 header 只能调用 `AscendC::Mutex::Lock/Unlock`。
+  `basic_api/kernel_common.h` 和提供 CrossCore API 的
+  `basic_api/kernel_operator_block_sync_intf.h`。
+- 新 kernel 从这两个 header 只能调用 `AscendC::Mutex::Lock/Unlock` 和
+  `AscendC::CrossCoreSetFlag/CrossCoreWaitFlag`。
 - 新 kernel 不调用禁止的同步 API。
 - 两个 AIV均有有效分支，不存在 `subBlockIdx != 0` 直接退出。
+- SIMT entry 使用 `__launch_bounds__(1024)` 和 `dim3(1024, 1, 1)`。
 - QK 和 PV 使用 Tensor API MMAD。
 - Host 根据 shape 计算 task count，不写死 V3.2 的 `8`。
 - 默认参数仍选择 legacy。
