@@ -204,11 +204,38 @@ def test_lightning_indexer_fused_families_use_cube_scores_in_shared_ub():
         assert "MakeMmad(" in source
         assert "Fixpipe<float, float" in source
         assert "TPosition::LCM" in source
-        assert "kCrossCoreSyncMode = 4" in source
+        assert "kCrossCoreSyncMode = 2" in source
         assert "CrossCoreSetFlag<kCrossCoreSyncMode" in source
         assert "CrossCoreWaitFlag<kCrossCoreSyncMode" in source
         assert "for (int32_t row_start = 0; row_start < total_rows;" not in source
         assert "linear_index += used_core_num" in source
+
+
+def test_lightning_indexer_fused_families_sync_aic_with_both_aivs():
+    base = Path(
+        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
+        "aten_dsa_lightning_indexer/csrc/simt"
+    )
+
+    for family in ("4x64", "64x128"):
+        source = (base / f"lightning_indexer_fused_family_{family}.asc").read_text(
+            encoding="utf-8"
+        )
+        aiv = source.split(
+            f"__aicore__ inline void lightning_indexer_fused_family_{family}_aiv(",
+            1,
+        )[1].split(
+            f"__global__ __aicore__ void lightning_indexer_fused_family_{family}_kernel(",
+            1,
+        )[0]
+
+        assert "kCrossCoreSyncMode = 2" in source
+        assert "kScoreReadyFlag = 0" in source
+        assert "kScoreReadyFlagBase" not in source
+        assert "kScoreReadyFlag + block_idx" not in source
+        assert "if (AscendC::GetSubBlockIdx() != 0)" not in aiv
+        assert "CrossCoreSetFlag<kCrossCoreSyncMode, PIPE_V>(kScoreReadyFlag)" in aiv
+        assert "CrossCoreWaitFlag<kCrossCoreSyncMode, PIPE_V>(kScoreReadyFlag)" in aiv
 
 
 def test_lightning_indexer_prefill_family_64x128_bridge_extracts_tile_helper():
