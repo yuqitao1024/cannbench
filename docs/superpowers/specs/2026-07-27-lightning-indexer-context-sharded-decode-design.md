@@ -67,6 +67,7 @@ The new path must:
 - preserve the current public custom-op and plugin interfaces
 - preserve the target case's TopK score-set semantics
 - use both AIVs in each `1:2` mixed-kernel group
+- launch new SIMT VF and TopK blocks with 1024 threads
 - avoid synchronization between different logical tasks or AI Core groups
 - retain the current implementation for every non-target shape
 - remain entirely inside the `lightning_indexer` operator package
@@ -229,6 +230,12 @@ readback.
 The arithmetic and conversion order must remain aligned with the current
 kernel so that context sharding changes scheduling, not score semantics.
 
+The postprocess VF uses `__launch_bounds__(1024)` and launches
+`dim3(1024, 1, 1)`. Threads stride by `blockDim.x`; the configuration follows
+Ascend SIMT practice rather than the current CUDA-like 256-thread constant.
+It may be reduced only if the remote compiler resource report demonstrates
+register or stack spilling at 1024 threads.
+
 ## Score Workspace
 
 The workspace shape and type are:
@@ -249,6 +256,9 @@ and records all raw-launch tensor storage on the current NPU stream.
 
 The second launch is a SIMT-only TopK kernel with four logical blocks, one per
 `(batch, query)` row.
+
+Each TopK block also launches 1024 SIMT threads with
+`__launch_bounds__(1024)`.
 
 Each block keeps 2048 best candidates and merges 2048 workspace scores at a
 time. The existing 4096-entry UB capacity can hold:
@@ -307,6 +317,7 @@ backends, or global framework tests.
 - task count is 16 and mapping is `(batch, shard)`
 - Query atom M is 128
 - synchronization uses mode 2 and flag 0
+- score postprocess and TopK use 1024 SIMT threads
 - both AIVs execute the handshake
 - sub-AIV 0 and sub-AIV 1 select different Query halves
 - the score workspace is BF16 `[B, Q, C]`
