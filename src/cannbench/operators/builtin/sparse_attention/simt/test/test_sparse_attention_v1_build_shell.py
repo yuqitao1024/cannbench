@@ -16,6 +16,26 @@ def _bridge_source() -> str:
     ).read_text(encoding="utf-8")
 
 
+def _head64_source() -> str:
+    path = (
+        Path(__file__).parents[1]
+        / "v1/aten_dsa_sparse_attention/csrc/simt"
+        / "sparse_attention_head64_hd576.asc"
+    )
+    assert path.is_file(), f"missing Head64 device source: {path}"
+    return path.read_text(encoding="utf-8")
+
+
+def _head64_plan_source() -> str:
+    path = (
+        Path(__file__).parents[1]
+        / "v1/aten_dsa_sparse_attention/csrc/simt"
+        / "sparse_attention_head64_plan.h"
+    )
+    assert path.is_file(), f"missing Head64 plan header: {path}"
+    return path.read_text(encoding="utf-8")
+
+
 def _function_body(source: str, start_marker: str, end_marker: str) -> str:
     return source.split(start_marker, 1)[1].split(end_marker, 1)[0]
 
@@ -26,6 +46,91 @@ def test_sparse_attention_custom_op_schema_keeps_legacy_tuning_defaults():
     assert "int64_t head_tile" in source
     assert "int64_t selected_partitions" in source
     assert "int head_tile=1, int selected_partitions=1" in source
+
+
+def test_sparse_attention_head64_sources_are_registered():
+    project = Path(__file__).parents[1] / "v1" / "aten_dsa_sparse_attention"
+    setup_source = (Path(__file__).parents[1] / "v1" / "setup.py").read_text()
+
+    assert (project / "csrc/simt/sparse_attention_head64_plan.h").is_file()
+    assert (project / "csrc/simt/sparse_attention_head64_hd576.asc").is_file()
+    assert "libsparse_attention_head64_hd576_kernel.so" in setup_source
+    assert "sparse_attention_head64_hd576.asc" in setup_source
+
+
+def test_sparse_attention_head64_plan_keeps_dynamic_task_mapping():
+    plan = _head64_plan_source()
+    bridge = _bridge_source()
+    device = _head64_source()
+
+    assert "struct SparseAttentionHead64Plan" in plan
+    assert "constexpr int32_t kHead64PhysicalAicLimit = 32;" in plan
+    assert "make_sparse_attention_head64_plan(" in bridge
+    assert (
+        "query.size(0) * query.size(2) * head_group_count * "
+        "selected_partitions"
+    ) in bridge
+    assert "std::min<int64_t>(task_count, kHead64PhysicalAicLimit)" in bridge
+    assert "task_id % plan.head_group_count" in device
+    assert "(task_id / plan.head_group_count) % plan.query_tokens" in device
+    assert "task_id / (plan.head_group_count * plan.query_tokens)" in device
+
+
+def test_sparse_attention_head64_host_validates_explicit_route():
+    source = _bridge_source()
+
+    assert "const bool use_head64 = head_tile == 64 && selected_partitions == 1;" in source
+    assert 'TORCH_CHECK(phase == "decode", "head64 requires phase=decode")' in source
+    assert 'TORCH_CHECK(family == "family_hd576", "head64 requires family_hd576")' in source
+    assert "indices.size(2) <= 2048" in source
+
+
+def test_sparse_attention_head64_source_uses_only_allowed_basic_api():
+    source = _head64_source()
+    basic_headers = {
+        line.strip()
+        for line in source.splitlines()
+        if line.strip().startswith('#include "basic_api/')
+    }
+
+    assert basic_headers == {
+        '#include "basic_api/kernel_common.h"',
+        '#include "basic_api/kernel_operator_block_sync_intf.h"',
+    }
+    assert '#include "kernel_operator.h"' not in source
+    assert "AscendC::SetFlag" not in source
+    assert "AscendC::WaitFlag" not in source
+    assert "AscendC::PipeBarrier" not in source
+    assert "AscendC::SyncAll" not in source
+
+
+def test_sparse_attention_head64_uses_1024_thread_dual_aiv_contract():
+    source = _head64_source()
+
+    assert "__launch_bounds__(1024)" in source
+    assert "dim3(1024, 1, 1)" in source
+    assert "GetSubBlockIdx()" in source
+    assert "GetSubBlockIdx() != 0" not in source
+    assert "threadIdx.x / 32" in source
+    assert "threadIdx.x % 32" in source
+    assert "constexpr uint8_t kAivToAicReady = 8;" in source
+    assert "constexpr uint8_t kAicToAivReady = 9;" in source
+    assert "CrossCoreSetFlag<2" in source
+    assert "CrossCoreWaitFlag<2" in source
+
+
+def test_sparse_attention_head64_reads_subblock_outside_simt_vf():
+    source = _head64_source()
+    vf_body = _function_body(
+        source,
+        "head64_probe_vf(",
+        "__global__ __aicore__ void sparse_attention_head64_probe_kernel(",
+    )
+
+    assert "uint32_t subblock_index" in vf_body
+    assert "GetSubBlockIdx()" not in vf_body
+    assert "const uint32_t subblock_index = AscendC::GetSubBlockIdx();" in source
+    assert "probe, task_id, subblock_index" in source
 
 
 def test_sparse_attention_host_uses_right_aligned_absolute_query_start():
