@@ -320,6 +320,46 @@ csrc/attention/vllm_quant_lightning_indexer_metadata/op_kernel_aicpu/
 workspace、最终 merge 和 GM 流量一起测量。如果仍采用单 Query task，逻辑任务
 数还要再乘 `Q`，但两个 Query 会重复读取同一批 Key。
 
+### 7.3 理论成本模型能确定什么
+
+当前 case 的总点积量与拆分方式无关：
+
+```text
+B * Q * C * G * D
+= 2 * 2 * 32768 * 64 * 128
+= 1,073,741,824 MAC
+```
+
+拆分方案改变的是每个任务的工作量、有效 AIC 数、Key 读取量和 TopK 归约量。
+可以用下面的近似模型比较方案：
+
+```text
+T_total ~= T_AIC_score
+          + T_AIV_postprocess
+          + T_local_topk
+          + T_final_merge
+          + T_GM
+          + T_launch_and_sync
+```
+
+理论分析可以排除明显不合理的分片大小，并给出计算量、数据量和并行度上下界，
+但不能单独确定最终最快方案，原因包括：
+
+- 16 AIC 和 32 AIC 的实际 MMAD 效率不等于理论峰值的固定比例。
+- 两个独立 Query 重复读取 Key 时，实际 GM 流量取决于缓存命中和并发行为。
+- `4096 -> 2048` 局部 TopK 与更大候选集合 final merge 的硬件效率不同。
+- MIX kernel 中 AIC、AIV、GM 搬运和同步可能重叠，也可能互相等待。
+- Q atom 对 M 维形状、L0/L1 占用和流水深度的影响需要在目标设备确认。
+
+因此应先用理论模型限定候选，再用少量硬件微基准校准以下参数：
+
+1. Q=1 和 Q=2 atom 的单核 MMAD 吞吐。
+2. 16 AIC 和 32 AIC 的纯 score 计算耗时。
+3. 16384 和 32768 候选的 TopK/final merge 耗时。
+
+校准后可以将实测吞吐和带宽代入模型，再决定最终默认配置，而不必长期维护三套
+独立实现。
+
 ## 8. CannBench 候选优化方向
 
 以下只是下一轮讨论的候选项，不是本文结论。
@@ -357,15 +397,64 @@ query_atom_size = 2
 - 端到端 `dsa_decode` 延迟；
 - `B/Q/C/K` 改变后的稳定性。
 
+### 8.4 三组对照方案
+
+第一轮实现和测试保留以下三组配置。表中的 Key 读取量是假设 BF16 Key、跨任务
+没有缓存复用时的上界；merge 候选数是 4 个 Query row 的总数。
+
+| 方案 | Query 组织 | Context shard | 逻辑 AIC task | 每任务 MAC | Key 读取上界 | merge 候选数 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| A：高并行 atom | Q=2 atom | 2048 | 32 | 33,554,432 | 约 16 MiB | 131072 |
+| B：低归约 atom | Q=2 atom | 4096 | 16 | 67,108,864 | 约 16 MiB | 65536 |
+| C：单 Query 对照 | Q=1 task | 4096 | 32 | 33,554,432 | 约 32 MiB | 65536 |
+
+三组方案验证不同瓶颈：
+
+- A 对比 B：32 AIC 的 score 并行收益能否覆盖增加的 final merge 成本。
+- B 对比 C：Q atom 的 Key 复用能否覆盖任务数从 32 降到 16 的利用率损失。
+- A 对比 C：在相同 32 个逻辑任务下，Key 复用与不同 merge 规模的综合影响。
+
+建议同时记录一个不含 TopK 的 score-only 微基准，以便把 AIC 扩展效率与归约成本
+分开分析。
+
+### 8.5 三组方案的代码复用约束
+
+三组方案不应复制三套设备核函数。目标结构是一套共享的 score、局部候选生成和
+final merge 设备函数，差异由 host 根据测试参数计算并传入 launch plan：
+
+```text
+host inputs:
+    B, Q, valid_context_lengths, top_k
+    query_atom_size        # 1 or 2
+    context_shard_size     # 2048 or 4096
+
+host-derived launch plan:
+    query_atom_count
+    context_shard_count per batch/row
+    task_count and task-to-(batch, atom, shard) mapping
+    score loop start/end
+    local candidate count
+    final reduce group start/count
+    workspace offsets
+```
+
+kernel 只消费 launch plan 和张量地址，不根据“方案 A/B/C”名称分支。循环次数、
+是否需要局部筛选、final reduce 的输入范围以及尾部分片，都由通用参数推导。host
+测试通过同一个入口改变 `query_atom_size` 和 `context_shard_size`，从而形成三组
+可直接对照的 profiler 数据。
+
+第一轮只需要覆盖当前 V3.2 decode case 使用的 Q atom size 1/2、Context shard
+2048/4096 和 `K=2048`，不提前设计任意 atom size 或任意 shard size 的泛化接口。
+
 新的 Ascend SIMT 设计还必须遵守本仓库 API 边界：算子源码只使用 C API、Tensor
 API 和 SIMT API；仅在片内流水无法表达时使用 kernel-local Mutex，不新增 C++
 Basic API 或跨核同步依赖。
 
 ## 9. 下一轮需要决定的问题
 
-1. 优化目标是只针对 V3.2 `B=2,Q=2,C=32768,K=2048`，还是覆盖其他 decode case。
-2. 第一版目标核数选 8、16 还是 32，是否需要运行时自适应。
-3. 两个 Query 是否组成一个计算 atom 来复用 Key。
+1. 第一轮以 V3.2 `B=2,Q=2,C=32768,K=2048` 为校准 case，何时扩展到其他 decode case。
+2. 三组对照完成后，默认选择固定配置还是根据 `B/Q/C/K` 运行时自适应。
+3. Q atom 在设备侧采用 M=128 一次 MMAD，还是复用 Key 后执行两次 M=64 MMAD。
 4. TopK 采用完整 score 加独立 kernel，还是局部 TopK 加最终 merge。
 5. 最终 merge 由第二个 kernel 完成，还是由同一 MIX kernel 的 AIV阶段完成。
 6. 如何让 `1:2` MIX 配置中的两个 AIV都有稳定、对称的有效工作。
