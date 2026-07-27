@@ -102,6 +102,7 @@ def test_sparse_attention_head64_source_uses_only_allowed_basic_api():
     assert "AscendC::WaitFlag" not in source
     assert "AscendC::PipeBarrier" not in source
     assert "AscendC::SyncAll" not in source
+    assert "AscendC::InitSocState" not in source
 
 
 def test_sparse_attention_head64_uses_1024_thread_dual_aiv_contract():
@@ -131,6 +132,146 @@ def test_sparse_attention_head64_reads_subblock_outside_simt_vf():
     assert "GetSubBlockIdx()" not in vf_body
     assert "const uint32_t subblock_index = AscendC::GetSubBlockIdx();" in source
     assert "probe, task_id, subblock_index" in source
+
+
+def test_sparse_attention_head64_qk_uses_m64_tensor_api():
+    source = _head64_source()
+
+    assert "launch_sparse_attention_head64_qk_hd576_bf16" in source
+    assert "sparse_attention_head64_qk_kernel" in source
+    assert "MmadParams" in source
+    assert "kHead64Tile" in source
+    assert "params.m = 64" in source
+    assert "params.n = current_selected" in source
+    assert "params.k = current_k" in source
+    assert "MakeMmad(" in source
+
+
+def test_sparse_attention_head64_qk_synchronizes_mmad_and_fixpipe():
+    source = _head64_source()
+    aic = _function_body(
+        source,
+        "sparse_attention_head64_qk_aic(",
+        "__global__ __aicore__ void sparse_attention_head64_qk_kernel(",
+    )
+
+    assert "asc_sync_notify(PIPE_FIX, PIPE_M, EVENT_ID0);" in aic
+    assert "asc_sync_wait(PIPE_FIX, PIPE_M, EVENT_ID0);" in aic
+    assert "asc_sync_notify(PIPE_M, PIPE_FIX, EVENT_ID0);" in aic
+    assert "asc_sync_wait(PIPE_M, PIPE_FIX, EVENT_ID0);" in aic
+
+    mm_to_fix = aic.index("asc_sync_notify(PIPE_M, PIPE_FIX, EVENT_ID0);")
+    fix_wait = aic.index("asc_sync_wait(PIPE_M, PIPE_FIX, EVENT_ID0);")
+    fix_copy = aic.index("Copy(copy_l0c_to_gm, gm_score_tile, l0_scores);")
+    assert mm_to_fix < fix_wait < fix_copy
+
+
+def test_sparse_attention_head64_qk_synchronizes_l0_inputs_and_mmad():
+    source = _head64_source()
+    aic = _function_body(
+        source,
+        "sparse_attention_head64_qk_aic(",
+        "__global__ __aicore__ void sparse_attention_head64_qk_kernel(",
+    )
+
+    assert "asc_sync_notify(PIPE_M, PIPE_MTE1, EVENT_ID1);" in aic
+    assert "asc_sync_wait(PIPE_M, PIPE_MTE1, EVENT_ID1);" in aic
+    assert "asc_sync_notify(PIPE_MTE1, PIPE_M, EVENT_ID1);" in aic
+    assert "asc_sync_wait(PIPE_MTE1, PIPE_M, EVENT_ID1);" in aic
+
+    release_wait = aic.index("asc_sync_wait(PIPE_M, PIPE_MTE1, EVENT_ID1);")
+    copy_a = aic.index("Copy(copy_l1_to_l0a, l0_query, l1_query_tile);")
+    copy_b = aic.index("Copy(copy_l1_to_l0b, l0_keys, l1_keys);")
+    ready_notify = aic.index("asc_sync_notify(PIPE_MTE1, PIPE_M, EVENT_ID1);")
+    ready_wait = aic.index("asc_sync_wait(PIPE_MTE1, PIPE_M, EVENT_ID1);")
+    mm = aic.index("Mmad(mm.with(params), l0_scores, l0_query, l0_keys);")
+    assert release_wait < copy_a < copy_b < ready_notify < ready_wait < mm
+
+
+def test_sparse_attention_head64_qk_kernel_avoids_const_bf16_launch_abi():
+    source = _head64_source()
+    kernel = _function_body(
+        source,
+        "sparse_attention_head64_qk_kernel(",
+        "}  // namespace",
+    )
+
+    assert "__gm__ bfloat16_t* query" in kernel
+    assert "__gm__ bfloat16_t* keys" in kernel
+    assert "const_cast<bfloat16_t*>(query)" in source
+    assert "const_cast<bfloat16_t*>(keys)" in source
+
+
+def test_sparse_attention_hd512_postprocess_avoids_const_bf16_launch_abi():
+    source = Path(
+        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+        "aten_dsa_sparse_attention/csrc/simt/"
+        "sparse_attention_postprocess_family_hd512.asc"
+    ).read_text(encoding="utf-8")
+    kernel = _function_body(
+        source,
+        "sparse_attention_postprocess_family_hd512_decode_direct_kernel(",
+        "} // namespace",
+    )
+
+    assert "__gm__ bfloat16_t* values" in kernel
+    assert "const_cast<bfloat16_t*>(values)" in source
+
+
+def test_sparse_attention_head64_qk_maps_dynamic_tasks():
+    source = _head64_source()
+    normalized = " ".join(source.split())
+
+    assert "logical_task += plan.used_core_num" in source
+    assert "plan.task_count" in source
+    assert "plan.head_group_count" in source
+    assert "plan.query_tokens" in source
+    assert "plan.selected_tokens" in source
+    assert (
+        "static_cast<int64_t>(logical_task) * kHead64Tile * "
+        "plan.selected_tokens"
+    ) in normalized
+
+
+def test_sparse_attention_head64_qk_uses_both_aiv_for_query_and_key_pack():
+    source = _head64_source()
+
+    assert "head64_query_pack_vf" in source
+    assert "head64_key_pack_vf" in source
+    assert "const uint32_t sub_block = AscendC::GetSubBlockIdx();" in source
+    assert "const uint32_t head_begin = sub_block * 32;" in source
+    assert "const uint32_t selected_begin = sub_block * 32;" in source
+    assert "CrossCoreSetFlag<2" in source
+    assert "CrossCoreWaitFlag<2" in source
+
+
+def test_sparse_attention_head64_qk_has_staged_host_route():
+    source = _bridge_source()
+
+    assert "sparse_attention_forward_family_hd576_head64(" in source
+    assert "launch_sparse_attention_head64_qk_hd576_bf16(" in source
+    assert "{plan.task_count, kHead64Tile, plan.selected_tokens}" in source
+    assert ".view({plan.batch_size, plan.query_tokens, plan.query_heads," in source
+    assert ".permute({0, 2, 1, 3})" in source
+    assert "run_sparse_attention_family_hd512_decode_direct_tile(" in source
+
+
+def test_sparse_attention_head64_reduced_accuracy_covers_boundaries():
+    path = Path(__file__).with_name("head64_reduced_accuracy.py")
+
+    assert path.is_file()
+    source = path.read_text(encoding="utf-8")
+    for case_name in (
+        "valid_s64",
+        "tail_s70",
+        "invalid_causal_s70",
+        "all_invalid_s17",
+    ):
+        assert case_name in source
+    assert "atol=0.05" in source
+    assert "rtol=0.05" in source
+    assert "torch.count_nonzero(actual_output)" in source
+    assert "torch.isneginf(actual_lse).all()" in source
 
 
 def test_sparse_attention_host_uses_right_aligned_absolute_query_start():
