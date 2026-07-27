@@ -28,6 +28,42 @@ def test_lightning_indexer_build_isolates_each_fused_family_device_library():
     assert "glob.glob(os.path.join(EXTENSIONS_DIR, \"simt\", \"*.asc\"))" not in setup_py
 
 
+def test_context_sharded_family_64x128_builds_a_separate_device_library():
+    setup_py = Path(
+        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/setup.py"
+    ).read_text(encoding="utf-8")
+
+    assert "lightning_indexer_context_sharded_family_64x128.asc" in setup_py
+    assert (
+        '"liblightning_indexer_context_sharded_family_64x128_kernel.so"'
+        in setup_py
+    )
+
+
+def test_context_sharded_family_64x128_uses_q2_atom_and_both_aivs():
+    source = Path(
+        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
+        "aten_dsa_lightning_indexer/csrc/simt/"
+        "lightning_indexer_context_sharded_family_64x128.asc"
+    ).read_text(encoding="utf-8")
+
+    for expected in (
+        "kQueryAtomSize = 2",
+        "kContextShardSize = 4096",
+        "kContextShardCount = 8",
+        "kLogicalTaskCount = 16",
+        "kThreadsPerBlock = 1024",
+        "__launch_bounds__(kThreadsPerBlock)",
+        "params.m = 128",
+        "kCrossCoreSyncMode = 2",
+        "kScoreReadyFlag = 0",
+        "query_in_atom = static_cast<int32_t>(AscendC::GetSubBlockIdx())",
+        "context_start = shard_index * kContextShardSize",
+        "context_index >= valid_context_lengths[row_index]",
+    ):
+        assert expected in source
+
+
 def test_lightning_indexer_simt_v1_register_has_python_module_entry():
     source = Path(
         "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"

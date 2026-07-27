@@ -30,6 +30,11 @@ KERNEL_LIBRARIES = {
     "liblightning_indexer_family_64x128_kernel.so": os.path.join(
         EXTENSIONS_DIR, "simt", "lightning_indexer_fused_family_64x128.asc"
     ),
+    "liblightning_indexer_context_sharded_family_64x128_kernel.so": os.path.join(
+        EXTENSIONS_DIR,
+        "simt",
+        "lightning_indexer_context_sharded_family_64x128.asc",
+    ),
 }
 
 
