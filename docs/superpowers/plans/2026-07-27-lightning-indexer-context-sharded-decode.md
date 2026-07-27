@@ -44,7 +44,7 @@
 - Consumes: BF16 `query [2,2,64,128]`, `keys [2,32768,128]`, `weights [2,2,64]`; int32 lengths `[2,2]`.
 - Produces: `launch_lightning_indexer_context_sharded_family_64x128_bfloat16(..., bfloat16_t* reduced_scores, aclrtStream)` writing `[2,2,32768]`.
 
-- [ ] **Step 1: Write the failing source test**
+- [x] **Step 1: Write the failing source test**
 
 ```python
 def test_context_sharded_family_64x128_uses_q2_atom_and_both_aivs():
@@ -73,7 +73,7 @@ def test_context_sharded_family_64x128_uses_q2_atom_and_both_aivs():
 Extend the setup test to require the new `.asc` source and
 `liblightning_indexer_context_sharded_family_64x128_kernel.so`.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run:
 
@@ -83,7 +83,7 @@ pytest -q src/cannbench/operators/builtin/lightning_indexer/simt/test/test_light
 
 Expected: FAIL because the source and build entry do not exist.
 
-- [ ] **Step 3: Implement the fixed-shape kernel and launcher**
+- [x] **Step 3: Implement the fixed-shape kernel and launcher**
 
 Use these constants and mapping:
 
@@ -145,7 +145,7 @@ asc_vf_call<lightning_indexer_context_sharded_postprocess_vf>(
 Export a launcher that always uses `<<<kLogicalTaskCount, 0, stream>>>`. Add its
 source/library pair to `KERNEL_LIBRARIES` in `setup.py`.
 
-- [ ] **Step 4: Verify GREEN locally and compile remotely**
+- [x] **Step 4: Verify GREEN locally and compile remotely**
 
 Run the selected source tests, then sync to
 `/tmp/cannbench-indexer-sync-iCNM54` and run:
@@ -161,7 +161,7 @@ Expected: tests PASS and the new device library compiles with exit 0. If the
 compiler reports stack use above zero, capture `--cce-res-usage` output before
 changing 1024 threads.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/cannbench/operators/builtin/lightning_indexer/simt/v1/setup.py \
@@ -184,7 +184,7 @@ git commit -m "feat(lightning-indexer): add context-sharded score kernel"
 - Consumes: Task 1 launcher and BF16 reduced scores `[2,2,32768]`.
 - Produces: `launch_lightning_indexer_topk_scores_bfloat16(...)` and a host helper returning int32 `[2,2,2048]`.
 
-- [ ] **Step 1: Write failing TopK and bridge tests**
+- [x] **Step 1: Write failing TopK and bridge tests**
 
 ```python
 def test_context_sharded_topk_uses_1024_threads_and_2048_score_tiles():
@@ -217,12 +217,12 @@ def test_context_sharded_bridge_launches_score_before_topk():
 
 Also assert exact dtype/dimension predicates occur before the old family helper.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run the build-shell test with `-k 'context_sharded or topk_scores'`. Expected:
 FAIL because the TopK source and bridge helper do not exist.
 
-- [ ] **Step 3: Implement the 1024-thread TopK kernel**
+- [x] **Step 3: Implement the 1024-thread TopK kernel**
 
 ```cpp
 constexpr int32_t kRowCount = 4;
@@ -240,7 +240,7 @@ for 16 rounds, uses score-descending/index-ascending comparison, and writes the
 first 2048 indices. Mark the SIMT entry `__launch_bounds__(1024)` and export a
 launcher using `<<<kRowCount, kDynamicUbufBytes, stream>>>`.
 
-- [ ] **Step 4: Implement bridge allocation, launch order, and exact dispatch**
+- [x] **Step 4: Implement bridge allocation, launch order, and exact dispatch**
 
 ```cpp
 auto reduced_scores = at::empty(
@@ -262,7 +262,7 @@ Select only when original dtype and all target dimensions match. Do not inspect
 length values on host. Record all input, workspace, and output storage on the
 current NPU stream.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 Run the complete build-shell test and `pytest -q`. Expected: no failures. Then:
 
@@ -286,7 +286,7 @@ git commit -m "feat(lightning-indexer): add context score TopK path"
 - Consumes: registered two-launch custom op from Task 2.
 - Produces: automated exact-shape, asymmetric-length, and repeated-launch coverage.
 
-- [ ] **Step 1: Add the exact target-shape test**
+- [x] **Step 1: Add the exact target-shape test**
 
 Use existing torch/custom-op/NPU availability guards, then create:
 
@@ -304,13 +304,13 @@ Compute the PyTorch reduced scores, mask
 scores with `torch.equal`. Assert `[2,2,2048]`, int32, and that Query 0 never
 selects context index 32767.
 
-- [ ] **Step 2: Add repeated-launch coverage**
+- [x] **Step 2: Add repeated-launch coverage**
 
 Call the exact custom op 20 times using the same tensors, synchronize after the
 loop, and assert every output gathers the same reference score set. This test
 catches mode-2 flag counter imbalance and deadlock across launches.
 
-- [ ] **Step 3: Verify local skip and remote PASS**
+- [x] **Step 3: Verify local skip and remote PASS**
 
 Run locally:
 
@@ -323,7 +323,7 @@ Expected: clean SKIP without torch/NPU. Sync the worktree to
 path, and run the same selection remotely. Expected: both tests PASS and the
 extension path is inside the temporary directory.
 
-- [ ] **Step 4: Run remote operator regression and commit**
+- [x] **Step 4: Run remote operator regression and commit**
 
 ```bash
 /root/miniconda3/bin/python -m pytest -q \
@@ -352,14 +352,14 @@ git commit -m "test(lightning-indexer): validate context-sharded decode"
 - Consumes: corrected baseline `d608c0b` and Task 3 candidate.
 - Produces: measured default-path decision and reproducible operator-local documentation.
 
-- [ ] **Step 1: Prepare isolated baseline and candidate builds**
+- [x] **Step 1: Prepare isolated baseline and candidate builds**
 
 Create two remote directories with
 `mktemp -d /tmp/cannbench-indexer-bench-XXXXXX`. Sync `d608c0b` to baseline and
 current HEAD to candidate. Build each extension in place with the same CANN,
 Python, `NPU_ARCH=dav-3510`, and `ASCEND_VISIBLE_DEVICES=0` settings.
 
-- [ ] **Step 2: Measure identical inputs**
+- [x] **Step 2: Measure identical inputs**
 
 In separate Python processes, use seed 7 and Task 3 tensors. Run five warmups
 and 30 synchronized samples:
@@ -383,20 +383,20 @@ print(json.dumps({
 Capture compiler resource output for both 1024-thread entries. A nonzero stack
 size triggers investigation before any thread-count change.
 
-- [ ] **Step 3: Apply the default-path gate**
+- [x] **Step 3: Apply the default-path gate**
 
 If candidate median is lower, keep the Task 2 exact dispatch. If not, keep both
 internal kernels but make the predicate false so production calls remain on
 the corrected baseline. Rerun bridge source tests after either decision.
 
-- [ ] **Step 4: Document measured results**
+- [x] **Step 4: Document measured results**
 
 In `simt/README.md`, record device, target shape, baseline commit, warmups,
 sample count, both medians, candidate/baseline ratio, 1024-thread resource
 result, and whether the new path is enabled. Do not present the earlier 52.287
 ms cold validation launch as benchmark data.
 
-- [ ] **Step 5: Run final verification**
+- [x] **Step 5: Run final verification**
 
 ```bash
 pytest -q
@@ -409,7 +409,7 @@ Expected: full suite passes, diff check is empty, and the search shows no new
 public-layer operator branch. Rebuild the final candidate remotely and rerun
 all operator-local tests with no failures.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/cannbench/operators/builtin/lightning_indexer/simt/README.md \
