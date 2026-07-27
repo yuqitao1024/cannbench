@@ -64,6 +64,90 @@ def test_context_sharded_family_64x128_uses_q2_atom_and_both_aivs():
         assert expected in source
 
 
+def test_context_sharded_topk_builds_a_separate_device_library():
+    setup_py = Path(
+        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/setup.py"
+    ).read_text(encoding="utf-8")
+
+    assert "lightning_indexer_topk_scores.asc" in setup_py
+    assert '"liblightning_indexer_topk_scores_kernel.so"' in setup_py
+
+
+def test_context_sharded_topk_uses_1024_threads_and_2048_score_tiles():
+    source = Path(
+        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
+        "aten_dsa_lightning_indexer/csrc/simt/lightning_indexer_topk_scores.asc"
+    ).read_text(encoding="utf-8")
+
+    for expected in (
+        "kThreadsPerBlock = 1024",
+        "__launch_bounds__(kThreadsPerBlock)",
+        "kTopK = 2048",
+        "kScoreTileSize = 2048",
+        "kSortCapacity = 4096",
+        "kRowCount = 4",
+        "index < other_index",
+    ):
+        assert expected in source
+
+
+def test_context_sharded_bridge_launches_score_before_topk():
+    source = Path(
+        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
+        "aten_dsa_lightning_indexer/csrc/lightning_indexer.asc"
+    ).read_text(encoding="utf-8")
+    body = source.split(
+        "lightning_indexer_forward_decode_family_64x128_context_sharded_bfloat16(",
+        1,
+    )[1].split("\n}\n", 1)[0]
+
+    assert "{2, 2, 32768}" in body
+    assert "query.options().dtype(c10::kBFloat16)" in body
+    assert body.index("launch_lightning_indexer_context_sharded") < body.index(
+        "launch_lightning_indexer_topk_scores_bfloat16"
+    )
+    assert "{2, 2, 2048}" in body
+    for tensor in (
+        "query",
+        "keys",
+        "weights",
+        "valid_context_lengths",
+        "reduced_scores",
+        "output",
+    ):
+        assert f"record_tensor_on_stream({tensor}, npu_stream);" in body
+
+
+def test_context_sharded_bridge_dispatches_only_exact_bfloat16_decode_shape():
+    source = Path(
+        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
+        "aten_dsa_lightning_indexer/csrc/lightning_indexer.asc"
+    ).read_text(encoding="utf-8")
+    body = source.split(
+        'if (phase == "decode" && family == "family_64x128") {',
+        1,
+    )[1].split(
+        'if (phase == "decode" && family == "family_32x128") {',
+        1,
+    )[0]
+
+    for predicate in (
+        "query.scalar_type() == at::ScalarType::BFloat16",
+        "query.size(0) == 2",
+        "query.size(1) == 2",
+        "query.size(2) == 64",
+        "query.size(3) == 128",
+        "keys.size(1) == 32768",
+        "keys.size(2) == 128",
+        "top_k == 2048",
+    ):
+        assert predicate in body
+    assert body.index(
+        "lightning_indexer_forward_decode_family_64x128_context_sharded_bfloat16("
+    ) < body.index("lightning_indexer_forward_decode_family_64x128_float(")
+    assert ".item" not in body
+
+
 def test_lightning_indexer_simt_v1_register_has_python_module_entry():
     source = Path(
         "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"

@@ -35,6 +35,9 @@ KERNEL_LIBRARIES = {
         "simt",
         "lightning_indexer_context_sharded_family_64x128.asc",
     ),
+    "liblightning_indexer_topk_scores_kernel.so": os.path.join(
+        EXTENSIONS_DIR, "simt", "lightning_indexer_topk_scores.asc"
+    ),
 }
 
 
