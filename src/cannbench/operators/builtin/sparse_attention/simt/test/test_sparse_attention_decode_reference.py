@@ -34,14 +34,27 @@ def test_sparse_attention_forward_prefers_registered_custom_op_for_decode_family
     captured: dict[str, object] = {}
 
     def fake_custom_op(
-        query, shared_kv, indices, value_head_dim, phase, family, causal
+        query,
+        shared_kv,
+        indices,
+        value_head_dim,
+        phase,
+        family,
+        causal,
+        head_tile,
+        selected_partitions,
     ):
         del query, shared_kv, indices, value_head_dim
         captured["phase"] = phase
         captured["family"] = family
         captured["causal"] = causal
+        captured["tuning"] = (head_tile, selected_partitions)
         return "custom"
 
+    monkeypatch.delenv("CANNBENCH_SPARSE_ATTENTION_HEAD_TILE", raising=False)
+    monkeypatch.delenv(
+        "CANNBENCH_SPARSE_ATTENTION_SELECTED_PARTITIONS", raising=False
+    )
     monkeypatch.setattr(ops, "_load_registered_op", lambda: fake_custom_op, raising=False)
 
     actual = ops.sparse_attention_forward(
@@ -59,7 +72,66 @@ def test_sparse_attention_forward_prefers_registered_custom_op_for_decode_family
         "phase": "decode",
         "family": family,
         "causal": True,
+        "tuning": (1, 1),
     }
+
+
+def test_sparse_attention_forward_passes_head64_tuning(monkeypatch):
+    captured = {}
+
+    def fake_custom_op(*args):
+        captured["tuning"] = args[-2:]
+        return "custom"
+
+    monkeypatch.setenv("CANNBENCH_SPARSE_ATTENTION_HEAD_TILE", "64")
+    monkeypatch.setenv("CANNBENCH_SPARSE_ATTENTION_SELECTED_PARTITIONS", "1")
+    monkeypatch.setattr(ops, "_load_registered_op", lambda: fake_custom_op)
+
+    result = ops.sparse_attention_forward(
+        object(),
+        object(),
+        object(),
+        value_head_dim=512,
+        phase="decode",
+        family="family_hd576",
+        causal=True,
+    )
+
+    assert result == "custom"
+    assert captured["tuning"] == (64, 1)
+
+
+@pytest.mark.parametrize(
+    ("name", "value", "message"),
+    [
+        ("CANNBENCH_SPARSE_ATTENTION_HEAD_TILE", "abc", "must be an integer"),
+        ("CANNBENCH_SPARSE_ATTENTION_HEAD_TILE", "0", "must be positive"),
+        (
+            "CANNBENCH_SPARSE_ATTENTION_SELECTED_PARTITIONS",
+            "2",
+            "unsupported sparse_attention tuning",
+        ),
+    ],
+)
+def test_sparse_attention_forward_rejects_invalid_tuning(
+    monkeypatch, name, value, message
+):
+    monkeypatch.delenv("CANNBENCH_SPARSE_ATTENTION_HEAD_TILE", raising=False)
+    monkeypatch.delenv(
+        "CANNBENCH_SPARSE_ATTENTION_SELECTED_PARTITIONS", raising=False
+    )
+    monkeypatch.setenv(name, value)
+
+    with pytest.raises(RuntimeError, match=message):
+        ops.sparse_attention_forward(
+            object(),
+            object(),
+            object(),
+            value_head_dim=512,
+            phase="decode",
+            family="family_hd576",
+            causal=True,
+        )
 
 
 def _require_custom_sparse_attention_op():

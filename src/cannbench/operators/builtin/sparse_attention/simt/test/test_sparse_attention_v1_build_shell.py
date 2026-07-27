@@ -9,8 +9,23 @@ def _score_source(head_dim: int) -> str:
     ).read_text(encoding="utf-8")
 
 
+def _bridge_source() -> str:
+    return Path(
+        "src/cannbench/operators/builtin/sparse_attention/simt/v1/"
+        "aten_dsa_sparse_attention/csrc/sparse_attention.asc"
+    ).read_text(encoding="utf-8")
+
+
 def _function_body(source: str, start_marker: str, end_marker: str) -> str:
     return source.split(start_marker, 1)[1].split(end_marker, 1)[0]
+
+
+def test_sparse_attention_custom_op_schema_keeps_legacy_tuning_defaults():
+    source = _bridge_source()
+
+    assert "int64_t head_tile" in source
+    assert "int64_t selected_partitions" in source
+    assert "int head_tile=1, int selected_partitions=1" in source
 
 
 def test_sparse_attention_host_uses_right_aligned_absolute_query_start():

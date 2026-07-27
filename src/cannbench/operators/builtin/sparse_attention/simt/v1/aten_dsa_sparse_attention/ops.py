@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from importlib import import_module
+import os
 
 try:
     torch = import_module("torch")
@@ -12,6 +13,36 @@ __all__ = [
     "_prefill_reference",
     "_decode_reference",
 ]
+
+_HEAD_TILE_ENV = "CANNBENCH_SPARSE_ATTENTION_HEAD_TILE"
+_SELECTED_PARTITIONS_ENV = "CANNBENCH_SPARSE_ATTENTION_SELECTED_PARTITIONS"
+_SUPPORTED_TUNING = {(1, 1), (64, 1)}
+
+
+def _read_positive_int(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be an integer, got {raw!r}") from exc
+    if value <= 0:
+        raise RuntimeError(f"{name} must be positive, got {value}")
+    return value
+
+
+def _resolve_tuning() -> tuple[int, int]:
+    tuning = (
+        _read_positive_int(_HEAD_TILE_ENV, 1),
+        _read_positive_int(_SELECTED_PARTITIONS_ENV, 1),
+    )
+    if tuning not in _SUPPORTED_TUNING:
+        raise RuntimeError(
+            "unsupported sparse_attention tuning: "
+            f"head_tile={tuning[0]}, selected_partitions={tuning[1]}"
+        )
+    return tuning
 
 
 def sparse_attention_forward(
@@ -33,6 +64,7 @@ def sparse_attention_forward(
         "family_hd576",
     }:
         raise RuntimeError(f"unsupported sparse_attention family for custom op wrapper: {family}")
+    head_tile, selected_partitions = _resolve_tuning()
     custom_op = _load_registered_op()
     if custom_op is None:
         raise RuntimeError("aten_dsa_sparse_attention custom op is not registered")
@@ -44,6 +76,8 @@ def sparse_attention_forward(
         phase,
         family,
         causal,
+        head_tile,
+        selected_partitions,
     )
     if not isinstance(result, tuple):
         return result
