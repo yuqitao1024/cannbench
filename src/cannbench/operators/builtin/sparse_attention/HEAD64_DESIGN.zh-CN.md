@@ -55,7 +55,8 @@ PV: [64, S_tile] x [S_tile, 512]
 - 不优化 prefill。
 - 不修改公共 CLI、Backend、Workflow 或全局配置。
 - 不在 benchmark 前将 `head64` 设为默认。
-- 不新增 C++ Basic API、`SetFlag`、`WaitFlag`、`PipeBarrier` 或跨核 flag 依赖。
+- 除 kernel-local Mutex 所需的 `basic_api/kernel_common.h` 外，不新增 C++ Basic
+  API、`SetFlag`、`WaitFlag`、`PipeBarrier` 或跨核 flag 依赖。
 
 ## 3. 实现策略
 
@@ -329,7 +330,8 @@ Q、K、probability 和 V 在 L1 中按阶段复用。最终布局以 `dav-3510`
 ## 8. 同步边界
 
 新 Head64 kernel 只允许 kernel-local `AscendC::Mutex::Lock/Unlock` 协调同一个 MIX
-task 内的 AIC/AIV流水。
+task 内的 AIC/AIV流水。允许包含 `basic_api/kernel_common.h` 以取得 Mutex 定义；
+不得从该 header 使用其他 Basic API。
 
 逻辑阶段为：
 
@@ -355,7 +357,8 @@ gather 与当前 tile 的 QK/softmax/PV 重叠。
 - 使用 GM flag 自旋同步。
 - 新增 `CrossCoreSetFlag/CrossCoreWaitFlag`。
 - 新增 `SetFlag/WaitFlag/PipeBarrier`。
-- 为同步重新引入 `basic_api` 或 `kernel_operator.h`。
+- 引入 `basic_api/kernel_common.h` 之外的 Basic API header 或
+  `kernel_operator.h`。
 
 ## 9. 文件边界
 
@@ -475,7 +478,9 @@ pytest -q
 
 源码契约测试需要确认：
 
-- 新 kernel 不包含禁止的 Basic API header。
+- 新 kernel 的 Basic API header 只能有提供 Mutex 的
+  `basic_api/kernel_common.h`。
+- 新 kernel 从该 header 只能调用 `AscendC::Mutex::Lock/Unlock`。
 - 新 kernel 不调用禁止的同步 API。
 - 两个 AIV均有有效分支，不存在 `subBlockIdx != 0` 直接退出。
 - QK 和 PV 使用 Tensor API MMAD。
