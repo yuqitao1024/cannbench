@@ -170,19 +170,22 @@ The AIC loads both Query rows and arranges their heads as one M dimension:
 ```text
 M = Q * H = 2 * 64 = 128
 K = D = 128
-N = context_tile = 128
+N = context_tile = 32
 ```
 
-For every 128-token Key tile, one M=128 MMAD computes both Query rows. The Key
+For every 32-token Key tile, one M=128 MMAD computes both Query rows. The Key
 tile is loaded once and reused by the complete Query atom. The shared score
-layout is:
+layout produced for each AIV by dual-M Fixpipe is:
 
 ```text
-[query_in_atom=2, head=64, context_tile=128]
+[head=64, context_tile=32]
 ```
 
 The first 64 score rows belong to Query 0; the second 64 rows belong to Query
-1. This explicit layout lets the two AIVs consume disjoint halves.
+1. Fixpipe `dualDstCtl=1` routes those halves to sub-AIV 0 and sub-AIV 1 at the
+same UB offset. Each half is exactly 8 KiB. C310 mixed-kernel validation showed
+that offsets at or above 8 KiB trap with error 341, so a 128-token tile cannot
+be consumed directly even when the logical `LocalTensor` is declared larger.
 
 ## AIC/AIV Handshake
 
@@ -213,7 +216,7 @@ sub-AIV 0 -> Query 0
 sub-AIV 1 -> Query 1
 ```
 
-Each AIV processes its Query row over the 128 context positions in the shared
+Each AIV processes its Query row over the 32 context positions in the shared
 tile. For each position it:
 
 1. converts the MMAD result to BF16 as in the current kernel
@@ -316,6 +319,7 @@ backends, or global framework tests.
 - other metadata selects the current path
 - task count is 16 and mapping is `(batch, shard)`
 - Query atom M is 128
+- the context tile is 32 so each dual-M AIV destination is at most 8 KiB
 - synchronization uses mode 2 and flag 0
 - score postprocess and TopK use 1024 SIMT threads
 - both AIVs execute the handshake

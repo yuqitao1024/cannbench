@@ -92,7 +92,7 @@ constexpr int32_t kQueryAtomSize = 2;
 constexpr int32_t kHeadCount = 64;
 constexpr int32_t kHeadDim = 128;
 constexpr int32_t kContextCount = 32768;
-constexpr int32_t kContextTileSize = 128;
+constexpr int32_t kContextTileSize = 32;
 constexpr int32_t kContextShardSize = 4096;
 constexpr int32_t kContextShardCount = 8;
 constexpr int32_t kLogicalTaskCount = 16;
@@ -118,6 +118,10 @@ params.cmatrixInitVal = true;
 Mmad(mm.with(params), l0_scores, l0_query_atom, l0_keys);
 ```
 
+Use `dualDstCtl=1` so each AIV receives one 64-row Query half at UB offset 0.
+With N=32, each destination is `64 * 32 * sizeof(float) = 8 KiB`, matching the
+C310 mixed-kernel shared window verified on hardware.
+
 Both AIVs handshake before any Query-specific branch. Launch a 1024-thread VF
 on each AIV and preserve the current BF16 dot, ReLU, weighted-BF16, float-sum,
 final-BF16 order:
@@ -129,7 +133,7 @@ AscendC::CrossCoreSetFlag<kCrossCoreSyncMode, PIPE_V>(kScoreReadyFlag);
 AscendC::CrossCoreWaitFlag<kCrossCoreSyncMode, PIPE_V>(kScoreReadyFlag);
 asc_vf_call<lightning_indexer_context_sharded_postprocess_vf>(
     dim3(kThreadsPerBlock, 1, 1),
-    shared_scores + query_in_atom * kHeadCount * kContextTileSize,
+    shared_scores,
     weights,
     valid_context_lengths,
     reduced_scores,

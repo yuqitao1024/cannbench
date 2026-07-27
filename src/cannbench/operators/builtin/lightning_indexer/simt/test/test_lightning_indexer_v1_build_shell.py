@@ -49,6 +49,7 @@ def test_context_sharded_family_64x128_uses_q2_atom_and_both_aivs():
 
     for expected in (
         "kQueryAtomSize = 2",
+        "kContextTileSize = 32",
         "kContextShardSize = 4096",
         "kContextShardCount = 8",
         "kLogicalTaskCount = 16",
@@ -57,11 +58,17 @@ def test_context_sharded_family_64x128_uses_q2_atom_and_both_aivs():
         "params.m = 128",
         "kCrossCoreSyncMode = 2",
         "kScoreReadyFlag = 0",
+        "kSharedScoresEntries = kHeadCount * kContextTileSize",
+        "fixpipe_params.dualDstCtl = 1",
         "query_in_atom = static_cast<int32_t>(AscendC::GetSubBlockIdx())",
         "context_start = shard_index * kContextShardSize",
         "context_index >= valid_context_lengths[row_index]",
     ):
         assert expected in source
+    assert (
+        "shared_scores + query_in_atom * kHeadCount * kContextTileSize"
+        not in source
+    )
 
 
 def test_context_sharded_topk_builds_a_separate_device_library():
