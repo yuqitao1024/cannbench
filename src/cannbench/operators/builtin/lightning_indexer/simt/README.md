@@ -10,6 +10,24 @@ Fast-path families:
 
 Unsupported shapes use plugin-local fallback.
 
+## Context-sharded decode benchmark
+
+Measured on Atlas 350 (`dav-3510`, CANN 9.2.0) on July 27, 2026. The target
+shape was BF16 `B=2, Q=2, C=32768, H=64, D=128, K=2048`, with valid context
+lengths `[[32767, 32768], [32767, 32768]]` and seed 7. Each isolated build used
+5 warmups followed by 30 `perf_counter_ns` samples, synchronizing the NPU after
+every public custom-op call.
+
+| Path | Commit | Median | Min | Max |
+| --- | --- | ---: | ---: | ---: |
+| Corrected fused baseline | `d608c0b` | 46.7846 ms | 46.7764 ms | 47.5276 ms |
+| Context-sharded score + TopK | `8bac22a` | 2.1788 ms | 2.1745 ms | 2.2077 ms |
+
+The candidate/baseline median ratio is `0.04657`, or a `21.47x` speedup. The
+exact-shape context-sharded dispatch remains enabled. Both SIMT entries use
+1024 threads: the score VF reports 0 bytes of stack and 22 registers, while
+the TopK VF reports 0 bytes of stack and 24 registers.
+
 ## Realistic bf16 validation snapshot
 
 Status below reflects the current custom-op-supported realistic cases validated
