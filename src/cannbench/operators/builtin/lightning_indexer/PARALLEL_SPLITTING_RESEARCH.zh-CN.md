@@ -27,6 +27,8 @@ deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048
 
 需要区分：
 
+- 目标设备包含 32 个 AIC 和 64 个 AIV；对于 `KERNEL_TYPE_MIX_AIC_1_2`，
+  32 个 mixed task 才对应完整设备资源。
 - 逻辑任务数不等于物理 AIC、AIV 或 GPU SM 数。逻辑任务最终由设备调度到物理核。
 - host 设置的 `blockDim` 不等于有效工作核数。kernel 内部可以让多余的核直接退出。
 - `Q=2` 表示 kernel 收到两个已经存在的 Query 向量，不表示 Indexer 自己生成两个 token。
@@ -66,6 +68,10 @@ CannBench case 定义位于
 total_rows = batch_size * query_count;
 used_core_num = min(total_rows, kMaxUsedCoreNum);
 ```
+
+公共 fused 路径的 `kMaxUsedCoreNum` 当前为 32，SIMT VF 使用 1024 线程。
+V3.2 精确 decode case 则由独立的 Context-sharded 路径接管，其 16-task 数量来自
+`2 batch * 8 Context shard`，不是公共路径的硬件上限。
 
 源码位于
 [`lightning_indexer_fused_family_64x128.asc`](simt/v1/aten_dsa_lightning_indexer/csrc/simt/lightning_indexer_fused_family_64x128.asc)。

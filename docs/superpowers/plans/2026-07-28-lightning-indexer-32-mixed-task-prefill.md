@@ -15,7 +15,7 @@
 - Do not change CLI, core, shared backends, result schemas, or plugin boundaries.
 - The target has exactly 32 AICs and 64 AIVs; one `KERNEL_TYPE_MIX_AIC_1_2` task maps to one AIC and two AIVs.
 - Keep synchronization mode 2, flag 0, and both AIVs participating in the handshake.
-- Keep 1024 SIMT threads per AIV.
+- Keep 1024 SIMT threads per launched VF.
 - Do not change the 16-task context-sharded decode kernel.
 - Do not enable or modify the experimental two-Query-atom prefill candidate.
 - Compare against the exact 16-task msopprof kernel baseline of 11.218775 seconds.
@@ -24,8 +24,8 @@
 ## File Map
 
 - Modify `src/cannbench/operators/builtin/lightning_indexer/simt/test/test_lightning_indexer_v1_build_shell.py`: require 32 common fused tasks while preserving synchronization contracts.
-- Modify `src/cannbench/operators/builtin/lightning_indexer/simt/v1/aten_dsa_lightning_indexer/csrc/simt/lightning_indexer_fused_family_4x64.asc`: raise the common fused cap to 32.
-- Modify `src/cannbench/operators/builtin/lightning_indexer/simt/v1/aten_dsa_lightning_indexer/csrc/simt/lightning_indexer_fused_family_64x128.asc`: raise the common fused cap to 32.
+- Modify `src/cannbench/operators/builtin/lightning_indexer/simt/v1/aten_dsa_lightning_indexer/csrc/simt/lightning_indexer_fused_family_4x64.asc`: raise the common fused cap to 32 and use 1024 threads.
+- Modify `src/cannbench/operators/builtin/lightning_indexer/simt/v1/aten_dsa_lightning_indexer/csrc/simt/lightning_indexer_fused_family_64x128.asc`: raise the common fused cap to 32 and use 1024 threads.
 - Modify `src/cannbench/operators/builtin/lightning_indexer/simt/README.md`: correct hardware occupancy and record the 32-task measurements.
 - Modify `src/cannbench/operators/builtin/lightning_indexer/PARALLEL_SPLITTING_RESEARCH.zh-CN.md`: distinguish the 32-task hardware limit from decode's 16-task shard geometry.
 
@@ -40,7 +40,7 @@
 - Consumes: the two existing common fused source files.
 - Produces: a source-level contract requiring `kMaxUsedCoreNum = 32` without changing decode or the candidate.
 
-- [ ] **Step 1: Change the source contract to require 32 tasks**
+- [x] **Step 1: Change the source contract to require 32 tasks**
 
 Rename the test and replace its cap assertions with:
 
@@ -57,11 +57,13 @@ def test_lightning_indexer_fused_kernels_use_all_32_aics_and_64_aivs():
         assert "constexpr int32_t kMaxUsedCoreNum = 32;" in source
         assert "constexpr int32_t kMaxUsedCoreNum = 16;" not in source
         assert "constexpr int32_t kMaxUsedCoreNum = 11;" not in source
+        assert "constexpr int32_t kThreadsPerBlock = 1024;" in source
+        assert "constexpr int32_t kThreadsPerBlock = 256;" not in source
         assert "constexpr uint8_t kCrossCoreSyncMode = 2;" in source
         assert "constexpr uint16_t kScoreReadyFlag = 0;" in source
 ```
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 ```bash
 pytest -q \
@@ -71,7 +73,7 @@ pytest -q \
 
 Expected: FAIL because both common fused sources still contain `kMaxUsedCoreNum = 16`.
 
-### Task 2: Raise Only The Common Prefill Cap
+### Task 2: Raise The Common Prefill Cap And Launch Width
 
 **Files:**
 - Modify: `src/cannbench/operators/builtin/lightning_indexer/simt/v1/aten_dsa_lightning_indexer/csrc/simt/lightning_indexer_fused_family_4x64.asc`
@@ -80,9 +82,10 @@ Expected: FAIL because both common fused sources still contain `kMaxUsedCoreNum 
 
 **Interfaces:**
 - Consumes: `total_rows` from the existing fused launcher.
-- Produces: `used_core_num = min(total_rows, 32)` for the two common fused families.
+- Produces: `used_core_num = min(total_rows, 32)` and 1024-thread SIMT launches
+  for the two common fused families.
 
-- [ ] **Step 1: Make the minimal implementation change**
+- [x] **Step 1: Make the minimal implementation change**
 
 In both fused source files replace:
 
@@ -96,7 +99,19 @@ with:
 constexpr int32_t kMaxUsedCoreNum = 32;
 ```
 
-- [ ] **Step 2: Run the source suite and verify GREEN**
+Also replace:
+
+```cpp
+constexpr int32_t kThreadsPerBlock = 256;
+```
+
+with:
+
+```cpp
+constexpr int32_t kThreadsPerBlock = 1024;
+```
+
+- [x] **Step 2: Run the source suite and verify GREEN**
 
 ```bash
 pytest -q src/cannbench/operators/builtin/lightning_indexer/simt/test/test_lightning_indexer_v1_build_shell.py
@@ -105,7 +120,7 @@ git diff --check
 
 Expected: all tests pass and `git diff --check` emits no output.
 
-- [ ] **Step 3: Verify excluded kernels remain unchanged**
+- [x] **Step 3: Verify excluded kernels remain unchanged**
 
 ```bash
 git diff -- \
@@ -124,7 +139,7 @@ Expected: no output.
 - Consumes: BF16 `B=1,Q=4096,C=32768,H=64,D=128,K=2048`, seed 7, valid lengths 28673 through 32768.
 - Produces: sampled score-set correctness, repeated-launch stability, host timing, and one exact-kernel msopprof record.
 
-- [ ] **Step 1: Copy the worktree into a fresh remote directory**
+- [x] **Step 1: Copy the worktree into a fresh remote directory**
 
 ```bash
 INDEXER_REMOTE_DIR=$(ssh -p 20002 root@121.41.199.170 \
@@ -140,7 +155,7 @@ rsync -a --delete -e 'ssh -p 20002' \
 
 Keep `INDEXER_REMOTE_DIR` for all following remote commands; never reuse the earlier candidate directory.
 
-- [ ] **Step 2: Build the custom operator remotely**
+- [x] **Step 2: Build the custom operator remotely**
 
 ```bash
 source /usr/local/Ascend/cann/set_env.sh
@@ -154,7 +169,7 @@ cd src/cannbench/operators/builtin/lightning_indexer/simt/v1
 
 Expected: exit 0 and all Lightning Indexer device libraries are produced.
 
-- [ ] **Step 3: Run exact correctness and stability**
+- [x] **Step 3: Run exact correctness and stability**
 
 From the fresh remote repository root run:
 
@@ -170,7 +185,7 @@ export ASCEND_VISIBLE_DEVICES=0
 
 Expected: `sampled_score_sets_match` and `stability_match` are both `true`.
 
-- [ ] **Step 4: Capture one exact-kernel BasicInfo profile**
+- [x] **Step 4: Capture one exact-kernel BasicInfo profile**
 
 ```bash
 msopprof \
@@ -189,7 +204,7 @@ msopprof \
 
 Expected: exit 0, no timeout or `RegisterFuncSymbol` error, `Block Dim = 32`, `Mix Block Dim = 64`, and kernel duration no greater than 11.218775 seconds.
 
-- [ ] **Step 5: Apply the performance gate**
+- [x] **Step 5: Apply the performance gate**
 
 Record:
 
@@ -210,7 +225,7 @@ If kernel time regresses, restore only the Task 1/2 implementation files to thei
 - Consumes: exact remote correctness, stability, host timing, block dimensions, and kernel duration from Task 3.
 - Produces: an operator-local record of the final retained cap and measured comparison.
 
-- [ ] **Step 1: Update documentation with exact results**
+- [x] **Step 1: Update documentation with exact results**
 
 Replace claims that 16 mixed tasks fill the device with:
 
@@ -220,7 +235,7 @@ Replace claims that 16 mixed tasks fill the device with:
 
 Record the 16-task baseline, 32-task kernel time, speedup, latency reduction, correctness result, stability result, and profiler artifact path. Keep decode documented as `2 batch × 8 shards = 16 mixed tasks`.
 
-- [ ] **Step 2: Run final local verification**
+- [x] **Step 2: Run final local verification**
 
 ```bash
 pytest -q src/cannbench/operators/builtin/lightning_indexer/simt/test
@@ -233,7 +248,7 @@ rg -n "kMaxUsedCoreNum = (11|16)" \
 
 Expected: operator-local and full suites pass; whitespace and stale-cap searches emit no output.
 
-- [ ] **Step 3: Commit the verified implementation**
+- [x] **Step 3: Commit the verified implementation**
 
 ```bash
 git add \

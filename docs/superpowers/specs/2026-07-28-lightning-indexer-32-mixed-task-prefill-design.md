@@ -4,8 +4,11 @@
 
 The target Atlas 350 device exposes 32 AICs and 64 AIVs. The Lightning
 Indexer fused kernels use `KERNEL_TYPE_MIX_AIC_1_2`, so one mixed task maps to
-one AIC and two AIVs. The current 16-task cap therefore uses only 16 AICs and
-32 AIVs; 32 mixed tasks are required to make the full device available.
+one AIC and two AIVs. Before this change, the 16-task cap therefore used only
+16 AICs and 32 AIVs; 32 mixed tasks are required to make the full device
+available. Source review also found that the existing common fused VFs still
+use 256 threads, while the newer decode and candidate VFs already use the
+requested 1024.
 
 The existing V3.2 prefill reference is BF16
 `B=1, Q=4096, C=32768, H=64, D=128, K=2048`. Its 16-task common fused path was
@@ -20,6 +23,9 @@ local implementations:
 - `lightning_indexer_fused_family_4x64.asc`
 - `lightning_indexer_fused_family_64x128.asc`
 
+Standardize both common fused VFs from 256 to 1024 SIMT threads at the same
+time, as explicitly required for all SIMT paths.
+
 The host launch continues to use:
 
 ```text
@@ -31,14 +37,15 @@ changes are required.
 
 ## Preserved Behavior
 
-This correction changes only the maximum number of row-parallel mixed tasks.
-It preserves:
+This correction changes the maximum number of row-parallel mixed tasks and
+standardizes the SIMT launch width. It preserves:
 
 - `KERNEL_TYPE_MIX_AIC_1_2`
 - cross-core synchronization mode 2 and flag 0
 - participation of both AIVs in the mode-2 handshake; the first AIV continues
   to own post-processing while the second AIV executes synchronization only
-- 1024 SIMT threads per AIV
+- 1024 SIMT threads per launched VF after replacing the inherited 256-thread
+  setting
 - the existing row ownership and output layout
 - current dtype, shape, and TopK constraints
 - the disabled state of the experimental two-Query-atom prefill candidate
@@ -52,8 +59,9 @@ separate shard-size and reduction design rather than a cap correction.
 ## Tests And Validation
 
 Operator-local source contract tests will first be changed to require a
-32-task cap for both common fused families and to reject the stale 16-task
-cap. The implementation will then be updated to satisfy those tests.
+32-task cap and 1024 SIMT threads for both common fused families and to reject
+the stale 16-task and 256-thread settings. The implementation will then be
+updated to satisfy those tests.
 
 Local verification will run the Lightning Indexer SIMT source tests followed
 by the full repository test suite. Remote verification on the target device
