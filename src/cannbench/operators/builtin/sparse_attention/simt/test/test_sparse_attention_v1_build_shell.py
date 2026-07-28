@@ -500,6 +500,34 @@ def test_sparse_attention_head64_recomputes_first_pv_value_tile_with_cube():
     assert "kAicToAivPvDone" not in source
 
 
+def test_sparse_attention_head64_combine_uses_1024_thread_dual_aiv():
+    source = _head64_source()
+    body = _function_body(
+        source,
+        "head64_combine_vf(",
+        "__global__ __aicore__ void sparse_attention_head64_combine_kernel(",
+    )
+    assert "__launch_bounds__(1024)" in source
+    assert "dim3(1024, 1, 1)" in source
+    assert "GetSubBlockIdx()" in source
+    assert "partial_lse" in body
+    assert "partial_output" in body
+    assert "__expf(partial_lse_value - global_lse)" in body
+    assert "isfinite" in body
+    assert "output[output_row + dim] = 0.0F" in body
+
+
+def test_sparse_attention_head64_host_skips_combine_for_p1():
+    body = _function_body(
+        _bridge_source(),
+        "sparse_attention_forward_family_hd576_head64(",
+        "std::tuple<at::Tensor, at::Tensor> sparse_attention_forward_privateuse1(",
+    )
+    p1 = body.index("if (plan.selected_partitions == 1)")
+    combine = body.index("run_sparse_attention_head64_combine_hd576_bf16(")
+    assert p1 < combine
+
+
 def test_sparse_attention_head64_reduced_accuracy_covers_boundaries():
     path = Path(__file__).with_name("head64_reduced_accuracy.py")
 
