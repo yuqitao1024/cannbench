@@ -370,14 +370,13 @@ Q、K、probability 和 V 在 L1 中按阶段复用。最终布局以 `dav-3510`
 
 ## 8. 同步边界
 
-当前 staged QK/PV kernel 仍过渡性使用
-`AscendC::CrossCoreSetFlag/CrossCoreWaitFlag`。检查点四是新设计，必须回到仓库规定的
-`C API + Tensor API + SIMT API` 边界：
+当前 staged QK/PV kernel 使用 `AscendC::CrossCoreSetFlag/CrossCoreWaitFlag`。检查点四
+继续使用 CrossCoreFlag；这是同一 MIX task 内 AIC 与两个 AIV 协作的必需同步，不得
+移除或用单 pipe 内顺序替代：
 
-1. 同一个 MIX task 内的 AIC/AIV 阶段握手使用 C API
-   `asc_sync_block_arrive(pipe, flag_id)` 和 `asc_sync_block_wait(pipe, flag_id)`。
-2. 跨核同步选择 mode 2 语义；`8` 用于 AIV 到 AIC ready，`9` 用于 AIC 到 AIV
-   ready。每轮复用前必须完成同方向完整 arrive/wait 配对。
+1. 跨核同步使用 `CrossCoreSetFlag/CrossCoreWaitFlag` mode 2。
+2. `8` 用于 AIV 到 AIC ready，`9` 用于 AIC 到 AIV ready。两个 AIV 都必须执行
+   set/wait；每轮复用前必须完成同方向完整配对。
 3. `asc_sync_notify/asc_sync_wait` 只负责单个 AIC 或 AIV 内部 pipeline 的 buffer
    复用顺序。
 4. 两个 AIV 都执行实际 gather、softmax、probability pack、output update 和 writeback；
@@ -399,8 +398,9 @@ tile 从 L1 拷入 L0A，再发布 AIC-to-AIV ready 允许 AIV 覆盖共享 L1�
 
 - AIC 之间共享状态。
 - 使用 GM flag 自旋同步。
-- 在新 fused kernel 中调用 `CrossCoreSetFlag/CrossCoreWaitFlag`、
-  `SetFlag/WaitFlag/PipeBarrier` 或引入 Basic API header。
+- 使用 `CrossCoreSetFlag/CrossCoreWaitFlag` 以外的 Basic API 同步，或引入当前
+  CrossCoreFlag 声明所需 header 之外的 Basic API header。
+- 使用 `SetFlag/WaitFlag/PipeBarrier`。
 - 使用 mode 0/1 全核同步。
 - 在首版正确性和 profiler 结果出来前引入 ping-pong；只有单 buffer 的等待或搬运数据
   证明双缓冲有收益时，才把它作为同一检查点内的后续优化。
@@ -433,8 +433,8 @@ src/cannbench/operators/builtin/sparse_attention/
 - `sparse_attention_head64_common.h`：staged/fused 共用的无 Basic API 数学、布局和
   task helper。
 - `sparse_attention_head64_hd576.asc`：现有 staged P=1/P=2 对照 kernel。
-- `sparse_attention_head64_fused_hd576.asc`：P=4 fused 主 kernel；只使用 C API、
-  Tensor API 和 SIMT API，不包含 Basic API header。
+- `sparse_attention_head64_fused_hd576.asc`：P=4 fused 主 kernel；使用 Tensor API、
+  SIMT API 和必需的 CrossCoreFlag mode-2 同步。
 - `setup.py`：分别注册 staged 与 fused Head64 device ELF。
 - 算子本地测试：验证参数、源码边界、编译、精度和运行稳定性。
 
@@ -520,8 +520,8 @@ write partition-local output/LSE
   profiler 可见的实际 Vector 工作。
 - QK 和 PV 继续使用 Tensor API MMAD；不把 Cube 计算退回纯 Vector。
 - Host 的 P=4 路径只 launch fused 主 kernel 和现有 Combine，不再 launch staged QK/PV。
-- fused kernel 位于独立 device source/ELF，不从 staged source 复制遗留 Basic API
-  include；可复用的数学和布局 helper 移到无 Basic API 依赖的算子本地 header。
+- fused kernel 位于独立 device source/ELF；可复用的数学和布局 helper 移到无
+  Basic API 依赖的算子本地 header，CrossCoreFlag header 只由 device source 包含。
 - 删除 P=4 路径的 `task_scores` 和 `task_probabilities`，不再分配与
   `B * H * Q * S` 成比例的完整中间矩阵。
 - 保留 P=4 Combine 所需的 partition-local FP32 `task_output` 和 `task_lse`；Combine
@@ -566,9 +566,9 @@ pytest -q
 
 源码契约测试需要确认：
 
-- 新 fused kernel 不包含 Basic API header，不调用
-  `CrossCoreSetFlag/CrossCoreWaitFlag` 或其他禁止的同步 API。
-- 新 fused kernel 使用 C API block arrive/wait 完成 mode-2 AIC/AIV 同步。
+- 新 fused kernel 只包含当前 CrossCoreFlag 所需的两个过渡性 Basic API header，
+  并调用 mode-2 `CrossCoreSetFlag/CrossCoreWaitFlag`。
+- 新 fused kernel 不调用其他 Basic API 同步。
 - 两个 AIV均有有效分支，不存在 `subBlockIdx != 0` 直接退出。
 - SIMT entry 使用 `__launch_bounds__(1024)` 和 `dim3(1024, 1, 1)`。
 - QK 和 PV 使用 Tensor API MMAD。
