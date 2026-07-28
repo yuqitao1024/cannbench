@@ -111,6 +111,19 @@ def test_sparse_attention_head64_qk_uses_partition_local_scores():
     )
 
 
+def test_sparse_attention_head64_pv_uses_partition_bounds_and_local_stride():
+    source = _head64_source()
+    assert "partition_begin" in _function_body(
+        source,
+        "sparse_attention_head64_pv_aiv(",
+        "__aicore__ inline void sparse_attention_head64_pv_aic(",
+    )
+    assert "partition_length" in source
+    assert "partition_token_capacity" in source
+    assert "partial_lse" in source
+    assert "task.partition" in source
+
+
 def test_sparse_attention_head64_score_pipeline_uses_one_padded_row_stride():
     source = _head64_source()
     qk = _function_body(
@@ -141,13 +154,16 @@ def test_sparse_attention_head64_score_pipeline_uses_one_padded_row_stride():
         "head64_score_row_stride(plan);"
     ) in " ".join(qk.split())
     assert "kHead64Tile * partition_token_capacity" in " ".join(qk.split())
-    assert "int32_t score_row_stride" in softmax
-    assert "task_head) * score_row_stride" in " ".join(softmax.split())
-    assert "int32_t score_row_stride" in probability_pack
-    assert "task_head) * score_row_stride" in " ".join(
+    assert "int32_t partition_token_capacity" in softmax
+    assert "task_head) * partition_token_capacity" in " ".join(softmax.split())
+    assert "int32_t partition_token_capacity" in probability_pack
+    assert "task_head) * partition_token_capacity" in " ".join(
         probability_pack.split()
     )
-    assert "const int32_t score_row_stride = head64_score_row_stride(plan);" in pv
+    assert (
+        "const int32_t partition_token_capacity = "
+        "head64_score_row_stride(plan);"
+    ) in " ".join(pv.split())
 
 
 def test_sparse_attention_head64_source_uses_only_allowed_basic_api():
@@ -396,7 +412,7 @@ def test_sparse_attention_head64_softmax_does_not_read_invalid_scores():
 
     invalid_branch = softmax.index("if (!valid || running_sum <= 0.0F) {")
     score_read = softmax.index(
-        "scores[row_offset + selected_index] * score_scale - running_max",
+        "scores[score_row + local_selected] * score_scale - running_max",
         invalid_branch,
     )
     assert "continue;" in softmax[invalid_branch:score_read]
