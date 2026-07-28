@@ -40,6 +40,25 @@ def _function_body(source: str, start_marker: str, end_marker: str) -> str:
     return source.split(start_marker, 1)[1].split(end_marker, 1)[0]
 
 
+def _function_definition(source: str, start_marker: str) -> str:
+    start = source.index(start_marker)
+    while True:
+        body_start = source.index("{", start)
+        declaration_end = source.find(";", start, body_start)
+        if declaration_end == -1:
+            break
+        start = source.index(start_marker, start + len(start_marker))
+    depth = 0
+    for index in range(body_start, len(source)):
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return source[start : index + 1]
+    raise AssertionError(f"unterminated function definition: {start_marker}")
+
+
 def test_sparse_attention_custom_op_schema_keeps_legacy_tuning_defaults():
     source = _bridge_source()
 
@@ -502,30 +521,60 @@ def test_sparse_attention_head64_recomputes_first_pv_value_tile_with_cube():
 
 def test_sparse_attention_head64_combine_uses_1024_thread_dual_aiv():
     source = _head64_source()
-    body = _function_body(
+    combine_vf = _function_definition(
         source,
+        "__simt_vf__ __aicore__ __launch_bounds__(1024) inline void\n"
         "head64_combine_vf(",
+    )
+    combine_kernel = _function_definition(
+        source,
         "__global__ __aicore__ void sparse_attention_head64_combine_kernel(",
     )
-    assert "__launch_bounds__(1024)" in source
-    assert "dim3(1024, 1, 1)" in source
-    assert "GetSubBlockIdx()" in source
-    assert "partial_lse" in body
-    assert "partial_output" in body
-    assert "__expf(partial_lse_value - global_lse)" in body
-    assert "isfinite" in body
-    assert "output[output_row + dim] = 0.0F" in body
+    launcher = _function_definition(
+        source,
+        "extern \"C\" void launch_sparse_attention_head64_combine_hd576_bf16(",
+    )
+    combine_scope = combine_vf + combine_kernel + launcher
+
+    assert "__launch_bounds__(1024)" in combine_vf
+    assert "partial_lse" in combine_vf
+    assert "partial_output" in combine_vf
+    assert "float global_max = -std::numeric_limits<float>::infinity();" in combine_vf
+    assert "global_max = global_max < value ? value : global_max;" in combine_vf
+    assert "float global_sum = 0.0F;" in combine_vf
+    assert "global_sum += __expf(value - global_max);" in combine_vf
+    assert "const float global_lse = global_max + logf(global_sum);" in combine_vf
+    assert "__expf(partial_lse_value - global_lse) *" in combine_vf
+    assert "partial_output[partial_row * value_head_dim + dim]" in combine_vf
+    assert "if (!isfinite(global_max))" in combine_vf
+    assert "lse[lse_offset] = -std::numeric_limits<float>::infinity();" in combine_vf
+    assert "output[output_row + dim] = 0.0F;" in combine_vf
+
+    assert "KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_2);" in combine_kernel
+    assert "if ASCEND_IS_AIC {\n    return;\n  } else if ASCEND_IS_AIV {" in combine_kernel
+    assert "AscendC::GetBlockIdx() / AscendC::GetTaskRatio()" in combine_kernel
+    assert "const uint32_t sub_block_index = AscendC::GetSubBlockIdx();" in combine_kernel
+    assert "asc_vf_call<head64_combine_vf>(\n        dim3(1024, 1, 1)," in combine_kernel
+    assert "CrossCore" not in combine_scope
+
+    assert "extern \"C\" void launch_sparse_attention_head64_combine_hd576_bf16(" in launcher
+    assert "plan->task_count / plan->selected_partitions" in launcher
+    assert "sparse_attention_head64_combine_kernel" in launcher
 
 
 def test_sparse_attention_head64_host_skips_combine_for_p1():
-    body = _function_body(
+    head64_host = _function_definition(
         _bridge_source(),
+        "std::tuple<at::Tensor, at::Tensor>\n"
         "sparse_attention_forward_family_hd576_head64(",
-        "std::tuple<at::Tensor, at::Tensor> sparse_attention_forward_privateuse1(",
     )
-    p1 = body.index("if (plan.selected_partitions == 1)")
-    combine = body.index("run_sparse_attention_head64_combine_hd576_bf16(")
-    assert p1 < combine
+    p1 = head64_host.index("if (plan.selected_partitions == 1)")
+    p1_return = head64_host.index("return {output, task_lse};", p1)
+    split_output = head64_host.index("auto output = at::empty(", p1)
+    split_lse = head64_host.index("auto lse = at::empty(", p1)
+    combine = head64_host.index("run_sparse_attention_head64_combine_hd576_bf16(")
+
+    assert p1 < p1_return < split_output < split_lse < combine
 
 
 def test_sparse_attention_head64_reduced_accuracy_covers_boundaries():
