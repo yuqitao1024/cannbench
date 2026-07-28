@@ -76,13 +76,16 @@ def test_sparse_attention_head64_plan_keeps_dynamic_task_mapping():
     assert "task_id / (plan.head_group_count * plan.query_tokens)" in device
 
 
-def test_sparse_attention_head64_host_validates_explicit_route():
-    source = _bridge_source()
+def test_sparse_attention_head64_host_supports_split_kv_route():
+    bridge = _bridge_source()
+    plan = _head64_plan_source()
 
-    assert "const bool use_head64 = head_tile == 64 && selected_partitions == 1;" in source
-    assert 'TORCH_CHECK(phase == "decode", "head64 requires phase=decode")' in source
-    assert 'TORCH_CHECK(family == "family_hd576", "head64 requires family_hd576")' in source
-    assert "indices.size(2) <= 2048" in source
+    assert "is_supported_head64_partitions" in bridge
+    assert "selected_partitions == 2" in bridge
+    assert "selected_partitions == 4" in bridge
+    assert "selected_partition_tile_capacity" in plan
+    assert "selected_tile_count" in bridge
+    assert "partition_tile_capacity" in bridge
 
 
 def test_sparse_attention_head64_source_uses_only_allowed_basic_api():

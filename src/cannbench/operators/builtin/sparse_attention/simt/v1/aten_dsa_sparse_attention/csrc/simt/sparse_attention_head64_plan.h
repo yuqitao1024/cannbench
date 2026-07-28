@@ -26,7 +26,7 @@ struct SparseAttentionHead64Plan {
   int32_t head_group_count;
   int32_t selected_tile;
   int32_t selected_partitions;
-  int32_t selected_partition_size;
+  int32_t selected_partition_tile_capacity;
 };
 
 }  // namespace aten_dsa_sparse_attention

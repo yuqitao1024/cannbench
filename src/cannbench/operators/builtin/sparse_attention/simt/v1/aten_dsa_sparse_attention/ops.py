@@ -16,7 +16,7 @@ __all__ = [
 
 _HEAD_TILE_ENV = "CANNBENCH_SPARSE_ATTENTION_HEAD_TILE"
 _SELECTED_PARTITIONS_ENV = "CANNBENCH_SPARSE_ATTENTION_SELECTED_PARTITIONS"
-_SUPPORTED_TUNING = {(1, 1), (64, 1)}
+_SUPPORTED_TUNING = {(1, 1), (64, 1), (64, 2), (64, 4)}
 
 
 def _read_positive_int(name: str, default: int) -> int:

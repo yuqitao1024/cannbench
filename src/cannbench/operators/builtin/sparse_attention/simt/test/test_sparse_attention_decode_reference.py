@@ -76,7 +76,10 @@ def test_sparse_attention_forward_prefers_registered_custom_op_for_decode_family
     }
 
 
-def test_sparse_attention_forward_passes_head64_tuning(monkeypatch):
+@pytest.mark.parametrize("selected_partitions", [1, 2, 4])
+def test_sparse_attention_forward_passes_head64_tuning(
+    monkeypatch, selected_partitions
+):
     captured = {}
 
     def fake_custom_op(*args):
@@ -84,7 +87,10 @@ def test_sparse_attention_forward_passes_head64_tuning(monkeypatch):
         return "custom"
 
     monkeypatch.setenv("CANNBENCH_SPARSE_ATTENTION_HEAD_TILE", "64")
-    monkeypatch.setenv("CANNBENCH_SPARSE_ATTENTION_SELECTED_PARTITIONS", "1")
+    monkeypatch.setenv(
+        "CANNBENCH_SPARSE_ATTENTION_SELECTED_PARTITIONS",
+        str(selected_partitions),
+    )
     monkeypatch.setattr(ops, "_load_registered_op", lambda: fake_custom_op)
 
     result = ops.sparse_attention_forward(
@@ -98,7 +104,7 @@ def test_sparse_attention_forward_passes_head64_tuning(monkeypatch):
     )
 
     assert result == "custom"
-    assert captured["tuning"] == (64, 1)
+    assert captured["tuning"] == (64, selected_partitions)
 
 
 @pytest.mark.parametrize(
@@ -108,7 +114,7 @@ def test_sparse_attention_forward_passes_head64_tuning(monkeypatch):
         ("CANNBENCH_SPARSE_ATTENTION_HEAD_TILE", "0", "must be positive"),
         (
             "CANNBENCH_SPARSE_ATTENTION_SELECTED_PARTITIONS",
-            "2",
+            "3",
             "unsupported sparse_attention tuning",
         ),
     ],
