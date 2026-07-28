@@ -4,7 +4,7 @@
 
 **Goal:** Build a minimal standalone diagnostic that compares msopprof behavior for equivalent one-kernel workloads stored in device ELFs containing one versus two SIMT VF entries.
 
-**Architecture:** Add two pure ACL/ASC executables under the Lightning Indexer operator-local test tree. The default paths both run one copy kernel; the two-VF executable also contains a second VF that can be launched with `--launch-second`, isolating ELF symbol layout from default launch count.
+**Architecture:** Add two pure ACL/ASC executables under the Lightning Indexer operator-local test tree. Separate ASC translation units build one-VF and two-VF shared libraries with pure-Vector 1024-thread kernels. The default paths both run one copy kernel; the two-VF executable can also launch its second VF with `--launch-second`, isolating ELF symbol layout from default launch count.
 
 **Tech Stack:** CMake 3.16+, ASC language support, ACL runtime C API, Ascend SIMT API, `bisheng --npu-arch=dav-3510`, msopprof BasicInfo.
 
@@ -29,25 +29,26 @@
 - Consumes: files under `simt/test/msopprof_two_vf_repro/`.
 - Produces: a test contract for CMake targets, VF counts, CLI switch, and dependency isolation.
 
-- [ ] **Step 1: Add the failing source contract**
+- [x] **Step 1: Add the failing source contract**
 
-Add a test that reads `CMakeLists.txt`, `two_vf_repro.asc`, and
-`single_vf_control.asc`, then asserts:
+Add a test that reads `CMakeLists.txt`, both main sources, and both VF sources,
+then asserts:
 
 ```python
 assert "add_executable(two_vf_repro" in cmake
 assert "add_executable(single_vf_control" in cmake
-assert two_vf.count("__simt_vf__") == 2
-assert single_vf.count("__simt_vf__") == 1
-assert '"--launch-second"' in two_vf
-for source in (two_vf, single_vf):
+assert copy_vf.count("__simt_vf__") == 1
+assert add_one_vf.count("__simt_vf__") == 1
+assert "__global__ __vector__" in copy_vf
+assert "__global__ __vector__" in add_one_vf
+assert '"--launch-second"' in two_vf_main
+for source in (two_vf_main, single_vf_main, copy_vf, add_one_vf):
     assert '#include "acl/acl.h"' in source
-    assert '#include "simt_api/asc_simt.h"' in source
     for forbidden in ("torch", "Python.h", "cannbench"):
         assert forbidden not in source
 ```
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 ```bash
 pytest -q \
@@ -60,26 +61,29 @@ Expected: FAIL because the standalone directory does not exist.
 
 **Files:**
 - Create: `src/cannbench/operators/builtin/lightning_indexer/simt/test/msopprof_two_vf_repro/CMakeLists.txt`
-- Create: `src/cannbench/operators/builtin/lightning_indexer/simt/test/msopprof_two_vf_repro/two_vf_repro.asc`
-- Create: `src/cannbench/operators/builtin/lightning_indexer/simt/test/msopprof_two_vf_repro/single_vf_control.asc`
+- Create: `src/cannbench/operators/builtin/lightning_indexer/simt/test/msopprof_two_vf_repro/copy_vf.asc`
+- Create: `src/cannbench/operators/builtin/lightning_indexer/simt/test/msopprof_two_vf_repro/add_one_vf.asc`
+- Create: `src/cannbench/operators/builtin/lightning_indexer/simt/test/msopprof_two_vf_repro/two_vf_main.asc`
+- Create: `src/cannbench/operators/builtin/lightning_indexer/simt/test/msopprof_two_vf_repro/single_vf_main.asc`
 - Create: `src/cannbench/operators/builtin/lightning_indexer/simt/test/msopprof_two_vf_repro/README.md`
 
 **Interfaces:**
 - Consumes: device 0 and the Ascend runtime installed through `ASCEND_HOME_PATH`.
 - Produces: executables `two_vf_repro` and `single_vf_control`, each returning zero only after direct output validation succeeds.
 
-- [ ] **Step 1: Add the CMake build**
+- [x] **Step 1: Add the CMake build**
 
-Use `find_package(ASC REQUIRED)`, `project(... LANGUAGES ASC CXX)`, and one
-`add_executable` per `.asc` source. Set `LINKER_LANGUAGE ASC`, pass
-`--npu-arch=${CMAKE_ASC_ARCHITECTURES}`, and include both standard Ascend
-include locations for each target.
+Use `find_package(ASC REQUIRED)` and `project(... LANGUAGES ASC CXX)`. Build a
+two-VF shared library from `copy_vf.asc` plus `add_one_vf.asc`, a one-VF shared
+library from `copy_vf.asc`, and link one ACL executable to each library. Set
+`LINKER_LANGUAGE ASC`, pass `--npu-arch=${CMAKE_ASC_ARCHITECTURES}`, and include
+both standard Ascend include locations for each target.
 
-- [ ] **Step 2: Implement the single-VF control**
+- [x] **Step 2: Implement the single-VF control**
 
 Define one `__simt_vf__` copy function, one `__global__ __vector__` wrapper,
 and a direct ACL `main`. Allocate four `int32_t` elements, initialize them to
-`{3, 5, 7, 11}`, launch one block with 32 SIMT threads, synchronize, copy the
+`{3, 5, 7, 11}`, launch one block with 1024 SIMT threads, synchronize, copy the
 result back, validate equality, clean up, and print:
 
 ```text
@@ -88,21 +92,22 @@ sync_ret=0
 validation=pass
 ```
 
-- [ ] **Step 3: Implement the two-VF reproduction**
+- [x] **Step 3: Implement the two-VF reproduction**
 
-Define the same copy VF plus a second add-one VF and their separate vector
-kernel wrappers. The default invocation launches only copy and validates
-`{3, 5, 7, 11}`. With `--launch-second`, launch add-one after copy and validate
-`{4, 6, 8, 12}`. Reject every other argument with exit code 2. Print the
-target, `launch_second=true|false`, synchronization result, and validation.
+Link the copy VF plus a second add-one VF and their separate vector kernel
+wrappers. The default invocation launches only copy and validates
+`{3, 5, 7, 11}`. With `--launch-second`, launch add-one from the immutable
+input buffer and validate `{4, 6, 8, 12}`. Reject every other argument with
+exit code 2. Print the target, `launch_second=true|false`, synchronization
+result, and validation.
 
-- [ ] **Step 4: Document exact handoff commands**
+- [x] **Step 4: Document exact handoff commands**
 
 The README must contain configure/build, direct runs, BasicInfo collection for
 each target, expected affected/fixed profiler outcomes, and the source, build
 log, direct-run log, msopprof log, and output directory list to send upstream.
 
-- [ ] **Step 5: Run the source contract and verify GREEN**
+- [x] **Step 5: Run the source contract and verify GREEN**
 
 ```bash
 pytest -q \
@@ -121,12 +126,12 @@ Expected: both selected tests pass and no whitespace errors are reported.
 - Consumes: the port-20002 device with CANN environment and the updated 100-second msopprof build.
 - Produces: direct-run and separate BasicInfo profile artifacts for both targets.
 
-- [ ] **Step 1: Sync to a fresh remote temporary directory**
+- [x] **Step 1: Sync to a fresh remote temporary directory**
 
 Create `/tmp/cannbench-msopprof-two-vf-XXXXXX` using remote `mktemp -d` and
 rsync the reproduction directory through SSH port 20002.
 
-- [ ] **Step 2: Configure and build**
+- [x] **Step 2: Configure and build**
 
 ```bash
 source /usr/local/Ascend/cann/set_env.sh
@@ -136,7 +141,7 @@ cmake --build build --parallel
 
 Expected: both executables build with exit code 0.
 
-- [ ] **Step 3: Run all direct controls**
+- [x] **Step 3: Run all direct controls**
 
 ```bash
 ./build/single_vf_control
@@ -146,7 +151,7 @@ Expected: both executables build with exit code 0.
 
 Expected: every command exits zero and prints `validation=pass`.
 
-- [ ] **Step 4: Profile equivalent default workloads separately**
+- [x] **Step 4: Profile equivalent default workloads separately**
 
 ```bash
 msopprof --output="$PWD/profile-single" --aic-metrics=BasicInfo \
@@ -159,7 +164,7 @@ Record each exit code, profiler log, whether `RegisterFuncSymbol` appears, and
 whether BasicInfo kernel data exists. Do not treat success on the rebuilt
 profiler as failure of the sample; it means the minimal former trigger is fixed.
 
-- [ ] **Step 5: Backfill observed results**
+- [x] **Step 5: Backfill observed results**
 
 Add the remote directory, msopprof version, direct-run result, profile result,
 and artifact locations to the reproduction README.
@@ -173,7 +178,7 @@ and artifact locations to the reproduction README.
 - Consumes: completed local and remote evidence.
 - Produces: a self-contained diagnostic commit suitable for sharing upstream.
 
-- [ ] **Step 1: Run operator-local and repository tests**
+- [x] **Step 1: Run operator-local and repository tests**
 
 ```bash
 pytest -q src/cannbench/operators/builtin/lightning_indexer/simt/test

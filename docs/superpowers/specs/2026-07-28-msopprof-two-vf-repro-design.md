@@ -15,20 +15,23 @@ Keep the diagnostic under the owning operator package:
 src/cannbench/operators/builtin/lightning_indexer/simt/test/
   msopprof_two_vf_repro/
     CMakeLists.txt
-    two_vf_repro.asc
-    single_vf_control.asc
+    copy_vf.asc
+    add_one_vf.asc
+    two_vf_main.asc
+    single_vf_main.asc
     README.md
 ```
 
-`two_vf_repro.asc` builds one executable and one device ELF containing two
-distinct `__simt_vf__` entries. Its normal run launches only the first VF's
-kernel; the `--launch-second` switch launches the second kernel as well.
-Keeping the default runtime workload to one launch isolates the number of VF
-entries in the ELF from the number of executed kernels.
+`copy_vf.asc` and `add_one_vf.asc` are separate ASC translation units linked
+into one shared device library. Both use a 1024-thread `__simt_vf__` behind a
+pure `__global__ __vector__` entry. `two_vf_main.asc` normally launches only
+the copy kernel; the `--launch-second` switch launches the add-one kernel as
+well. Keeping the default runtime workload to one launch isolates the number
+of VF entries in the shared ELF from the number of executed kernels.
 
-`single_vf_control.asc` performs the same default copy operation and validation
-but contains only one `__simt_vf__` entry. It is the control for confirming that
-separate compilation avoids the profiler failure.
+`single_vf_main.asc` links a control shared library containing only
+`copy_vf.asc`. It performs the same default copy operation and validation with
+one `__simt_vf__` entry.
 
 ## Runtime Behavior
 
@@ -36,7 +39,7 @@ Both executables use ACL directly to:
 
 1. initialize device 0 and create a stream;
 2. allocate small input and output buffers;
-3. launch a one-block SIMT copy kernel;
+3. launch a one-block, 1024-thread SIMT copy kernel;
 4. synchronize and copy the result to the host;
 5. validate the output and release all resources.
 
@@ -51,6 +54,8 @@ does not import or link Python, PyTorch, torch_npu, or CannBench code.
 `CMakeLists.txt` uses the repository's existing standalone ASC pattern,
 defaults `CMAKE_ASC_ARCHITECTURES` to `dav-3510`, and builds:
 
+- `libtwo_vf_kernels.so`
+- `libsingle_vf_kernel.so`
 - `two_vf_repro`
 - `single_vf_control`
 
@@ -65,11 +70,16 @@ requirement because the behavior belongs to a specific msopprof version. Its
 expected comparison is:
 
 - both executables build, run, and validate successfully outside msopprof;
-- `single_vf_control` produces profile data;
-- `two_vf_repro` exposes the missing-data or `RegisterFuncSymbol` failure on an
-  affected profiler build;
-- the updated profiler may make both collections succeed, which is also a
-  valid result and demonstrates that the minimal reproducer no longer fails.
+- compare whether `single_vf_control` and `two_vf_repro` produce profile data;
+- record any missing data, `RegisterFuncSymbol`, or binary-registration error;
+- treat success as evidence that VF count and pure-Vector ELF layout are not a
+  sufficient trigger for that profiler build.
+
+The July 28 target run succeeded with both the installed 26.0 build and a
+fresh 26.1 branch build. A mixed-CV control also succeeded. The exact affected
+historical profiler remains necessary to determine whether the failure was
+version-specific or depended on another property of the original operator
+ELF.
 
 Operator-local source tests verify that the sample remains standalone and that
 the two targets contain exactly one and two `__simt_vf__` declarations,
