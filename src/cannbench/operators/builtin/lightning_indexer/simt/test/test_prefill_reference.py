@@ -499,7 +499,7 @@ def _assert_v32_prefill_sampled_score_sets(
     assert torch.equal(custom_scores, reference_scores)
 
 
-def test_v32_prefill_q2_matches_sampled_reference_scores():
+def test_v32_prefill_matches_sampled_reference_scores():
     torch = _require_v32_prefill_npu_custom_op()
     query, keys, weights, valid = _v32_prefill_target_tensors(torch)
     rows, reduced, reference_scores = _v32_prefill_sampled_scores(
@@ -525,7 +525,7 @@ def test_v32_prefill_q2_matches_sampled_reference_scores():
     )
 
 
-def test_v32_prefill_q2_is_stable_across_repeated_launches():
+def test_v32_prefill_is_stable_across_repeated_launches():
     torch = _require_v32_prefill_npu_custom_op()
     query, keys, weights, valid = _v32_prefill_target_tensors(torch)
     rows, reduced, reference_scores = _v32_prefill_sampled_scores(

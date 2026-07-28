@@ -50,7 +50,7 @@
 - Consumes: existing mode-2/flag-0 mixed-kernel handshake from commit `d608c0b`.
 - Produces: a common-path launch limit of 16 mixed tasks for both fused families.
 
-- [ ] **Step 1: Write the failing source contract**
+- [x] **Step 1: Write the failing source contract**
 
 Add:
 
@@ -70,7 +70,7 @@ def test_lightning_indexer_fused_kernels_use_all_32_aivs():
         assert "constexpr uint16_t kScoreReadyFlag = 0;" in source
 ```
 
-- [ ] **Step 2: Run the test and verify RED**
+- [x] **Step 2: Run the test and verify RED**
 
 Run:
 
@@ -82,7 +82,7 @@ pytest -q \
 
 Expected: FAIL because both sources still contain `kMaxUsedCoreNum = 11`.
 
-- [ ] **Step 3: Make the minimal cap correction**
+- [x] **Step 3: Make the minimal cap correction**
 
 In both fused sources change only:
 
@@ -92,7 +92,7 @@ constexpr int32_t kMaxUsedCoreNum = 16;
 
 Do not change task mapping, TopK, tile size, flags, or dispatch in this task.
 
-- [ ] **Step 4: Verify locally and remotely**
+- [x] **Step 4: Verify locally and remotely**
 
 Run locally:
 
@@ -121,7 +121,7 @@ cd "$INDEXER_REMOTE_ROOT"
 
 Expected: build exit 0 and no operator-local test failures.
 
-- [ ] **Step 5: Commit the corrected baseline**
+- [x] **Step 5: Commit the corrected baseline**
 
 ```bash
 git add \
@@ -146,7 +146,7 @@ Record this commit as `CORRECTED_BASELINE_COMMIT` for Task 4.
 - Consumes: BF16 Query `[1,4096,64,128]`, Keys `[1,32768,128]`, Weights `[1,4096,64]`, and int32 lengths `[1,4096]`.
 - Produces: `launch_lightning_indexer_prefill_q2_family_64x128_bfloat16(const bfloat16_t* query, const bfloat16_t* keys, const bfloat16_t* weights, const int32_t* valid_context_lengths, float* topk_scores, int32_t* topk_indices, aclrtStream stream)`.
 
-- [ ] **Step 1: Write failing build and kernel contracts**
+- [x] **Step 1: Write failing build and kernel contracts**
 
 Add tests that require the new setup entry and fixed-shape source:
 
@@ -183,7 +183,7 @@ def test_prefill_q2_family_64x128_uses_16_tasks_and_both_aivs():
         assert expected in source
 ```
 
-- [ ] **Step 2: Run the tests and verify RED**
+- [x] **Step 2: Run the tests and verify RED**
 
 ```bash
 pytest -q \
@@ -193,7 +193,7 @@ pytest -q \
 
 Expected: FAIL because the source and setup entry do not exist.
 
-- [ ] **Step 3: Add the isolated build entry**
+- [x] **Step 3: Add the isolated build entry**
 
 Add to `KERNEL_LIBRARIES`:
 
@@ -205,7 +205,7 @@ Add to `KERNEL_LIBRARIES`:
 ),
 ```
 
-- [ ] **Step 4: Implement the fixed-shape kernel**
+- [x] **Step 4: Implement the fixed-shape kernel**
 
 Use these constants and task mapping:
 
@@ -301,7 +301,7 @@ lightning_indexer_prefill_q2_family_64x128_kernel
     reinterpret_cast<uint8_t*>(topk_scores));
 ```
 
-- [ ] **Step 5: Verify locally and compile remotely**
+- [x] **Step 5: Verify locally and compile remotely**
 
 Run the selected test, then the whole build-shell file. Sync to a new remote
 `/tmp/cannbench-indexer-prefill-candidate-XXXXXX` directory and build with the
@@ -310,7 +310,7 @@ same CANN/Python/NPU settings as Task 1.
 Expected: source tests PASS; `bisheng` build exits 0. Capture resource usage for
 the 1024-thread VF and stop to investigate if stack usage is nonzero.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add \
@@ -334,7 +334,7 @@ git commit -m "feat(lightning-indexer): add dual-AIV prefill kernel"
 - Consumes: Task 2 launcher.
 - Produces: exact host dispatch returning int32 `[1,4096,2048]`, sampled NPU score-set validation, stability coverage, and JSON timing output.
 
-- [ ] **Step 1: Write failing bridge tests**
+- [x] **Step 1: Write failing bridge tests**
 
 Require an exact helper and predicates before the generic prefill call:
 
@@ -366,11 +366,11 @@ def test_prefill_q2_bridge_dispatches_only_the_exact_v32_bfloat16_shape():
     assert ".item" not in body
 ```
 
-- [ ] **Step 2: Verify bridge RED**
+- [x] **Step 2: Verify bridge RED**
 
 Run the exact test. Expected: FAIL because no helper or predicate exists.
 
-- [ ] **Step 3: Implement the bridge helper and dispatch**
+- [x] **Step 3: Implement the bridge helper and dispatch**
 
 Declare the Task 2 launcher and add:
 
@@ -408,7 +408,7 @@ at::Tensor lightning_indexer_forward_prefill_q2_family_64x128_bfloat16(
 Inside the existing `prefill/family_64x128` branch, after family checks and
 before the generic helper, select only the eight exact predicates from Step 1.
 
-- [ ] **Step 4: Add exact-shape NPU correctness and stability tests**
+- [x] **Step 4: Add exact-shape NPU correctness and stability tests**
 
 Factor a target-input helper in `test_prefill_reference.py`:
 
@@ -434,7 +434,7 @@ after all launches and repeats the same sampled score checks for every output.
 Local execution must cleanly SKIP without an NPU custom op; remote execution
 must PASS.
 
-- [ ] **Step 5: Add the reproducible benchmark runner**
+- [x] **Step 5: Add the reproducible benchmark runner**
 
 The runner accepts `--warmups`, `--iters`, `--seed`, and `--stability-runs`,
 uses `_v32_prefill_target_tensors`-equivalent allocation, runs sampled score
@@ -459,7 +459,7 @@ Time each public custom-op call with `time.perf_counter_ns()` and
 `torch.npu.synchronize()` after every call. Exit nonzero if sampled correctness
 or repeated-launch stability fails.
 
-- [ ] **Step 6: Run local and remote coverage**
+- [x] **Step 6: Run local and remote coverage**
 
 Run locally:
 
@@ -473,7 +473,7 @@ Expected: source tests PASS and NPU tests SKIP locally. Rebuild remotely and
 run the same files. Expected: all available NPU tests PASS, including the exact
 full-shape and three-launch tests.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add \
@@ -498,7 +498,7 @@ git commit -m "test(lightning-indexer): validate V3.2 prefill fast path"
 - Consumes: Task 1 `CORRECTED_BASELINE_COMMIT`, Task 3 candidate, and existing `dsa_conformance` runner/comparator.
 - Produces: measured default-path decision, reproducible records, completed checklist, and final verification evidence.
 
-- [ ] **Step 1: Build isolated baseline and candidate trees remotely**
+- [x] **Step 1: Build isolated baseline and candidate trees remotely**
 
 Create two explicit remote directories using:
 
@@ -512,7 +512,7 @@ HEAD. Build each in a separate Python process using identical CANN,
 `NPU_ARCH=dav-3510`, and `ASCEND_VISIBLE_DEVICES=0` settings. Print the loaded
 `aten_dsa_lightning_indexer._C` path before every benchmark to prove isolation.
 
-- [ ] **Step 2: Measure standalone indexer latency**
+- [x] **Step 2: Measure standalone indexer latency**
 
 In both builds run:
 
@@ -528,6 +528,11 @@ stability success. Keep the exact dispatch only when candidate median is lower
 than corrected-baseline median.
 
 - [ ] **Step 3: Run the full workflow gate**
+
+The corrected baseline workflow and vLLM-Ascend conformance comparison passed.
+Candidate workflow timing was intentionally not run because the standalone
+candidate was already 11.11% slower, which failed the first required gate and
+made it ineligible for production dispatch.
 
 Generate baseline and candidate artifacts using the same seed:
 
@@ -555,7 +560,7 @@ candidate `timing_seconds.workflow_total` no greater than baseline. Repeat the
 workflow timing three times if the first ratio is within 5% of 1.0 and decide
 using the median of those three runs.
 
-- [ ] **Step 4: Apply the dispatch decision**
+- [x] **Step 4: Apply the dispatch decision**
 
 If standalone and workflow gates pass, retain the exact predicate. If either
 performance gate fails, remove the call from the exact predicate so production
@@ -567,7 +572,7 @@ suite passes.
 Rerun bridge tests after the final choice. Do not leave a hardcoded false
 predicate.
 
-- [ ] **Step 5: Record results and resource usage**
+- [x] **Step 5: Record results and resource usage**
 
 Add a V3.2 prefill benchmark section to `simt/README.md` containing:
 
@@ -581,7 +586,7 @@ Add a V3.2 prefill benchmark section to `simt/README.md` containing:
 - 1024-thread stack/register resource report
 - whether exact dispatch remains enabled
 
-- [ ] **Step 6: Run final verification**
+- [x] **Step 6: Run final verification**
 
 Run locally:
 
@@ -602,7 +607,7 @@ branch appears in public layers. Rebuild final HEAD remotely and run:
 
 Expected: no failures.
 
-- [ ] **Step 7: Backfill the plan and commit the gate**
+- [x] **Step 7: Backfill the plan and commit the gate**
 
 Mark only actually completed checkboxes in this plan, then commit final source,
 tests, benchmark documentation, and the backfilled plan:
