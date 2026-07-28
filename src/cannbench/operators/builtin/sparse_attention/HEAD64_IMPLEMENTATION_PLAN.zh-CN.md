@@ -1,12 +1,18 @@
 # Sparse Attention Head64 Implementation Plan
 
+> 状态说明（2026-07-28）：本计划的 staged QK 与 staged softmax/PV 检查点已交付；
+> Task 5 的单 persistent MIX kernel 融合及“移除完整 scores workspace”尚未实现，已
+> 延期。当前实现与后续优化以 `HEAD64_SPLIT_KV_DESIGN.zh-CN.md` 和
+> `HEAD64_SPLIT_KV_IMPLEMENTATION_PLAN.zh-CN.md` 为准，不能把 Task 5 描述当作
+> 当前交付状态。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 为 `family_hd576` BF16 decode 实现实验性的 Head64 fused Sparse Attention，使 64 个 Query heads 共享 K/V gather，并使用 1024-thread 双 AIV、Cube QK、online softmax 和 Cube PV。
 
 **Architecture:** Host 根据 `head_tile` 与 `selected_partitions` 构造算子本地 launch plan；方案 A 将每个 `(batch, query_token, head_group_64)` 映射为一个独立 MIX task。实现按 QK workspace、softmax+PV workspace、单 kernel 融合三个设备检查点推进，最后只保留 legacy 和 fused Head64 路径。
 
-**Tech Stack:** Python 3.11+、PyTorch custom op、C++17 Host bridge、CANN `dav-3510`、C API、Tensor API、SIMT API、`CrossCoreSetFlag/CrossCoreWaitFlag` mode 2、kernel-local `AscendC::Mutex`、pytest。
+**Tech Stack:** Python 3.11+、PyTorch custom op、C++17 Host bridge、CANN `dav-3510`、C API、Tensor API、SIMT API、`CrossCoreSetFlag/CrossCoreWaitFlag` mode 2/mode 4、pytest。
 
 ## Global Constraints
 
@@ -17,8 +23,11 @@
 - Head64 只支持 `phase=decode`、`family=family_hd576`、BF16、`H=128`、`KV_H=1`、`Dqk=576`、`Dv=512`、`S<=2048`。
 - 每个 AIV 必须使用 `__launch_bounds__(1024)`，Host 必须使用 `dim3(1024, 1, 1)` 发起 SIMT VF。
 - 每个 AIV 处理 32 个 Head，每个 Head 固定由 32 个 SIMT threads 协作。
-- AIC 与两个 AIV 的阶段握手使用 `CrossCoreSetFlag/CrossCoreWaitFlag` mode 2，所有 set/wait 必须成对。
-- Mutex 只用于单个 AIC/AIV内部异步流水的 buffer 复用顺序。
+- QK 的 AIC/AIV 阶段握手使用 `CrossCoreSetFlag/CrossCoreWaitFlag` mode 2；
+  staged PV 的双 AIV ready 使用 mode 4，反方向继续使用 mode 2。所有 set/wait
+  必须成对。
+- 当前交付未调用 Mutex；单个 AIC/AIV 内部异步流水通过 pipe ordering 管理 buffer
+  复用顺序。
 - 新 kernel 只允许额外包含 `basic_api/kernel_common.h` 和 `basic_api/kernel_operator_block_sync_intf.h`；不得使用其他 Basic API header。
 - 新 kernel 不得使用 `SetFlag`、`WaitFlag`、`PipeBarrier`、`SyncAll`、GM flag 自旋或跨逻辑 task 数据共享。
 - 目标编译架构固定为 `NPU_ARCH=dav-3510`。
@@ -948,7 +957,7 @@ git add \
 git commit -m "feat(sparse-attention): add head64 online softmax and pv"
 ```
 
-## Task 5: Fuse QK, Softmax and PV Into One MIX Kernel
+## Task 5: Fuse QK, Softmax and PV Into One MIX Kernel（延期）
 
 **Files:**
 - Modify: `src/cannbench/operators/builtin/sparse_attention/simt/v1/aten_dsa_sparse_attention/csrc/simt/sparse_attention_head64_hd576.asc`

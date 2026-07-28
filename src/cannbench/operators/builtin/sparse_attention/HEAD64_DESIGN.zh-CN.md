@@ -56,9 +56,9 @@ PV: [64, S_tile] x [S_tile, 512]
 - 不优化 prefill。
 - 不修改公共 CLI、Backend、Workflow 或全局配置。
 - 不在 benchmark 前将 `head64` 设为默认。
-- 除 kernel-local Mutex 所需的 `basic_api/kernel_common.h`，以及 AIC/AIV握手所需的
-  `basic_api/kernel_operator_block_sync_intf.h` 外，不新增 C++ Basic API、
-  `SetFlag`、`WaitFlag` 或 `PipeBarrier` 依赖。
+- 不新增 C++ Basic API、`SetFlag`、`WaitFlag` 或 `PipeBarrier` 依赖。当前源码仍
+  过渡性保留 `basic_api/kernel_common.h` 和 AIC/AIV 握手所需的
+  `basic_api/kernel_operator_block_sync_intf.h`。
 
 ## 3. 实现策略
 
@@ -343,16 +343,17 @@ Q、K、probability 和 V 在 L1 中按阶段复用。最终布局以 `dav-3510`
 
 ## 8. 同步边界
 
-新 Head64 kernel 使用两类同步：
+当前 Head64 staged kernel 使用 CrossCore 握手和 pipe 内顺序：
 
-1. `AscendC::CrossCoreSetFlag/CrossCoreWaitFlag` 使用 mode 2，负责同一个 MIX task
-   内 AIC 与两个 AIV 的阶段握手。
-2. kernel-local `AscendC::Mutex::Lock/Unlock` 负责 AIC或AIV内部异步流水对同一
-   buffer 的复用顺序。
+1. `AscendC::CrossCoreSetFlag/CrossCoreWaitFlag` 负责同一个 MIX task 内 AIC 与两个
+   AIV 的阶段握手。QK 使用 mode 2；PV 的 AIV 到 AIC ready 使用 mode 4，使 AIC
+   分别等待两个 AIV subblock，反方向继续使用 mode 2。
+2. `asc_sync_notify/asc_sync_wait` 负责单个 AIC 或 AIV 内部 pipeline 的 buffer
+   复用顺序。当前交付源码没有调用 `AscendC::Mutex::Lock/Unlock`。
 
-允许包含 `basic_api/kernel_operator_block_sync_intf.h` 取得 CrossCore API，允许
-包含 `basic_api/kernel_common.h` 取得 Mutex 定义。不得从这两个 header 使用其他
-Basic API。
+`basic_api/kernel_operator_block_sync_intf.h` 为现有 CrossCore API 提供声明；
+`basic_api/kernel_common.h` 是尚待清理的过渡性 include。不得从这两个 header
+引入其他 Basic API。
 
 逻辑阶段为：
 
@@ -363,20 +364,23 @@ P_READY
 PV_READY
 ```
 
-所有阶段都成对调用 set/wait。mode 2 的 flag ID 合法范围是 `0..15`；高级 Matmul
-占用 `0..7`，`SyncAll` 保留 `11..14`，因此 Head64 只使用 `8` 和 `9`：
+所有阶段都成对调用 set/wait。QK 的 mode 2 握手使用 `8` 和 `9`：
 
 ```cpp
 constexpr uint8_t kAivToAicReady = 8;
 constexpr uint8_t kAicToAivReady = 9;
 ```
 
-`8` 只用于 AIV 到 AIC，`9` 只用于 AIC 到 AIV。每次复用前必须先完成同方向的完整
-set/wait 配对，任一时刻每个方向最多只有一个未消费事件。不要使用 `16` 以上的 ID；
-mode 2 只编码低 4 bit，这类值会折返并与其他 ID 冲突。
+QK 中 `8` 用于 AIV 到 AIC，`9` 用于 AIC 到 AIV。PV 中两个 AIV subblock 通过
+mode 4 分别发布 `8` 和 `24`，AIC 对两者都完成 wait 后才消费 L1 数据；AIC 到 AIV
+仍通过 mode 2 的 `9` 发布。每次复用前必须先完成同方向的完整 set/wait 配对，任一
+时刻每个方向最多只有一个未消费事件。
 
-mode 2 的语义为：两个 AIV 都上报后 AIC 才继续，或者 AIC 上报后两个 AIV 才继续。
-方案 A 不使用 mode 0 做全核同步，也不让不同逻辑 task 共享状态。
+QK 的 query buffer 还必须遵守所有权顺序：AIC 等待 query ready 后，先通过 MTE1
+把当前 query tile 从 L1 拷入 L0A，再在同一 PIPE_MTE1 上发布 `9` 允许 AIV 写入 key。
+这样当物理核循环处理下一个逻辑 task 时，AIV 即使覆盖 L1 query，也不会破坏当前
+task 已保存到 L0A 的 query。方案 A 不使用 mode 0 做全核同步，也不让不同逻辑 task
+共享状态。
 
 第一版使用单 buffer 顺序状态机：
 
@@ -440,7 +444,7 @@ src/cannbench/operators/builtin/dsa_decode/
 - Host launch plan。
 - `8` 个逻辑 task 的映射测试。
 - 新 device ELF 构建入口。
-- 1024-thread 双 AIV、CrossCore mode 2 和 kernel-local Mutex 的最小编译验证。
+- 1024-thread 双 AIV、CrossCore mode 2 和 kernel-local pipe ordering 的最小编译验证。
 - 新源码 API 边界测试。
 
 ### 10.2 检查点二：Head64 QK
@@ -512,10 +516,10 @@ pytest -q
 
 源码契约测试需要确认：
 
-- 新 kernel 的 Basic API header 只能有提供 Mutex 的
+- 新 kernel 的过渡性 Basic API header 只能有当前保留的
   `basic_api/kernel_common.h` 和提供 CrossCore API 的
   `basic_api/kernel_operator_block_sync_intf.h`。
-- 新 kernel 从这两个 header 只能调用 `AscendC::Mutex::Lock/Unlock` 和
+- 新 kernel 从这两个 header 只调用
   `AscendC::CrossCoreSetFlag/CrossCoreWaitFlag`。
 - 新 kernel 不调用禁止的同步 API。
 - 两个 AIV均有有效分支，不存在 `subBlockIdx != 0` 直接退出。

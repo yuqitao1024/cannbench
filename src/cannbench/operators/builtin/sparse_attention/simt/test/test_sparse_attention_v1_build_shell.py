@@ -118,6 +118,50 @@ def test_sparse_attention_head64_host_supports_split_kv_route():
     assert "partition_tile_capacity" in bridge
 
 
+def test_sparse_attention_head64_host_requires_matching_shared_kv_width():
+    bridge = _normalized_whitespace(_bridge_source())
+
+    assert (
+        'shared_kv.size(3) == 576, "head64 requires shared_kv_head_dim=576"'
+        in bridge
+    )
+
+
+def test_sparse_attention_empty_inputs_return_initialized_attention_identity():
+    bridge = _bridge_source()
+    forward = _function_definition(
+        bridge,
+        "sparse_attention_forward_privateuse1(",
+        declaration_marker="std::tuple<at::Tensor, at::Tensor>",
+    )
+    empty_branch = forward.split(
+        "if (query.numel() == 0 || shared_kv.numel() == 0 ||", 1
+    )[1].split("auto query_bfloat", 1)[0]
+
+    assert "at::zeros(" in empty_branch
+    assert "at::full(" in empty_branch
+    assert "-std::numeric_limits<float>::infinity()" in empty_branch
+    assert "at::empty(" not in empty_branch
+
+
+def test_sparse_attention_int64_indices_are_clamped_before_int32_narrowing():
+    bridge = _bridge_source()
+    forward = _function_definition(
+        bridge,
+        "sparse_attention_forward_privateuse1(",
+        declaration_marker="std::tuple<at::Tensor, at::Tensor>",
+    )
+    conversion = forward.split("auto indices_int =", 1)[1].split(
+        "if (use_head64)", 1
+    )[0]
+
+    clamp = conversion.index(".clamp(")
+    narrow = conversion.index(".to(at::kInt)")
+    assert "std::numeric_limits<int32_t>::min()" in conversion
+    assert "std::numeric_limits<int32_t>::max()" in conversion
+    assert clamp < narrow
+
+
 def test_sparse_attention_head64_task_mapping_keeps_partition_innermost():
     source = _head64_source()
     assert "int32_t partition;" in source
@@ -472,6 +516,30 @@ def test_sparse_attention_head64_crosscore_handshakes_are_paired():
     assert "CrossCoreSetFlag<1" not in source
 
 
+def test_sparse_attention_head64_qk_copies_query_before_releasing_aiv():
+    source = _head64_source()
+    aic = _function_body(
+        source,
+        "sparse_attention_head64_qk_aic(",
+        "__global__ __aicore__ void sparse_attention_head64_qk_kernel(",
+    )
+
+    task_query_ready = aic.index(
+        "CrossCoreWaitFlag<2, PIPE_MTE1>(kAivToAicReady)"
+    )
+    query_copy = aic.index("Copy(copy_l1_to_l0a", task_query_ready)
+    release_aiv = aic.index(
+        "CrossCoreSetFlag<2, PIPE_MTE1>(kAicToAivReady)", task_query_ready
+    )
+    key_ready = aic.index(
+        "CrossCoreWaitFlag<2, PIPE_MTE1>(kAivToAicReady)",
+        task_query_ready + 1,
+    )
+    key_copy = aic.index("Copy(copy_l1_to_l0b", key_ready)
+
+    assert task_query_ready < query_copy < release_aiv < key_ready < key_copy
+
+
 def test_sparse_attention_head64_pv_waits_for_both_aiv_subblocks():
     source = _head64_source()
     aiv = _function_body(
@@ -618,12 +686,17 @@ def test_sparse_attention_head64_reduced_accuracy_covers_boundaries():
         "tail_s70",
         "invalid_causal_s70",
         "all_invalid_s17",
+        "int64_overflow_s17",
     ):
         assert case_name in source
     assert "atol=0.05" in source
     assert "rtol=0.05" in source
     assert "torch.count_nonzero(actual_output)" in source
     assert "torch.isneginf(actual_lse).all()" in source
+    assert "empty_selected_s0" in source
+    assert "empty_context_c0" in source
+    assert "_run_width_rejection(torch, ops, 512)" in source
+    assert "_run_width_rejection(torch, ops, 640)" in source
 
 
 def test_sparse_attention_head64_reduced_accuracy_covers_split_kv():
@@ -631,9 +704,14 @@ def test_sparse_attention_head64_reduced_accuracy_covers_split_kv():
         encoding="utf-8"
     )
 
-    assert "PARTITIONS = (2, 4)" in source
+    assert "PARTITIONS = (1, 2, 4)" in source
     assert '"valid_s128"' in source
     assert '"valid_s2048"' in source
+    assert '"multi_task_b2_q9_s70"' in source
+    assert '"batch": 2' in source
+    assert '"query_tokens": 9' in source
+    assert "partition_results.extend(" in source
+    assert "results.extend(partition_results)" in source
     assert 'result["selected_partitions"]' in source
     assert "str(selected_partitions)" in source
 

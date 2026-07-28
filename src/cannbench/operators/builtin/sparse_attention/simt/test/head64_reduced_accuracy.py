@@ -4,7 +4,7 @@ import json
 import os
 
 
-PARTITIONS = (2, 4)
+PARTITIONS = (1, 2, 4)
 
 CASES = (
     {
@@ -12,6 +12,12 @@ CASES = (
         "context": 256,
         "selected": 17,
         "mode": "invalid",
+    },
+    {
+        "name": "int64_overflow_s17",
+        "context": 256,
+        "selected": 17,
+        "mode": "int64_overflow",
     },
     {"name": "valid_s64", "context": 256, "selected": 64, "mode": "valid"},
     {"name": "tail_s70", "context": 256, "selected": 70, "mode": "valid"},
@@ -22,6 +28,14 @@ CASES = (
         "mode": "mixed",
     },
     {"name": "valid_s128", "context": 256, "selected": 128, "mode": "valid"},
+    {
+        "name": "multi_task_b2_q9_s70",
+        "batch": 2,
+        "query_tokens": 9,
+        "context": 256,
+        "selected": 70,
+        "mode": "valid",
+    },
     {
         "name": "valid_s2048",
         "context": 32768,
@@ -41,13 +55,19 @@ def _pattern(torch, shape, *, offset: int, device):
 
 
 def _indices(torch, case, *, device):
+    batch = case.get("batch", 1)
+    query_tokens = case.get("query_tokens", 1)
     selected = torch.arange(case["selected"], dtype=torch.int64, device=device)
     indices = ((selected * 13 + 7) % case["context"]).reshape(1, 1, -1)
+    indices = indices.expand(batch, query_tokens, -1).clone()
     if case["mode"] == "mixed":
         indices[:, :, ::5] = -1
         indices[:, :, 3::7] = case["context"]
     elif case["mode"] == "invalid":
         indices.fill_(-1)
+    elif case["mode"] == "int64_overflow":
+        indices[:, :, ::2] = 1 << 40
+        indices[:, :, 1::2] = -(1 << 40)
     return indices
 
 
@@ -60,10 +80,17 @@ def _max_finite_error(torch, actual, expected) -> float:
 
 def _run_case(torch, ops, case):
     device = torch.device("npu")
-    query = _pattern(torch, (1, 128, 1, 576), offset=11, device=device)
+    batch = case.get("batch", 1)
+    query_tokens = case.get("query_tokens", 1)
+    query = _pattern(
+        torch,
+        (batch, 128, query_tokens, 576),
+        offset=11,
+        device=device,
+    )
     shared_kv = _pattern(
         torch,
-        (1, 1, case["context"], 576),
+        (batch, 1, case["context"], 576),
         offset=29,
         device=device,
     )
@@ -103,7 +130,7 @@ def _run_case(torch, ops, case):
         equal_nan=True,
     )
     boundary_passed = True
-    if case["mode"] == "invalid":
+    if case["mode"] in {"invalid", "int64_overflow"}:
         boundary_passed = (
             int(torch.count_nonzero(actual_output).item()) == 0
             and bool(torch.isneginf(actual_lse).all().item())
@@ -124,6 +151,70 @@ def _run_case(torch, ops, case):
     }
 
 
+def _run_empty_contract(torch, ops, *, name: str, context: int, selected: int):
+    device = torch.device("npu")
+    query = _pattern(torch, (1, 128, 1, 576), offset=11, device=device)
+    shared_kv = _pattern(
+        torch,
+        (1, 1, context, 576),
+        offset=29,
+        device=device,
+    )
+    indices = torch.full(
+        (1, 1, selected),
+        -1,
+        dtype=torch.int64,
+        device=device,
+    )
+    output, lse = ops.sparse_attention_forward(
+        query,
+        shared_kv,
+        indices,
+        value_head_dim=512,
+        phase="decode",
+        family="family_hd576",
+        causal=False,
+    )
+    torch.npu.synchronize()
+    passed = (
+        int(torch.count_nonzero(output).item()) == 0
+        and bool(torch.isneginf(lse).all().item())
+        and not bool(torch.isnan(output).any().item())
+        and not bool(torch.isnan(lse).any().item())
+    )
+    return {"name": name, "passed": passed}
+
+
+def _run_width_rejection(torch, ops, width: int):
+    device = torch.device("npu")
+    query = _pattern(torch, (1, 128, 1, 576), offset=11, device=device)
+    shared_kv = _pattern(
+        torch,
+        (1, 1, 1, width),
+        offset=29,
+        device=device,
+    )
+    indices = torch.zeros((1, 1, 1), dtype=torch.int64, device=device)
+    error = ""
+    try:
+        ops.sparse_attention_forward(
+            query,
+            shared_kv,
+            indices,
+            value_head_dim=512,
+            phase="decode",
+            family="family_hd576",
+            causal=False,
+        )
+        torch.npu.synchronize()
+    except RuntimeError as exc:
+        error = str(exc)
+    return {
+        "name": f"shared_kv_width_{width}_rejected",
+        "passed": "head64 requires shared_kv_head_dim=576" in error,
+    }
+
+
 def main() -> int:
     import torch
     import torch_npu  # noqa: F401
@@ -136,10 +227,33 @@ def main() -> int:
         os.environ[
             "CANNBENCH_SPARSE_ATTENTION_SELECTED_PARTITIONS"
         ] = partition_value
+        partition_results = []
         for case in CASES:
             result = _run_case(torch, ops, case)
+            partition_results.append(result)
+        partition_results.extend(
+            (
+                _run_empty_contract(
+                    torch,
+                    ops,
+                    name="empty_selected_s0",
+                    context=256,
+                    selected=0,
+                ),
+                _run_empty_contract(
+                    torch,
+                    ops,
+                    name="empty_context_c0",
+                    context=0,
+                    selected=17,
+                ),
+                _run_width_rejection(torch, ops, 512),
+                _run_width_rejection(torch, ops, 640),
+            )
+        )
+        for result in partition_results:
             result["selected_partitions"] = selected_partitions
-            results.append(result)
+        results.extend(partition_results)
     passed = all(result["passed"] for result in results)
     print(json.dumps({"passed": passed, "cases": results}, indent=2))
     return 0 if passed else 1

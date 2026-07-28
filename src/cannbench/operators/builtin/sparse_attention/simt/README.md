@@ -44,7 +44,7 @@ Atlas 350 validation for the corrected V3.2 workflows:
 
 | Phase | Case ID | Family | Status | Accuracy / runtime |
 | --- | --- | --- | --- | --- |
-| Decode | `deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048` | `family_hd576` | Full BF16 decode pass for split-KV P=2/P=4 | All `262144` output and `512` LSE elements passed at `atol=rtol=0.05`. P=2 output/LSE max abs errors were `0.0078125`/`0.0092763901`; P=4 errors were `0.009765625`/`0.0092763901`. |
+| Decode | `deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048` | `family_hd576` | Full BF16 decode pass for Head64 P=1/P=2/P=4 | All `262144` output and `512` LSE elements passed at `atol=rtol=0.05`. P=1 output/LSE max abs errors were `0.009765625`/`0.0092773438`; P=2 errors were `0.0078125`/`0.0092763901`; P=4 errors were `0.009765625`/`0.0092763901`. |
 | Prefill | `deepseek_v32_flashmla_prefill_q4096_ctx32768_top2048` | `family_hd576` | Reduced-shape pass; full case pending | Corrected `Dqk = 576`, `Dv = 512` path passed at B1/H128/Q4/C256/S64 with output max abs `0.015625` and LSE `0.014242`. Previous reduced-Q result used the wrong 576/576 layout. |
 
 ## Split-KV Device Record
@@ -177,6 +177,42 @@ timed call used a pre-call synchronize outside the clock and one final
 
 P=4 reduced the measured workflow median by `0.844586 ms` versus P=1 and was
 the fastest workflow configuration in this run.
+
+### Final Review Revalidation
+
+The QK pipeline was revalidated after moving the L1-to-L0A query copy before
+the existing MTE1 AIC-to-AIV release flag. This closes query-buffer ownership
+when a physical core loops over more than one logical task. The 2026-07-28 run
+used remote checkout `/root/cannbench-head64-final-review-20260728`, based on
+`b7655df016832a0776b5ed8dca9bc33a22eb6248` plus patch SHA-256
+`cfaa671128fb8fc3985ce81aa1742f452d279c04ccb29112a61d50a3d82f3ab1`.
+The final device and Host source SHA-256 values were:
+
+- Head64 device: `e9b1835fdda477f21f0bca3105bac9d05e6fa1b2422907612265829067f42fa6`
+- Host bridge: `bfc42103a18df2af4ba865e46cb3cb8eb2f8b58870d0fc45b092e913bcb43712`
+- reduced runner: `0360833d2513c9b5f4e2b291362ea1aeb1392076d98d7636c55dff8c5cc4058d`
+
+The rebuilt `dav-3510` extension passed all 36 reduced and boundary results.
+This included P=1/2/4, int64 overflow indices, `S=0`, `C=0`, both invalid
+shared-KV widths, and `B=2,Q=9,S=70`. The latter produces 36/72/144 logical
+tasks at P=1/2/4 and therefore exercises physical-core reuse in every tuning.
+Its P=4 output/LSE maximum absolute errors are recorded by the final runner,
+with zero mismatches.
+
+Full realistic P=1/2/4 accuracy also had zero mismatches for all `262144`
+output and `512` LSE elements. Using the same wall-time method documented
+above, the post-fix medians were:
+
+| P | Median (ms) | Speedup vs P=1 |
+| ---: | ---: | ---: |
+| 1 | `1.432600` | `1.000x` |
+| 2 | `0.882918` | `1.623x` |
+| 4 | `0.574588` | `2.493x` |
+
+P=4 remained the fastest configuration and stayed below the `1.33 ms` gate.
+The repeated P=4 QK profile measured `136.606 us`, reported launch dimensions
+`32 / 64`, and contained actual Cube/Vector work on all `32 AIC / 64 AIV`
+rows.
 
 Supported realistic-family cases:
 

@@ -124,6 +124,10 @@ QK kernel 继续以 M64K64 Cube tile 计算。每个 task 只循环自己的
 `[partition_begin, partition_end)`，scores 使用 partition-local selected offset；
 indices 和 shared KV gather 使用加上 `partition_begin` 的绝对 selected offset。
 
+当 `task_count` 超过 32、物理 AIC/AIV 核开始循环复用时，AIC 必须先把当前 query
+tile 从共享 L1 拷入 L0A，再通过已有的 MTE1 CrossCore flag 允许 AIV 生成 key。
+该所有权顺序防止 AIV 提前进入下一个逻辑 task 并覆盖当前 task 的 L1 query。
+
 ### 5.2 Softmax 与 PV
 
 softmax 只在当前 partition 的有效 token 上计算。每个 partition、每个 head 输出：
@@ -170,8 +174,9 @@ launch 顺序在同一个 NPU stream 中保持 QK、PV、combine 的依赖，不
 ## 7. 错误处理与实现边界
 
 Split-KV 继续沿用 Head64 准入条件：decode、family_hd576、BF16、`H=128`、
-`KV_H=1`、`Dqk=576`、`Dv=512` 和 `S<=2048`。显式启用后 shape 不满足条件时返回
-清晰错误，不调用 legacy。
+`KV_H=1`、query/shared-KV 的 `Dqk=576`、`Dv=512` 和 `S<=2048`。显式启用后
+shape 不满足条件时返回清晰错误，不调用 legacy。`S=0` 或 `C=0` 返回零 output 和
+负无穷 LSE；int64 indices 在窄化为 int32 前钳位到 int32 范围，使溢出值保持无效。
 
 所有新逻辑保留在：
 
@@ -198,11 +203,13 @@ src/cannbench/operators/builtin/sparse_attention/
 
 ### 8.2 远程设备精度
 
-分别验证 `P=2` 和 `P=4`：
+分别验证 `P=1`、`P=2` 和 `P=4`：
 
 - `S=17/64/70/128/2048`；
 - valid、causal、invalid index、all-invalid；
 - realistic case 的全部 `B/Q/H` 行；
+- 至少一个 `task_count>32` 的物理核循环复用 case；
+- `S=0/C=0`、shared-KV 宽度拒绝和 int64 index 溢出契约；
 - output 和 lse 延用当前 `atol=0.05, rtol=0.05`。
 
 ### 8.3 性能
