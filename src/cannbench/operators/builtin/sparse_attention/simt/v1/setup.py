@@ -24,6 +24,11 @@ HOST_SOURCES = [
 ]
 # Keep one VF entry per device ELF so msopprof can replay mixed kernels reliably.
 KERNEL_LIBRARIES = {
+    "libsparse_attention_head64_fused_hd576_kernel.so": os.path.join(
+        EXTENSIONS_DIR,
+        "simt",
+        "sparse_attention_head64_fused_hd576.asc",
+    ),
     "libsparse_attention_head64_hd576_kernel.so": os.path.join(
         EXTENSIONS_DIR,
         "simt",

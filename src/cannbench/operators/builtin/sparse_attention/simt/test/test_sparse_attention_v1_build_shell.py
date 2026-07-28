@@ -26,6 +26,26 @@ def _head64_source() -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _head64_fused_source() -> str:
+    path = (
+        Path(__file__).parents[1]
+        / "v1/aten_dsa_sparse_attention/csrc/simt"
+        / "sparse_attention_head64_fused_hd576.asc"
+    )
+    assert path.is_file(), f"missing fused Head64 device source: {path}"
+    return path.read_text(encoding="utf-8")
+
+
+def _head64_common_source() -> str:
+    path = (
+        Path(__file__).parents[1]
+        / "v1/aten_dsa_sparse_attention/csrc/simt"
+        / "sparse_attention_head64_common.h"
+    )
+    assert path.is_file(), f"missing Head64 common header: {path}"
+    return path.read_text(encoding="utf-8")
+
+
 def _head64_plan_source() -> str:
     path = (
         Path(__file__).parents[1]
@@ -85,10 +105,51 @@ def test_sparse_attention_head64_sources_are_registered():
     assert "sparse_attention_head64_hd576.asc" in setup_source
 
 
+def test_sparse_attention_head64_fused_source_is_registered_separately():
+    setup_source = (Path(__file__).parents[1] / "v1/setup.py").read_text()
+
+    assert _head64_common_source()
+    assert _head64_fused_source()
+    assert "libsparse_attention_head64_fused_hd576_kernel.so" in setup_source
+    assert "sparse_attention_head64_fused_hd576.asc" in setup_source
+
+
+def test_sparse_attention_head64_fused_source_uses_required_cross_core_flags():
+    source = _head64_fused_source()
+    basic_headers = {
+        line.strip()
+        for line in source.splitlines()
+        if line.strip().startswith('#include "basic_api/')
+    }
+
+    assert '#include "c_api/asc_simd.h"' in source
+    assert basic_headers == {
+        '#include "basic_api/kernel_common.h"',
+        '#include "basic_api/kernel_operator_block_sync_intf.h"',
+    }
+    assert '#include "kernel_operator.h"' not in source
+    assert "CrossCoreSetFlag<2" in source
+    assert "CrossCoreWaitFlag<2" in source
+    assert "AscendC::SetFlag" not in source
+    assert "AscendC::WaitFlag" not in source
+
+
+def test_sparse_attention_head64_fused_keeps_dual_aiv_1024_contract():
+    source = _head64_fused_source()
+
+    assert "KERNEL_TYPE_MIX_AIC_1_2" in source
+    assert "__launch_bounds__(1024)" in source
+    assert "dim3(1024, 1, 1)" in source
+    assert "GetSubBlockIdx()" in source
+    assert "GetSubBlockIdx() != 0" not in source
+    assert "threadIdx.x / 32" in source
+    assert "threadIdx.x % 32" in source
+
+
 def test_sparse_attention_head64_plan_keeps_dynamic_task_mapping():
     plan = _head64_plan_source()
     bridge = _bridge_source()
-    device = _head64_source()
+    device = _head64_source() + _head64_common_source()
 
     assert "struct SparseAttentionHead64Plan" in plan
     assert "constexpr int32_t kHead64PhysicalAicLimit = 32;" in plan
@@ -163,7 +224,7 @@ def test_sparse_attention_int64_indices_are_clamped_before_int32_narrowing():
 
 
 def test_sparse_attention_head64_task_mapping_keeps_partition_innermost():
-    source = _head64_source()
+    source = _head64_common_source()
     assert "int32_t partition;" in source
     assert "task_id % plan.selected_partitions" in source
     assert "task_id /= plan.selected_partitions" in source
@@ -192,7 +253,7 @@ def test_sparse_attention_head64_pv_uses_partition_bounds_and_local_stride():
     assert "partition_length" in source
     assert "partition_token_capacity" in source
     assert "partial_lse" in source
-    assert "task.partition" in source
+    assert "task.partition" in _head64_common_source()
 
 
 def test_sparse_attention_head64_score_pipeline_uses_one_padded_row_stride():
@@ -219,7 +280,10 @@ def test_sparse_attention_head64_score_pipeline_uses_one_padded_row_stride():
     )
 
     assert "head64_score_row_stride" in source
-    assert "plan.selected_partition_tile_capacity * plan.selected_tile" in source
+    assert (
+        "plan.selected_partition_tile_capacity * plan.selected_tile"
+        in _head64_common_source()
+    )
     assert (
         "const int32_t partition_token_capacity = "
         "head64_score_row_stride(plan);"
