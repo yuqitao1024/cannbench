@@ -40,6 +40,43 @@ def test_context_sharded_family_64x128_builds_a_separate_device_library():
     )
 
 
+def test_prefill_q2_family_64x128_builds_a_separate_device_library():
+    setup_py = Path(
+        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/setup.py"
+    ).read_text(encoding="utf-8")
+
+    assert "lightning_indexer_prefill_q2_family_64x128.asc" in setup_py
+    assert (
+        '"liblightning_indexer_prefill_q2_family_64x128_kernel.so"'
+        in setup_py
+    )
+
+
+def test_prefill_q2_family_64x128_uses_16_tasks_and_both_aivs():
+    source = Path(
+        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
+        "aten_dsa_lightning_indexer/csrc/simt/"
+        "lightning_indexer_prefill_q2_family_64x128.asc"
+    ).read_text(encoding="utf-8")
+
+    for expected in (
+        "kQueryAtomSize = 2",
+        "kQueryAtomCount = 2048",
+        "kLogicalTaskCount = 16",
+        "kContextTileSize = 32",
+        "kThreadsPerBlock = 1024",
+        "__launch_bounds__(kThreadsPerBlock)",
+        "params.m = kQueryAtomRows",
+        "kCrossCoreSyncMode = 2",
+        "kScoreReadyFlag = 0",
+        "fixpipe_params.dualDstCtl = 1",
+        "AscendC::GetSubBlockIdx()",
+        "atom_index += kLogicalTaskCount",
+        "query_index = atom_index * kQueryAtomSize + query_in_atom",
+    ):
+        assert expected in source
+
+
 def test_context_sharded_family_64x128_uses_q2_atom_and_both_aivs():
     source = Path(
         "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
