@@ -626,6 +626,18 @@ def test_sparse_attention_head64_reduced_accuracy_covers_boundaries():
     assert "torch.isneginf(actual_lse).all()" in source
 
 
+def test_sparse_attention_head64_reduced_accuracy_covers_split_kv():
+    source = Path(__file__).with_name("head64_reduced_accuracy.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "PARTITIONS = (2, 4)" in source
+    assert '"valid_s128"' in source
+    assert '"valid_s2048"' in source
+    assert 'result["selected_partitions"]' in source
+    assert "str(selected_partitions)" in source
+
+
 def test_sparse_attention_host_uses_right_aligned_absolute_query_start():
     source = Path(
         "src/cannbench/operators/builtin/sparse_attention/simt/v1/"

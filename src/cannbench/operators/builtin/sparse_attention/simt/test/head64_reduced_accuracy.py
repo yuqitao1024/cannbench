@@ -4,7 +4,15 @@ import json
 import os
 
 
+PARTITIONS = (2, 4)
+
 CASES = (
+    {
+        "name": "all_invalid_s17",
+        "context": 256,
+        "selected": 17,
+        "mode": "invalid",
+    },
     {"name": "valid_s64", "context": 256, "selected": 64, "mode": "valid"},
     {"name": "tail_s70", "context": 256, "selected": 70, "mode": "valid"},
     {
@@ -13,11 +21,12 @@ CASES = (
         "selected": 70,
         "mode": "mixed",
     },
+    {"name": "valid_s128", "context": 256, "selected": 128, "mode": "valid"},
     {
-        "name": "all_invalid_s17",
-        "context": 256,
-        "selected": 17,
-        "mode": "invalid",
+        "name": "valid_s2048",
+        "context": 32768,
+        "selected": 2048,
+        "mode": "valid",
     },
 )
 
@@ -120,9 +129,17 @@ def main() -> int:
     import torch_npu  # noqa: F401
     from aten_dsa_sparse_attention import ops
 
+    results = []
     os.environ["CANNBENCH_SPARSE_ATTENTION_HEAD_TILE"] = "64"
-    os.environ["CANNBENCH_SPARSE_ATTENTION_SELECTED_PARTITIONS"] = "1"
-    results = [_run_case(torch, ops, case) for case in CASES]
+    for selected_partitions in PARTITIONS:
+        partition_value = str(selected_partitions)
+        os.environ[
+            "CANNBENCH_SPARSE_ATTENTION_SELECTED_PARTITIONS"
+        ] = partition_value
+        for case in CASES:
+            result = _run_case(torch, ops, case)
+            result["selected_partitions"] = selected_partitions
+            results.append(result)
     passed = all(result["passed"] for result in results)
     print(json.dumps({"passed": passed, "cases": results}, indent=2))
     return 0 if passed else 1
