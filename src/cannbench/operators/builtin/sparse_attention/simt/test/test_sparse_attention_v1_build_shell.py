@@ -251,9 +251,168 @@ def test_sparse_attention_head64_qk_has_staged_host_route():
     assert "sparse_attention_forward_family_hd576_head64(" in source
     assert "launch_sparse_attention_head64_qk_hd576_bf16(" in source
     assert "{plan.task_count, kHead64Tile, plan.selected_tokens}" in source
-    assert ".view({plan.batch_size, plan.query_tokens, plan.query_heads," in source
-    assert ".permute({0, 2, 1, 3})" in source
-    assert "run_sparse_attention_family_hd512_decode_direct_tile(" in source
+
+
+def test_sparse_attention_head64_routes_task_scores_to_staged_pv():
+    source = _bridge_source()
+    head64 = _function_body(
+        source,
+        "sparse_attention_forward_family_hd576_head64(",
+        "std::tuple<at::Tensor, at::Tensor> sparse_attention_forward_privateuse1(",
+    )
+
+    assert "run_sparse_attention_head64_qk_hd576_bf16(" in head64
+    assert "run_sparse_attention_head64_pv_hd576_bf16(" in head64
+    assert "task_probabilities" in head64
+    assert "task_output" in head64
+    assert "legacy_scores" not in head64
+    assert "run_sparse_attention_family_hd512_decode_direct_tile(" not in head64
+
+
+def test_sparse_attention_head64_softmax_uses_1024_threads():
+    source = _head64_source()
+
+    assert "head64_online_softmax_vf" in source
+    assert "__launch_bounds__(1024)" in source
+    assert "const uint32_t local_head = threadIdx.x / 32;" in source
+    assert "const uint32_t lane = threadIdx.x % 32;" in source
+    assert "selected_index += 32" in source
+    assert "dim_index += 32" in source
+
+
+def test_sparse_attention_head64_pv_uses_cube_m64_n128():
+    source = _head64_source()
+
+    assert "launch_sparse_attention_head64_pv_hd576_bf16" in source
+    assert "sparse_attention_head64_pv_kernel" in source
+    assert "pv_params.m = 64" in source
+    assert "pv_params.n = current_value" in source
+    assert "pv_params.k = current_selected" in source
+    assert "kHead64ValueTile" in source
+
+
+def test_sparse_attention_head64_pv_keeps_bf16_gm_tensor_non_const():
+    source = _head64_source()
+    aic = _function_body(
+        source,
+        "sparse_attention_head64_pv_aic(",
+        "__global__ __aicore__ void sparse_attention_head64_pv_kernel(",
+    )
+
+    assert "__gm__ bfloat16_t* probabilities" in aic
+    assert "sqrtf(static_cast<float>(plan.qk_head_dim))" not in source
+
+
+def test_sparse_attention_head64_pv_uses_int32_causal_device_abi():
+    source = _head64_source()
+    softmax = source.split("head64_online_softmax_vf(", 1)[1].split(") {", 1)[0]
+    kernel = source.split("sparse_attention_head64_pv_kernel(", 1)[1].split(
+        ") {", 1
+    )[0]
+
+    assert "int32_t causal" in softmax
+    assert "bool causal" not in softmax
+    assert "int32_t causal" in kernel
+    assert "bool causal" not in kernel
+    assert "static_cast<int32_t>(causal)" in source
+
+
+def test_sparse_attention_head64_softmax_does_not_read_invalid_scores():
+    source = _head64_source()
+    softmax = _function_body(
+        source,
+        "head64_probability_pack_vf(",
+        "__simt_vf__ __aicore__ __launch_bounds__(1024) inline void\nhead64_value_pack_vf(",
+    )
+
+    invalid_branch = softmax.index("if (!valid || running_sum <= 0.0F) {")
+    score_read = softmax.index(
+        "scores[row_offset + selected_index] * score_scale - running_max",
+        invalid_branch,
+    )
+    assert "continue;" in softmax[invalid_branch:score_read]
+
+
+def test_sparse_attention_head64_probability_checkpoint_uses_mte3_before_ready():
+    source = _head64_source()
+    aiv = _function_body(
+        source,
+        "sparse_attention_head64_pv_aiv(",
+        "__aicore__ inline void sparse_attention_head64_pv_aic(",
+    )
+
+    pack = aiv.index("asc_vf_call<head64_probability_pack_vf>(")
+    copy = aiv.index("asc_copy_ub2gm_align(", pack)
+    ready = aiv.index(
+        "CrossCoreSetFlag<4, PIPE_MTE3>(", copy
+    )
+    assert pack < copy < ready
+
+
+def test_sparse_attention_head64_crosscore_handshakes_are_paired():
+    source = _head64_source()
+
+    assert "constexpr uint8_t kAivToAicReady = 8;" in source
+    assert "constexpr uint8_t kAicToAivReady = 9;" in source
+    assert source.count("CrossCoreSetFlag<2") >= 2
+    assert "CrossCoreWaitFlag<2" in source
+    assert "CrossCoreSetFlag<0" not in source
+    assert "CrossCoreSetFlag<1" not in source
+
+
+def test_sparse_attention_head64_pv_waits_for_both_aiv_subblocks():
+    source = _head64_source()
+    aiv = _function_body(
+        source,
+        "sparse_attention_head64_pv_aiv(",
+        "__aicore__ inline void sparse_attention_head64_pv_aic(",
+    )
+    aic = _function_body(
+        source,
+        "sparse_attention_head64_pv_aic(",
+        "__global__ __aicore__ void sparse_attention_head64_pv_kernel(",
+    )
+
+    assert "CrossCoreSetFlag<4, PIPE_MTE3>(" in aiv
+    assert "kAivToAicReady + sub_block * 16" in aiv
+    assert "CrossCoreWaitFlag<4, PIPE_MTE1>(kAivToAicReady);" in aic
+    assert "kAivToAicReady + 16" in aic
+    assert "CrossCoreSetFlag<2, PIPE_MTE1>(kAicToAivReady);" in aic
+    assert "CrossCoreWaitFlag<2, PIPE_V>(kAicToAivReady);" in aiv
+
+
+def test_sparse_attention_head64_recomputes_first_pv_value_tile_with_cube():
+    source = _head64_source()
+    aiv = _function_body(
+        source,
+        "sparse_attention_head64_pv_aiv(",
+        "__aicore__ inline void sparse_attention_head64_pv_aic(",
+    )
+    aic = _function_body(
+        source,
+        "sparse_attention_head64_pv_aic(",
+        "__global__ __aicore__ void sparse_attention_head64_pv_kernel(",
+    )
+    value_tile_count = (
+        "const int32_t value_tile_count =\n"
+        "        (plan.value_head_dim + kHead64ValueTile - 1) /\n"
+        "        kHead64ValueTile;"
+    )
+
+    assert "head64_pv_value_tile_index" in source
+    assert "return value_iteration == 0 ? 0 : value_iteration - 1;" in source
+    assert "TODO(cann): remove the duplicated first PV tile" in source
+    for body in (aiv, aic):
+        assert value_tile_count in body
+        assert "for (int32_t value_iteration = 0;" in body
+        assert "value_iteration <= value_tile_count;" in body
+        assert (
+            "head64_pv_value_tile_index(value_iteration) *\n"
+            "          kHead64ValueTile" in body
+        )
+
+    assert "head64_first_value_tile_repair_vf" not in source
+    assert "kAicToAivPvDone" not in source
 
 
 def test_sparse_attention_head64_reduced_accuracy_covers_boundaries():
