@@ -146,6 +146,31 @@ def test_sparse_attention_head64_fused_keeps_dual_aiv_1024_contract():
     assert "threadIdx.x % 32" in source
 
 
+def test_sparse_attention_head64_fused_qk_is_m64_tensor_api():
+    source = _head64_fused_source()
+
+    assert "Head64QkMmadTrait" in source
+    assert "params.m = 64" in source
+    assert "params.n = current_selected" in source
+    assert "params.k = current_k" in source
+    assert "Mmad(" in source
+
+
+def test_sparse_attention_head64_fused_scores_stay_tile_local():
+    source = _head64_fused_source()
+    launcher = _function_definition(
+        source, "launch_sparse_attention_head64_fused_hd576_bf16("
+    )
+
+    assert "float* scores" not in launcher
+    assert "bfloat16_t* probabilities" not in launcher
+    assert "l1_scores_buf" in source
+    assert "ub_scores_buf" in source
+    assert "ub_probabilities_buf" in source
+    assert "running_max" in source
+    assert "running_sum" in source
+
+
 def test_sparse_attention_head64_plan_keeps_dynamic_task_mapping():
     plan = _head64_plan_source()
     bridge = _bridge_source()
