@@ -1,14 +1,38 @@
 # Sparse Attention Head64 渐进式融合设计
 
-本文定义 CannBench Ascend SIMT Sparse Attention 第一阶段 Head64 优化的实现边界、
-数据流、Host 参数、设备侧任务映射、开发检查点和验收标准。
+本文定义 CannBench Ascend SIMT Sparse Attention Head64 优化的实现边界、数据流、
+Host 参数、设备侧任务映射、开发检查点和验收标准。
 
 本文是已确认的实现设计，不替代
 [`PARALLEL_SPLITTING_RESEARCH.zh-CN.md`](PARALLEL_SPLITTING_RESEARCH.zh-CN.md)
-中的外部方案调研。调研文档保留 A/B/C 三组长期对照；本文只实现其中优先级最高、
-也是后续 Split-KV 基础的方案 A。
+中的外部方案调研。调研文档保留 A/B/C 三组长期对照；本文记录从方案 A 的渐进式
+验证到方案 B 的 P=4 最终融合，方案 C 不在本设计范围内。
 
-设计日期：2026-07-27。
+设计日期：2026-07-27。最终融合范围更新：2026-07-28。
+
+## 0. 当前状态与最终范围
+
+原设计按四个检查点推进。当前状态为：
+
+| 检查点 | 状态 | 当前交付 |
+| --- | --- | --- |
+| 1. 控制面与编译骨架 | 已完成 | tuning、Host plan、1024-thread 双 AIV 骨架 |
+| 2. Head64 QK | 已完成 | M64 Cube QK 和 partition-aware scores |
+| 3. 双 AIV softmax 与 Cube PV | 已完成 | P=4 Split-KV、partial output/LSE 和 Combine |
+| 4. 最终融合与性能验收 | 未完成 | 本文定义的 P=4 fused 主 kernel 和验收 |
+
+检查点一至三保留了从 `selected_partitions=1` 到 Split-KV 的演进过程；对应的
+Split-KV 细节与实测记录见
+[`HEAD64_SPLIT_KV_DESIGN.zh-CN.md`](HEAD64_SPLIT_KV_DESIGN.zh-CN.md) 和
+[`simt/README.md`](simt/README.md)。检查点四只优化 V3.2 realistic decode 的
+`(head_tile=64, selected_partitions=4)`：
+
+```text
+B(2) * Q(2) * HeadGroup(2) * Partition(4) = 32 MIX tasks
+32 AIC + 64 AIV
+```
+
+`P=1` 和 `P=2` 仅保留为历史精度与性能对照，不是最终融合的额外优化目标。
 
 ## 1. 目标
 
@@ -46,16 +70,16 @@ PV: [64, S_tile] x [S_tile, 512]
 
 ## 2. 非目标
 
-第一阶段不做以下工作：
+最初 P=1 检查点不做以下工作：
 
-- 不实现沿 selected tokens 的 Split-KV。
-- 不实现 partial output workspace 和跨 partition combine。
+- 不在该历史检查点实现沿 selected tokens 的 Split-KV。
+- 不在该历史检查点实现 partial output workspace 和跨 partition combine。
 - 不实现 `head_tile=16` 对照。
 - 不让两个独立 AIC task 跨核共享 K/V staging。
 - 不优化 `family_hd128`、`family_hd256` 或普通 `family_hd512`。
 - 不优化 prefill。
 - 不修改公共 CLI、Backend、Workflow 或全局配置。
-- 不在 benchmark 前将 `head64` 设为默认。
+- 未通过检查点四验收前不将 P=4 设为 V3.2 decode 自动默认值。
 - 不新增 C++ Basic API、`SetFlag`、`WaitFlag` 或 `PipeBarrier` 依赖。当前源码仍
   过渡性保留 `basic_api/kernel_common.h` 和 AIC/AIV 握手所需的
   `basic_api/kernel_operator_block_sync_intf.h`。
@@ -64,7 +88,7 @@ PV: [64, S_tile] x [S_tile, 512]
 
 采用渐进式融合，而不是一次完成整个 fused kernel。
 
-最终目标是单个 Head64 MIX kernel：
+最初 P=1 目标是单个 Head64 MIX kernel：
 
 ```text
 双 AIV gather K/V tile
@@ -75,8 +99,9 @@ PV: [64, S_tile] x [S_tile, 512]
 ```
 
 开发中先保留阶段性 workspace，使 QK、softmax 和 PV 可以分别验证。每个检查点通过
-精度和运行稳定性验证后再融合。最终代码只保留 legacy 和完整 `head64` 两条路径，
-阶段性调试实现保留在 Git 历史中，不作为长期公开变体。
+精度和运行稳定性验证后再融合。Split-KV 交付后，最终性能目标调整为 P=4 的一个
+fused 主 kernel 加一个必要的跨 partition Combine kernel。阶段性 QK/PV 调试实现
+保留在 Git 历史中，不作为 P=4 的最终执行路径。
 
 这一选择兼顾两点：
 
@@ -99,12 +124,14 @@ CANNBENCH_SPARSE_ATTENTION_SELECTED_PARTITIONS
 | 配置 | `HEAD_TILE` | `SELECTED_PARTITIONS` | 含义 |
 | --- | ---: | ---: | --- |
 | 默认 | 1 | 1 | legacy |
-| 第一阶段 | 64 | 1 | 方案 A：Head64，不拆 S |
-| 后续候选 | 64 | 4 | 方案 B：Head64 + Split-KV |
+| 历史对照 | 64 | 1 | 方案 A：Head64，不拆 S |
+| 历史对照 | 64 | 2 | Head64 + Split-KV 16-task |
+| 最终目标 | 64 | 4 | Head64 + Split-KV 32-task |
 | 后续候选 | 16 | 1 | 方案 C：Head16，不拆 S |
 
-本阶段只接受 `(1,1)` 和 `(64,1)`。显式设置其他组合时返回清晰错误，不静默回退，
-避免 profiler 误测 legacy。
+当前实现接受 `(1,1)`、`(64,1)`、`(64,2)` 和 `(64,4)`。显式设置其他组合时返回
+清晰错误，不静默回退，避免 profiler 误测 legacy。检查点四只改变 `(64,4)` 的
+内部执行路径，不扩大 tuning 集合。
 
 ### 4.2 Torch custom op 边界
 
@@ -122,7 +149,7 @@ C++ Host bridge 根据 shape 和这两个参数生成 `SparseAttentionLaunchPlan
 
 ### 4.3 实验路径准入条件
 
-`head64` 第一阶段只接受：
+`head64` 路径接受：
 
 ```text
 phase == decode
@@ -133,7 +160,7 @@ H == 128
 KV_H == 1
 Dqk == 576
 Dv == 512
-selected_partitions == 1
+selected_partitions in {1, 2, 4}
 ```
 
 `B`、`Q`、`C` 和 `S` 由 Host plan 动态读取。`S` 支持不足 64 tokens 的尾块，
@@ -165,7 +192,7 @@ context_tokens
 selected_tokens
 ```
 
-第一阶段固定：
+最初 P=1 检查点固定：
 
 ```text
 head_tile = 64
@@ -184,7 +211,7 @@ task_count = B * Q * head_group_count * selected_partitions
 used_core_num = min(task_count, physical_aic_limit)
 ```
 
-第一阶段 `selected_partitions=1`，task ID 映射为：
+最初 P=1 检查点的 task ID 映射为：
 
 ```text
 head_group = task_id % head_group_count
@@ -192,15 +219,15 @@ query_token = (task_id / head_group_count) % Q
 batch = task_id / (head_group_count * Q)
 ```
 
-V3.2 full case：
+V3.2 full case 在 P=1 时：
 
 ```text
 head_group_count = 128 / 64 = 2
 task_count = 2 * 2 * 2 = 8
 ```
 
-每个 task 完整处理对应 `(batch, query_token, head_group)` 的 `S` 个 selected
-tokens。不同 task 不共享临时状态，也不需要跨 AIC 同步。
+P=4 最终路径把 partition 作为最内层 task 维度，得到 `8 * 4 = 32` 个 task；每个
+task 处理 512 个 selected tokens。不同 task 不共享临时状态，也不需要跨 AIC 同步。
 
 ## 6. Device 数据流
 
@@ -343,60 +370,40 @@ Q、K、probability 和 V 在 L1 中按阶段复用。最终布局以 `dav-3510`
 
 ## 8. 同步边界
 
-当前 Head64 staged kernel 使用 CrossCore 握手和 pipe 内顺序：
+当前 staged QK/PV kernel 仍过渡性使用
+`AscendC::CrossCoreSetFlag/CrossCoreWaitFlag`。检查点四是新设计，必须回到仓库规定的
+`C API + Tensor API + SIMT API` 边界：
 
-1. `AscendC::CrossCoreSetFlag/CrossCoreWaitFlag` 负责同一个 MIX task 内 AIC 与两个
-   AIV 的阶段握手。QK 使用 mode 2；PV 的 AIV 到 AIC ready 使用 mode 4，使 AIC
-   分别等待两个 AIV subblock，反方向继续使用 mode 2。
-2. `asc_sync_notify/asc_sync_wait` 负责单个 AIC 或 AIV 内部 pipeline 的 buffer
-   复用顺序。当前交付源码没有调用 `AscendC::Mutex::Lock/Unlock`。
+1. 同一个 MIX task 内的 AIC/AIV 阶段握手使用 C API
+   `asc_sync_block_arrive(pipe, flag_id)` 和 `asc_sync_block_wait(pipe, flag_id)`。
+2. 跨核同步选择 mode 2 语义；`8` 用于 AIV 到 AIC ready，`9` 用于 AIC 到 AIV
+   ready。每轮复用前必须完成同方向完整 arrive/wait 配对。
+3. `asc_sync_notify/asc_sync_wait` 只负责单个 AIC 或 AIV 内部 pipeline 的 buffer
+   复用顺序。
+4. 两个 AIV 都执行实际 gather、softmax、probability pack、output update 和 writeback；
+   不允许任一 AIV 通过提前 return 退化为空闲 subblock。
 
-`basic_api/kernel_operator_block_sync_intf.h` 为现有 CrossCore API 提供声明；
-`basic_api/kernel_common.h` 是尚待清理的过渡性 include。不得从这两个 header
-引入其他 Basic API。
-
-逻辑阶段为：
-
-```text
-K_READY
-SCORE_READY
-P_READY
-PV_READY
-```
-
-所有阶段都成对调用 set/wait。QK 的 mode 2 握手使用 `8` 和 `9`：
-
-```cpp
-constexpr uint8_t kAivToAicReady = 8;
-constexpr uint8_t kAicToAivReady = 9;
-```
-
-QK 中 `8` 用于 AIV 到 AIC，`9` 用于 AIC 到 AIV。PV 中两个 AIV subblock 通过
-mode 4 分别发布 `8` 和 `24`，AIC 对两者都完成 wait 后才消费 L1 数据；AIC 到 AIV
-仍通过 mode 2 的 `9` 发布。每次复用前必须先完成同方向的完整 set/wait 配对，任一
-时刻每个方向最多只有一个未消费事件。
-
-QK 的 query buffer 还必须遵守所有权顺序：AIC 等待 query ready 后，先通过 MTE1
-把当前 query tile 从 L1 拷入 L0A，再在同一 PIPE_MTE1 上发布 `9` 允许 AIV 写入 key。
-这样当物理核循环处理下一个逻辑 task 时，AIV 即使覆盖 L1 query，也不会破坏当前
-task 已保存到 L0A 的 query。方案 A 不使用 mode 0 做全核同步，也不让不同逻辑 task
-共享状态。
-
-第一版使用单 buffer 顺序状态机：
+逻辑状态机使用单 buffer 严格顺序：
 
 ```text
-AIV gather -> AIC QK -> AIV softmax -> AIC PV -> AIV output update
+QUERY_READY
+  -> K_READY -> SCORE_READY -> PROBABILITY_READY
+  -> V_READY -> PV_READY -> OUTPUT_UPDATED
 ```
 
-正确性稳定后，最终融合检查点才引入 ping-pong buffer，使下一 selected tile 的
-gather 与当前 tile 的 QK/softmax/PV 重叠。
+query buffer 继续遵守所有权顺序：AIC 等待 query ready 后，先通过 MTE1 把当前 query
+tile 从 L1 拷入 L0A，再发布 AIC-to-AIV ready 允许 AIV 覆盖共享 L1。这样即使物理核
+以后循环处理多个逻辑 task，也不会破坏当前 task 已保存到 L0A 的 query。
 
 禁止：
 
 - AIC 之间共享状态。
 - 使用 GM flag 自旋同步。
-- 新增 `SetFlag/WaitFlag/PipeBarrier`。
-- 引入上述两个例外之外的 Basic API header 或 `kernel_operator.h`。
+- 在新 fused kernel 中调用 `CrossCoreSetFlag/CrossCoreWaitFlag`、
+  `SetFlag/WaitFlag/PipeBarrier` 或引入 Basic API header。
+- 使用 mode 0/1 全核同步。
+- 在首版正确性和 profiler 结果出来前引入 ping-pong；只有单 buffer 的等待或搬运数据
+  证明双缓冲有收益时，才把它作为同一检查点内的后续优化。
 
 ## 9. 文件边界
 
@@ -408,7 +415,9 @@ src/cannbench/operators/builtin/sparse_attention/
     ops.py
     csrc/sparse_attention.asc
     csrc/simt/sparse_attention_head64_plan.h
+    csrc/simt/sparse_attention_head64_common.h
     csrc/simt/sparse_attention_head64_hd576.asc
+    csrc/simt/sparse_attention_head64_fused_hd576.asc
     setup.py
   simt/test/
     test_sparse_attention_dispatch.py
@@ -421,8 +430,12 @@ src/cannbench/operators/builtin/sparse_attention/
 - `ops.py`：读取算子本地实验参数，保留 legacy 默认值。
 - `sparse_attention.asc`：校验参数、构造 Host plan、选择 legacy/head64 launch。
 - `sparse_attention_head64_plan.h`：Host/device 共享 POD plan 和整数常量。
-- `sparse_attention_head64_hd576.asc`：Head64 device kernel 和设备侧数学 helper。
-- `setup.py`：独立注册 Head64 device ELF。
+- `sparse_attention_head64_common.h`：staged/fused 共用的无 Basic API 数学、布局和
+  task helper。
+- `sparse_attention_head64_hd576.asc`：现有 staged P=1/P=2 对照 kernel。
+- `sparse_attention_head64_fused_hd576.asc`：P=4 fused 主 kernel；只使用 C API、
+  Tensor API 和 SIMT API，不包含 Basic API header。
+- `setup.py`：分别注册 staged 与 fused Head64 device ELF。
 - 算子本地测试：验证参数、源码边界、编译、精度和运行稳定性。
 
 不修改：
@@ -468,20 +481,57 @@ src/cannbench/operators/builtin/dsa_decode/
 - AIC `M=64` PV。
 - FP32 online output accumulator。
 - 全无效行、causal mask 和 selected tail 精度通过。
+- Split-KV P=4 将 logical task 扩为 32，输出 partition-local output/LSE。
+- 独立 Combine 完成四个 partition 的稳定 log-sum-exp 归约。
 
-此阶段可以继续使用完整 scores workspace，以便把 PV/softmax 错误与 QK 错误分开。
+此阶段保留完整 scores 和 probabilities workspace，以便把 PV/softmax 错误与 QK
+错误分开。P=4 的 staged 路径已通过 32 AIC + 64 AIV 实际工作、完整 realistic decode
+精度和性能验证，但仍不是最终融合形态。
 
 ### 10.4 检查点四：最终融合与性能验收
 
-交付：
+本检查点的性能目标只有 V3.2 realistic decode P=4，不增加 P=1/P=2 或其他 family
+场景。fused route 仍保持现有 Head64 的动态 `B/Q/S` contract，以便运行 reduced、
+boundary 和物理核复用测试。最终执行图为：
 
-- QK、online-softmax 和 PV 合入单个 MIX kernel。
-- 删除 Head64 路径的完整 scores workspace。
-- 根据单 buffer profiler 决定是否启用 ping-pong。
-- reduced shape 和 full realistic decode 精度通过。
-- 与 legacy 做等条件延迟和 profiler 对照。
+```text
+32-task fused QK + online-softmax + PV
+  -> 8-task Combine
+  -> final output/LSE
+```
 
-最终代码不保留只用于检查点二、三的调试入口。
+主 kernel 的每个 logical task 对应一个
+`(batch, query_token, head_group, partition)`，完整处理该 partition 的 512 tokens。
+它在一个 MIX launch 内完成：
+
+```text
+pack Q once
+for each selected tile in this partition:
+    dual-AIV gather K -> AIC M64 QK
+    dual-AIV online softmax + BF16 probability pack
+    dual-AIV gather V -> AIC M64 PV
+    dual-AIV FP32 online output update
+write partition-local output/LSE
+```
+
+交付要求：
+
+- 主 kernel launch 为 32 AIC / 64 AIV，两个 AIV 均使用 1024 SIMT threads 并有
+  profiler 可见的实际 Vector 工作。
+- QK 和 PV 继续使用 Tensor API MMAD；不把 Cube 计算退回纯 Vector。
+- Host 的 P=4 路径只 launch fused 主 kernel 和现有 Combine，不再 launch staged QK/PV。
+- fused kernel 位于独立 device source/ELF，不从 staged source 复制遗留 Basic API
+  include；可复用的数学和布局 helper 移到无 Basic API 依赖的算子本地 header。
+- 删除 P=4 路径的 `task_scores` 和 `task_probabilities`，不再分配与
+  `B * H * Q * S` 成比例的完整中间矩阵。
+- 保留 P=4 Combine 所需的 partition-local FP32 `task_output` 和 `task_lse`；Combine
+  仍负责跨四个 partition 的稳定 log-sum-exp 归约。
+- staged P=1/P=2 只作为历史对照保留，不要求迁移到 fused kernel，也不作为默认候选。
+- 首版使用单 buffer；是否增加 ping-pong 由 fused kernel profiler 决定。
+- fused 路径通过 reduced/boundary、物理核复用和 full realistic decode 精度验证。
+
+P=4 是否成为 V3.2 decode 的自动默认值，必须在最终精度和性能门槛通过后另行决定；
+本检查点本身不修改公共 CLI、Backend 或默认 tuning。
 
 ## 11. 错误处理
 
@@ -516,16 +566,14 @@ pytest -q
 
 源码契约测试需要确认：
 
-- 新 kernel 的过渡性 Basic API header 只能有当前保留的
-  `basic_api/kernel_common.h` 和提供 CrossCore API 的
-  `basic_api/kernel_operator_block_sync_intf.h`。
-- 新 kernel 从这两个 header 只调用
-  `AscendC::CrossCoreSetFlag/CrossCoreWaitFlag`。
-- 新 kernel 不调用禁止的同步 API。
+- 新 fused kernel 不包含 Basic API header，不调用
+  `CrossCoreSetFlag/CrossCoreWaitFlag` 或其他禁止的同步 API。
+- 新 fused kernel 使用 C API block arrive/wait 完成 mode-2 AIC/AIV 同步。
 - 两个 AIV均有有效分支，不存在 `subBlockIdx != 0` 直接退出。
 - SIMT entry 使用 `__launch_bounds__(1024)` 和 `dim3(1024, 1, 1)`。
 - QK 和 PV 使用 Tensor API MMAD。
-- Host 根据 shape 计算 task count，不写死 V3.2 的 `8`。
+- Host 根据 shape 和 P=4 计算 task count，不在 device kernel 写死 `32`。
+- P=4 Host 路径不分配 `task_scores/task_probabilities`，也不调用 staged QK/PV。
 - 默认参数仍选择 legacy。
 
 ### 12.2 目标环境编译
@@ -548,6 +596,7 @@ NPU_ARCH=dav-3510
 - causal mask。
 - 负 index 和越界 index。
 - 整行 index 都无效。
+- `task_count > 32` 的物理核循环复用 case。
 
 output 和 LSE 使用现有 contract：
 
@@ -568,7 +617,11 @@ realistic_decode::deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048
 
 ### 12.5 性能与 profiler
 
-legacy 和 `head64` 必须使用相同输入、warmup、重复次数和同步方式。至少记录：
+当前 staged P=4 的 post-fix 端到端中位延迟是 `0.574588 ms`，作为检查点四的直接
+基线。已有分阶段 profiler 参考值为 QK `136.606 us`、PV `211.732 us`、Combine
+`36.054 us`；新的采集必须使用同一输入、warmup、重复次数和同步方式。
+
+至少记录：
 
 - 端到端 Sparse Attention 延迟。
 - 实际有效 AIC/AIV 数。
@@ -579,20 +632,21 @@ legacy 和 `head64` 必须使用相同输入、warmup、重复次数和同步方
 - AIC/AIV等待比例。
 - GM/L2 流量和 L2 hit rate。
 
-首轮性能门槛是 `head64` 延迟低于 legacy，不预设固定加速倍数。如果未达到门槛，
-保持实验态，记录瓶颈并决定继续优化方案 A 还是进入 Split-KV；不得切换默认路径。
+性能通过条件：
+
+- fused P=4 + Combine 的端到端中位延迟不高于 staged P=4 的 `0.574588 ms`。
+- profiler 显示 fused 主 kernel launch 为 `32 / 64`，且全部 32 AIC 有 Cube 工作、
+  全部 64 AIV 有 Vector 工作。
+- 分别记录 fused 主 kernel 和 Combine 的 kernel-side duration，并与原
+  QK + PV + Combine 三段之和比较。
+
+如果端到端性能回退，保持 staged P=4 为可用实现，不切换默认路径；根据 profiler
+判断是继续做单 buffer 调度优化还是引入 ping-pong，不能仅凭 launch 维度判定通过。
 
 ## 13. 后续演进
 
-方案 A 稳定后，方案 B 复用同一 launch plan 和 Head64 kernel 主体：
+检查点四验收后再考虑：
 
-```text
-selected_partitions > 1
-task = (batch, query_token, head_group, selected_partition)
-```
-
-主 kernel 改为输出局部 max、sum 和 weighted output，独立 combine kernel 完成跨
-partition 合并。方案 B 不应复制 QK、softmax 或 PV 数学实现。
-
-`head_tile=16` 只作为后续满核对照。是否支持它由方案 A/B profiler 决定，本阶段
-不为它增加 device 分支。
+- 根据单 buffer profiler 决定是否引入 ping-pong，而不是预先增加同步复杂度。
+- 根据完整 workflow 数据决定是否让 V3.2 decode 自动选择 `(64,4)`。
+- P=1/P=2、`head_tile=16` 或其他 family 的对比与扩展另立设计，不进入本检查点。
