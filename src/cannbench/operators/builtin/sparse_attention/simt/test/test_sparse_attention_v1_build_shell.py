@@ -71,9 +71,12 @@ def test_sparse_attention_head64_plan_keeps_dynamic_task_mapping():
         "selected_partitions"
     ) in bridge
     assert "std::min<int64_t>(task_count, kHead64PhysicalAicLimit)" in bridge
+    assert "task_id % plan.selected_partitions" in device
+    assert "task_id /= plan.selected_partitions" in device
     assert "task_id % plan.head_group_count" in device
-    assert "(task_id / plan.head_group_count) % plan.query_tokens" in device
-    assert "task_id / (plan.head_group_count * plan.query_tokens)" in device
+    assert "task_id /= plan.head_group_count" in device
+    assert "task_id % plan.query_tokens" in device
+    assert "task_id / plan.query_tokens" in device
 
 
 def test_sparse_attention_head64_host_supports_split_kv_route():
@@ -86,6 +89,26 @@ def test_sparse_attention_head64_host_supports_split_kv_route():
     assert "selected_partition_tile_capacity" in plan
     assert "selected_tile_count" in bridge
     assert "partition_tile_capacity" in bridge
+
+
+def test_sparse_attention_head64_task_mapping_keeps_partition_innermost():
+    source = _head64_source()
+    assert "int32_t partition;" in source
+    assert "task_id % plan.selected_partitions" in source
+    assert "task_id /= plan.selected_partitions" in source
+    assert "head64_partition_begin" in source
+    assert "head64_partition_end" in source
+
+
+def test_sparse_attention_head64_qk_uses_partition_local_scores():
+    source = _head64_source()
+    bridge = _bridge_source()
+    assert "plan.selected_partition_tile_capacity * plan.selected_tile" in bridge
+    assert "partition_token_capacity" in source
+    assert "partition_begin + local_selected_start" in source
+    assert "logical_task) * kHead64Tile * partition_token_capacity" in " ".join(
+        source.split()
+    )
 
 
 def test_sparse_attention_head64_source_uses_only_allowed_basic_api():
@@ -232,7 +255,7 @@ def test_sparse_attention_head64_qk_maps_dynamic_tasks():
     assert "plan.selected_tokens" in source
     assert (
         "static_cast<int64_t>(logical_task) * kHead64Tile * "
-        "plan.selected_tokens"
+        "partition_token_capacity"
     ) in normalized
 
 
@@ -250,10 +273,14 @@ def test_sparse_attention_head64_qk_uses_both_aiv_for_query_and_key_pack():
 
 def test_sparse_attention_head64_qk_has_staged_host_route():
     source = _bridge_source()
+    normalized = " ".join(source.split())
 
     assert "sparse_attention_forward_family_hd576_head64(" in source
     assert "launch_sparse_attention_head64_qk_hd576_bf16(" in source
-    assert "{plan.task_count, kHead64Tile, plan.selected_tokens}" in source
+    assert (
+        "{plan.task_count, kHead64Tile, "
+        "plan.selected_partition_tile_capacity * plan.selected_tile}"
+    ) in normalized
 
 
 def test_sparse_attention_head64_routes_task_scores_to_staged_pv():
