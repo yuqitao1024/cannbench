@@ -111,6 +111,45 @@ def test_sparse_attention_head64_qk_uses_partition_local_scores():
     )
 
 
+def test_sparse_attention_head64_score_pipeline_uses_one_padded_row_stride():
+    source = _head64_source()
+    qk = _function_body(
+        source,
+        "sparse_attention_head64_qk_aic(",
+        "__global__ __aicore__ void sparse_attention_head64_qk_kernel(",
+    )
+    softmax = _function_body(
+        source,
+        "head64_online_softmax_vf(",
+        "head64_probability_pack_vf(",
+    )
+    probability_pack = _function_body(
+        source,
+        "head64_probability_pack_vf(",
+        "head64_value_pack_vf(",
+    )
+    pv = _function_body(
+        source,
+        "sparse_attention_head64_pv_aiv(",
+        "sparse_attention_head64_pv_aic(",
+    )
+
+    assert "head64_score_row_stride" in source
+    assert "plan.selected_partition_tile_capacity * plan.selected_tile" in source
+    assert (
+        "const int32_t partition_token_capacity = "
+        "head64_score_row_stride(plan);"
+    ) in " ".join(qk.split())
+    assert "kHead64Tile * partition_token_capacity" in " ".join(qk.split())
+    assert "int32_t score_row_stride" in softmax
+    assert "task_head) * score_row_stride" in " ".join(softmax.split())
+    assert "int32_t score_row_stride" in probability_pack
+    assert "task_head) * score_row_stride" in " ".join(
+        probability_pack.split()
+    )
+    assert "const int32_t score_row_stride = head64_score_row_stride(plan);" in pv
+
+
 def test_sparse_attention_head64_source_uses_only_allowed_basic_api():
     source = _head64_source()
     basic_headers = {
