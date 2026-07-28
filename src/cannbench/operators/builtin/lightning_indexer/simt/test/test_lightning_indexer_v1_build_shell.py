@@ -71,6 +71,21 @@ def test_context_sharded_family_64x128_uses_q2_atom_and_both_aivs():
     )
 
 
+def test_lightning_indexer_fused_kernels_use_all_32_aivs():
+    root = Path(
+        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
+        "aten_dsa_lightning_indexer/csrc/simt"
+    )
+    for family in ("4x64", "64x128"):
+        source = (root / f"lightning_indexer_fused_family_{family}.asc").read_text(
+            encoding="utf-8"
+        )
+        assert "constexpr int32_t kMaxUsedCoreNum = 16;" in source
+        assert "constexpr int32_t kMaxUsedCoreNum = 11;" not in source
+        assert "constexpr uint8_t kCrossCoreSyncMode = 2;" in source
+        assert "constexpr uint16_t kScoreReadyFlag = 0;" in source
+
+
 def test_context_sharded_topk_builds_a_separate_device_library():
     setup_py = Path(
         "src/cannbench/operators/builtin/lightning_indexer/simt/v1/setup.py"
