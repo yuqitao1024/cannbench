@@ -535,6 +535,33 @@ def test_sparse_attention_head64_routes_task_scores_to_staged_pv():
     assert "run_sparse_attention_family_hd512_decode_direct_tile(" not in head64
 
 
+def test_sparse_attention_head64_p4_routes_fused_then_combine():
+    bridge = _bridge_source()
+    body = _function_definition(
+        bridge, "sparse_attention_forward_family_hd576_head64("
+    )
+
+    assert "if (plan.selected_partitions == 4)" in body
+    fused = body.index("run_sparse_attention_head64_fused_hd576_bf16(")
+    combine = body.index("run_sparse_attention_head64_combine_hd576_bf16(")
+    assert fused < combine
+
+
+def test_sparse_attention_head64_p4_has_no_full_score_probability_workspace():
+    bridge = _bridge_source()
+    body = _function_definition(
+        bridge, "sparse_attention_forward_family_hd576_head64("
+    )
+
+    p4 = body.split("if (plan.selected_partitions == 4)", 1)[1].split(
+        "auto task_scores", 1
+    )[0]
+    assert "task_scores" not in p4
+    assert "task_probabilities" not in p4
+    assert "run_sparse_attention_head64_qk_hd576_bf16" not in p4
+    assert "run_sparse_attention_head64_pv_hd576_bf16" not in p4
+
+
 def test_sparse_attention_head64_softmax_uses_1024_threads():
     source = _head64_source()
 
@@ -781,7 +808,9 @@ def test_sparse_attention_head64_host_skips_combine_for_p1():
     p1_return = head64_host.index("return {output, task_lse};", p1)
     split_output = head64_host.index("auto output = at::empty(", p1)
     split_lse = head64_host.index("auto lse = at::empty(", p1)
-    combine = head64_host.index("run_sparse_attention_head64_combine_hd576_bf16(")
+    combine = head64_host.index(
+        "run_sparse_attention_head64_combine_hd576_bf16(", split_lse
+    )
 
     assert p1 < p1_return < split_output < split_lse < combine
 
