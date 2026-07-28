@@ -171,6 +171,27 @@ def test_sparse_attention_head64_fused_scores_stay_tile_local():
     assert "running_sum" in source
 
 
+def test_sparse_attention_head64_fused_pv_is_m64_tensor_api():
+    source = _head64_fused_source()
+
+    assert "Head64PvMmadTrait" in source
+    assert "pv_params.m = 64" in source
+    assert "pv_params.n = current_value" in source
+    assert "pv_params.k = current_selected" in source
+    assert "running_output" in source
+    assert "old_scale" in source
+
+
+def test_sparse_attention_head64_fused_writes_combine_compatible_partials():
+    source = _head64_fused_source()
+
+    assert "task_output" in source
+    assert "partial_lse" in source
+    assert "running_max + logf(running_sum)" in source
+    assert "running_output_values[local_head * 512 + dim] / running_sum" in source
+    assert "-std::numeric_limits<float>::infinity()" in source
+
+
 def test_sparse_attention_head64_plan_keeps_dynamic_task_mapping():
     plan = _head64_plan_source()
     bridge = _bridge_source()
