@@ -448,3 +448,105 @@ def test_custom_op_prefill_family_64x128_matches_reference_when_registered():
 
     assert ops.torch.equal(custom, reference)
     assert custom.dtype == ops.torch.int32
+
+
+def _require_v32_prefill_npu_custom_op():
+    if ops.torch is None:
+        pytest.skip("torch is required for V3.2 prefill custom-op coverage")
+    namespace = getattr(ops.torch.ops, "aten_dsa_lightning_indexer", None)
+    if namespace is None or not hasattr(namespace, "lightning_indexer_forward"):
+        pytest.skip("registered custom op is required for V3.2 prefill coverage")
+    npu_namespace = getattr(ops.torch, "npu", None)
+    if npu_namespace is None or not npu_namespace.is_available():
+        pytest.skip("torch.npu with an available PrivateUse1 device is required")
+    return ops.torch
+
+
+def _v32_prefill_target_tensors(torch):
+    torch.manual_seed(7)
+    device = torch.device("npu")
+    query = torch.randn(1, 4096, 64, 128, device=device, dtype=torch.bfloat16)
+    keys = torch.randn(1, 32768, 128, device=device, dtype=torch.bfloat16)
+    weights = torch.rand(1, 4096, 64, device=device, dtype=torch.bfloat16)
+    valid = torch.arange(28673, 32769, device=device, dtype=torch.int32).reshape(
+        1, 4096
+    )
+    return query, keys, weights, valid
+
+
+def _v32_prefill_sampled_scores(torch, query, keys, weights, valid):
+    rows = (0, 1365, 2730, 4095)
+    sampled_query = query[:, rows]
+    sampled_weights = weights[:, rows]
+    reduced = torch.einsum("bqhd,bcd->bqhc", sampled_query, keys)
+    reduced = torch.relu(reduced)
+    reduced = (reduced * sampled_weights.unsqueeze(-1)).sum(dim=2)
+    positions = torch.arange(keys.shape[1], device=keys.device).reshape(1, 1, -1)
+    reduced = reduced.masked_fill(
+        positions >= valid[:, rows].unsqueeze(-1),
+        float("-inf"),
+    )
+    reference_scores = torch.topk(
+        reduced, 2048, dim=-1, largest=True, sorted=True
+    ).values
+    return rows, reduced, reference_scores
+
+
+def _assert_v32_prefill_sampled_score_sets(
+    torch, output, rows, reduced, reference_scores
+):
+    custom_scores = reduced.gather(-1, output[:, rows].to(torch.int64))
+    assert torch.equal(custom_scores, reference_scores)
+
+
+def test_v32_prefill_q2_matches_sampled_reference_scores():
+    torch = _require_v32_prefill_npu_custom_op()
+    query, keys, weights, valid = _v32_prefill_target_tensors(torch)
+    rows, reduced, reference_scores = _v32_prefill_sampled_scores(
+        torch, query, keys, weights, valid
+    )
+
+    custom = ops.lightning_indexer_forward(
+        query,
+        keys,
+        weights,
+        valid_context_lengths=valid,
+        top_k=2048,
+        phase="prefill",
+        family="family_64x128",
+    )
+    torch.npu.synchronize()
+
+    assert custom.shape == (1, 4096, 2048)
+    assert custom.dtype == torch.int32
+    assert not bool((custom[:, 0, :] >= 28673).any().item())
+    _assert_v32_prefill_sampled_score_sets(
+        torch, custom, rows, reduced, reference_scores
+    )
+
+
+def test_v32_prefill_q2_is_stable_across_repeated_launches():
+    torch = _require_v32_prefill_npu_custom_op()
+    query, keys, weights, valid = _v32_prefill_target_tensors(torch)
+    rows, reduced, reference_scores = _v32_prefill_sampled_scores(
+        torch, query, keys, weights, valid
+    )
+
+    outputs = [
+        ops.lightning_indexer_forward(
+            query,
+            keys,
+            weights,
+            valid_context_lengths=valid,
+            top_k=2048,
+            phase="prefill",
+            family="family_64x128",
+        )
+        for _ in range(3)
+    ]
+    torch.npu.synchronize()
+
+    for output in outputs:
+        _assert_v32_prefill_sampled_score_sets(
+            torch, output, rows, reduced, reference_scores
+        )

@@ -207,6 +207,55 @@ def test_context_sharded_bridge_dispatches_only_exact_bfloat16_decode_shape():
     assert ".item" not in body
 
 
+def test_prefill_q2_bridge_dispatches_only_the_exact_v32_bfloat16_shape():
+    source = Path(
+        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
+        "aten_dsa_lightning_indexer/csrc/lightning_indexer.asc"
+    ).read_text(encoding="utf-8")
+    body = source.split(
+        'if (phase == "prefill" && family == "family_64x128") {', 1
+    )[1].split(
+        'if (phase == "prefill" && family == "family_32x128") {', 1
+    )[0]
+
+    for predicate in (
+        "query.scalar_type() == at::ScalarType::BFloat16",
+        "query.size(0) == 1",
+        "query.size(1) == 4096",
+        "query.size(2) == 64",
+        "query.size(3) == 128",
+        "keys.size(1) == 32768",
+        "keys.size(2) == 128",
+        "top_k == 2048",
+    ):
+        assert predicate in body
+    assert body.index(
+        "lightning_indexer_forward_prefill_q2_family_64x128_bfloat16("
+    ) < body.index("lightning_indexer_forward_prefill_family_64x128_float(")
+    assert ".item" not in body
+
+
+def test_prefill_q2_bridge_records_all_raw_launch_tensors():
+    source = Path(
+        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
+        "aten_dsa_lightning_indexer/csrc/lightning_indexer.asc"
+    ).read_text(encoding="utf-8")
+    body = source.split(
+        "lightning_indexer_forward_prefill_q2_family_64x128_bfloat16(", 1
+    )[1].split("\n}\n", 1)[0]
+
+    assert "{1, 4096, 2048}" in body
+    for tensor in (
+        "query",
+        "keys",
+        "weights",
+        "valid_context_lengths",
+        "best_scores",
+        "output",
+    ):
+        assert f"record_tensor_on_stream({tensor}, npu_stream);" in body
+
+
 def test_lightning_indexer_simt_v1_register_has_python_module_entry():
     source = Path(
         "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
