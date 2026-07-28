@@ -389,12 +389,21 @@ def test_sparse_attention_forward_prefers_registered_custom_op_for_prefill_famil
     captured = {}
 
     def fake_custom_op(
-        query, shared_kv, indices, value_head_dim, phase, family, causal
+        query,
+        shared_kv,
+        indices,
+        value_head_dim,
+        phase,
+        family,
+        causal,
+        head_tile,
+        selected_partitions,
     ):
         del query, shared_kv, indices, value_head_dim
         captured["phase"] = phase
         captured["family"] = family
         captured["causal"] = causal
+        captured["tuning"] = (head_tile, selected_partitions)
         return "custom"
 
     monkeypatch.setattr(ops, "_load_registered_op", lambda: fake_custom_op, raising=False)
@@ -414,6 +423,7 @@ def test_sparse_attention_forward_prefers_registered_custom_op_for_prefill_famil
         "phase": "prefill",
         "family": family,
         "causal": True,
+        "tuning": (1, 1),
     }
 
 
