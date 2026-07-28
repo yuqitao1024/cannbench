@@ -58,6 +58,10 @@ The exact realistic decode shape was:
 B=2 Q=2 H=128 KV_H=1 context=32768 selected=2048 Dqk=576 Dv=512 causal=true
 ```
 
+Throughout this record, P means `selected_partitions`, and every P=1/2/4
+measurement fixes `head_tile=64`. P=1 is therefore the Head64 `(64,1)`
+baseline, not the default legacy `(head_tile=1, selected_partitions=1)` path.
+
 ### Wall Time
 
 Each P used three warmups and seven measured rounds of five calls. Every call
@@ -145,20 +149,33 @@ hit, miss, and victim counters; `n/a` means the profile recorded no accesses.
 ### DSA Decode Workflow
 
 The existing `dsa_decode` workflow order was used:
-`lightning_indexer -> sparse_attention`. Its canonical `[2,2,2048]` int32
-Indexer output was bound once outside timing, matching the workflow runner's
-prepared-input contract. Each measured workflow call then launched the
-Indexer callable followed by the bound sparse-attention callable and used one
-`torch.npu.synchronize()` after both components. Warmups, rounds, calls, and
-partition ordering matched the single-operator measurement.
+`lightning_indexer -> sparse_attention`. Query and shared-KV were materialized
+once outside timing. Each measured call obtained a new canonical `[2,2,2048]`
+int32 Indexer output and passed that exact tensor object directly as the
+`indices` argument to the operator-local sparse-attention wrapper. A preflight
+before timing verified matching Python identity and NPU data pointer, input and
+output shapes, and dtypes. No sparse-attention callable captured stale indices.
+
+Runtime profiling of the exact Indexer case confirmed the two dispatched
+kernels: context-sharded score MIX (`16 / 32`) followed by score TopK Vector
+(`4`). Source SHA-256 values:
+
+- context-sharded score: `05b1e54ac0faebe9a51a976f1cfc6bc8fa3a5ae87d036adf63d8ede5b129d302`
+- score TopK: `0723df3fa0b96717b146d2c1f734017728821c0a165338db836123da649e02fd`
+- host dispatcher: `8f572a077bff8eab9326bedaf45062a5d603a2dccbb69a05076935b44633aae4`
+
+Each P retained three explicit warmups, seven measured rounds, five calls per
+round, and the same alternating order as the standalone measurement. Each
+timed call used a pre-call synchronize outside the clock and one final
+`torch.npu.synchronize()` after both components.
 
 | P | Seven workflow round means (ms) | Median (ms) | Speedup vs P=1 |
 | ---: | --- | ---: | ---: |
-| 1 | `3.536788, 3.578843, 3.580511, 3.539922, 3.535684, 3.542215, 3.539764` | `3.539922` | `1.000x` |
-| 2 | `2.977060, 2.990544, 2.993878, 2.982196, 2.983361, 2.978907, 2.983153` | `2.983153` | `1.187x` |
-| 4 | `2.662575, 2.663346, 2.665090, 2.666458, 2.668565, 2.670020, 2.662177` | `2.665090` | `1.328x` |
+| 1 | `3.490468, 3.494191, 3.495697, 3.492197, 3.491825, 3.489573, 3.495473` | `3.492197` | `1.000x` |
+| 2 | `2.956524, 2.951654, 2.951119, 2.949921, 2.954765, 2.971182, 2.961050` | `2.954765` | `1.182x` |
+| 4 | `2.649714, 2.645587, 2.652893, 2.647296, 2.647610, 2.647585, 2.650449` | `2.647610` | `1.319x` |
 
-P=4 reduced the measured workflow median by `0.874832 ms` versus P=1 and was
+P=4 reduced the measured workflow median by `0.844586 ms` versus P=1 and was
 the fastest workflow configuration in this run.
 
 Supported realistic-family cases:
