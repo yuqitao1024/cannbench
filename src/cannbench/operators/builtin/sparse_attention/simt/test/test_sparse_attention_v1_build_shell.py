@@ -40,8 +40,12 @@ def _function_body(source: str, start_marker: str, end_marker: str) -> str:
     return source.split(start_marker, 1)[1].split(end_marker, 1)[0]
 
 
-def _function_definition(source: str, start_marker: str) -> str:
+def _function_definition(
+    source: str, start_marker: str, declaration_marker: str | None = None
+) -> str:
     start = source.index(start_marker)
+    if declaration_marker is not None:
+        start = source.rindex(declaration_marker, 0, start)
     while True:
         body_start = source.index("{", start)
         declaration_end = source.find(";", start, body_start)
@@ -57,6 +61,10 @@ def _function_definition(source: str, start_marker: str) -> str:
             if depth == 0:
                 return source[start : index + 1]
     raise AssertionError(f"unterminated function definition: {start_marker}")
+
+
+def _normalized_whitespace(source: str) -> str:
+    return " ".join(source.split())
 
 
 def test_sparse_attention_custom_op_schema_keeps_legacy_tuning_defaults():
@@ -523,8 +531,8 @@ def test_sparse_attention_head64_combine_uses_1024_thread_dual_aiv():
     source = _head64_source()
     combine_vf = _function_definition(
         source,
-        "__simt_vf__ __aicore__ __launch_bounds__(1024) inline void\n"
         "head64_combine_vf(",
+        declaration_marker="__simt_vf__",
     )
     combine_kernel = _function_definition(
         source,
@@ -535,26 +543,49 @@ def test_sparse_attention_head64_combine_uses_1024_thread_dual_aiv():
         "extern \"C\" void launch_sparse_attention_head64_combine_hd576_bf16(",
     )
     combine_scope = combine_vf + combine_kernel + launcher
+    combine_vf_normalized = _normalized_whitespace(combine_vf)
+    combine_kernel_normalized = _normalized_whitespace(combine_kernel)
 
     assert "__launch_bounds__(1024)" in combine_vf
     assert "partial_lse" in combine_vf
     assert "partial_output" in combine_vf
-    assert "float global_max = -std::numeric_limits<float>::infinity();" in combine_vf
-    assert "global_max = global_max < value ? value : global_max;" in combine_vf
-    assert "float global_sum = 0.0F;" in combine_vf
-    assert "global_sum += __expf(value - global_max);" in combine_vf
-    assert "const float global_lse = global_max + logf(global_sum);" in combine_vf
-    assert "__expf(partial_lse_value - global_lse) *" in combine_vf
-    assert "partial_output[partial_row * value_head_dim + dim]" in combine_vf
-    assert "if (!isfinite(global_max))" in combine_vf
-    assert "lse[lse_offset] = -std::numeric_limits<float>::infinity();" in combine_vf
-    assert "output[output_row + dim] = 0.0F;" in combine_vf
+    assert "float global_max = -std::numeric_limits<float>::infinity();" in combine_vf_normalized
+    assert "global_max = global_max < value ? value : global_max;" in combine_vf_normalized
+    assert "float global_sum = 0.0F;" in combine_vf_normalized
+    assert "global_sum += __expf(value - global_max);" in combine_vf_normalized
+    assert "const float global_lse = global_max + logf(global_sum);" in combine_vf_normalized
+    assert "__expf(partial_lse_value - global_lse) *" in combine_vf_normalized
+    assert "partial_output[partial_row * value_head_dim + dim]" in combine_vf_normalized
+    assert "if (!isfinite(global_max))" in combine_vf_normalized
+    assert "lse[lse_offset] = -std::numeric_limits<float>::infinity();" in combine_vf_normalized
+    assert "output[output_row + dim] = 0.0F;" in combine_vf_normalized
+    assert (
+        "int32_t remainder = base_task; const int32_t head_group = remainder % "
+        "head_group_count; remainder /= head_group_count; const int32_t "
+        "query_token = remainder % query_tokens; const int32_t batch_index = "
+        "remainder / query_tokens;"
+    ) in combine_vf_normalized
+    assert (
+        "const int32_t task_head = sub_block_index * 32 + "
+        "static_cast<int32_t>(local_head);"
+    ) in combine_vf_normalized
+    assert "constexpr int32_t kHead64Tile = 64;" in _head64_plan_source()
+    assert (
+        "(static_cast<int64_t>(base_task) * selected_partitions + p) * "
+        "kHead64Tile + task_head;"
+    ) in combine_vf_normalized
+    assert (
+        "const int64_t lse_offset = (static_cast<int64_t>(batch_index) * "
+        "query_heads + global_head) * query_tokens + query_token;"
+    ) in combine_vf_normalized
+    assert "const int64_t output_row = lse_offset * value_head_dim;" in combine_vf_normalized
 
-    assert "KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_2);" in combine_kernel
-    assert "if ASCEND_IS_AIC {\n    return;\n  } else if ASCEND_IS_AIV {" in combine_kernel
-    assert "AscendC::GetBlockIdx() / AscendC::GetTaskRatio()" in combine_kernel
-    assert "const uint32_t sub_block_index = AscendC::GetSubBlockIdx();" in combine_kernel
-    assert "asc_vf_call<head64_combine_vf>(\n        dim3(1024, 1, 1)," in combine_kernel
+    assert "KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_2);" in combine_kernel_normalized
+    assert "if ASCEND_IS_AIC { return; } else if ASCEND_IS_AIV {" in combine_kernel_normalized
+    assert "AscendC::GetBlockIdx() / AscendC::GetTaskRatio()" in combine_kernel_normalized
+    assert "const uint32_t sub_block_index = AscendC::GetSubBlockIdx();" in combine_kernel_normalized
+    assert "asc_vf_call<head64_combine_vf>( dim3(1024, 1, 1)," in combine_kernel_normalized
+    assert "base_task, sub_block_index);" in combine_kernel_normalized
     assert "CrossCore" not in combine_scope
 
     assert "extern \"C\" void launch_sparse_attention_head64_combine_hd576_bf16(" in launcher
@@ -565,8 +596,8 @@ def test_sparse_attention_head64_combine_uses_1024_thread_dual_aiv():
 def test_sparse_attention_head64_host_skips_combine_for_p1():
     head64_host = _function_definition(
         _bridge_source(),
-        "std::tuple<at::Tensor, at::Tensor>\n"
         "sparse_attention_forward_family_hd576_head64(",
+        declaration_marker="std::tuple<at::Tensor, at::Tensor>",
     )
     p1 = head64_host.index("if (plan.selected_partitions == 1)")
     p1_return = head64_host.index("return {output, task_lse};", p1)
