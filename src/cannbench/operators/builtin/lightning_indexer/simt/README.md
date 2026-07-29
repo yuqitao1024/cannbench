@@ -69,23 +69,39 @@ minimum recall was `0.973145`, and sampled attention/workflow output and LSE
 had zero mismatches at `atol=0.05, rtol=0.05`. The Q=2 workflow timing was not
 run because its standalone gate had already failed.
 
-## Context-sharded decode benchmark
+## Parameterized context-sharded decode benchmark
 
-Measured on Atlas 350 (`dav-3510`, CANN 9.2.0) on July 27, 2026. The target
-shape was BF16 `B=2, Q=2, C=32768, H=64, D=128, K=2048`, with valid context
-lengths `[[32767, 32768], [32767, 32768]]` and seed 7. Each isolated build used
-5 warmups followed by 30 `perf_counter_ns` samples, synchronizing the NPU after
-every public custom-op call.
+Measured on Ascend 950PR (`dav-3510`, CANN 9.2.0) on July 29, 2026. The BF16
+`family_64x128` decode fast path fixes `C=32768, H=64, D=128, K=2048` and
+plans runtime `B/Q` as a single mixed device launch. It chooses the largest
+shard count in `{16,8,4,2,1}` for which `B * ceil(Q / 2) * shards <= 32`.
+The production `B=2,Q=2` S16 launch therefore uses 32 mixed tasks, or 32 AICs
+and 64 AIVs. It skips local TopK because every shard has exactly 2048 scores;
+four row owners perform the final TopK inside the same kernel.
 
-| Path | Commit | Median | Min | Max |
-| --- | --- | ---: | ---: | ---: |
-| Corrected fused baseline | `d608c0b` | 46.7846 ms | 46.7764 ms | 47.5276 ms |
-| Context-sharded score + TopK | `8bac22a` | 2.1788 ms | 2.1745 ms | 2.2077 ms |
+For the S16 target, seed 29 used five warmups and 20 timed iterations. The
+old BasicInfo medians were `578.193481 us` for the score kernel and
+`1566.729981 us` for standalone TopK (`2144.923462 us` combined). The new
+single kernel measured `1984.271485 us`, a `7.489870%` reduction. Synchronized
+wall time dropped from `2.1796345 ms` to `2.034242 ms` (`6.67%`), and the
+score sets matched exactly. msopprof reports `Block Dim = 32` and
+`Mix Block Dim = 64`; the remote artifacts are
+`/tmp/msopprof-li-kernel-NDQdwo`.
 
-The candidate/baseline median ratio is `0.04657`, or a `21.47x` speedup. The
-exact-shape context-sharded dispatch remains enabled. Both SIMT entries use
-1024 threads: the score VF reports 0 bytes of stack and 22 registers, while
-the TopK VF reports 0 bytes of stack and 24 registers.
+The same BF16 score-set gate and synchronized wall comparison passed for every
+enabled planner tier:
+
+| Tier | Representative `[B,Q]` | New / old wall median (ms) | Reduction |
+| --- | --- | ---: | ---: |
+| S16 | `[2,2]` | 2.034242 / 2.1796345 | 6.67% |
+| S8 | `[3,2]` | 1.662996 / 26.159979 | 93.64% |
+| S4 | `[5,1]` | 2.012016 / 26.156473 | 92.31% |
+| S2 | `[9,1]` | 3.363967 / 26.156201 | 87.14% |
+| S1 | `[17,1]` | 6.267947 / 26.170409 | 76.05% |
+
+All five tiers remain enabled. The generic fused family kernel is retained for
+unsupported family contracts and planner overflow (`B * ceil(Q / 2) > 32`),
+not as a per-tier runtime performance switch.
 
 ## Realistic bf16 validation snapshot
 

@@ -234,6 +234,30 @@ def _context_sharded_target_tensors(torch):
     return query, keys, weights, valid
 
 
+def _context_sharded_random_tensors(torch, batch, query_count, seed):
+    torch.manual_seed(seed)
+    device = torch.device("npu")
+    query = torch.randn(
+        batch, query_count, 64, 128, device=device, dtype=torch.bfloat16
+    )
+    keys = torch.randn(batch, 32768, 128, device=device, dtype=torch.bfloat16)
+    weights = torch.rand(
+        batch, query_count, 64, device=device, dtype=torch.bfloat16
+    )
+    valid = torch.tensor(
+        [
+            [
+                32768 - (1 + (batch_index * 37 + query_index * 61) % 509)
+                for query_index in range(query_count)
+            ]
+            for batch_index in range(batch)
+        ],
+        device=device,
+        dtype=torch.int32,
+    )
+    return query, keys, weights, valid
+
+
 def _context_sharded_reference_scores(torch, query, keys, weights, valid):
     scores = torch.einsum("bqhd,bcd->bqhc", query, keys)
     scores = torch.relu(scores)
@@ -255,6 +279,34 @@ def _context_sharded_reference_scores(torch, query, keys, weights, valid):
     return reduced, reference_scores
 
 
+def _assert_context_sharded_scores_and_indices(
+    torch, custom, reduced, reference_scores, valid
+):
+    custom_scores = reduced.gather(-1, custom.to(torch.int64))
+    sorted_indices = torch.sort(custom, dim=-1).values
+
+    assert bool(((custom >= 0) & (custom < reduced.shape[-1])).all().item())
+    assert bool((custom < valid.unsqueeze(-1)).all().item())
+    assert bool((custom_scores[..., :-1] >= custom_scores[..., 1:]).all().item())
+    assert bool(
+        (sorted_indices[..., :-1] != sorted_indices[..., 1:]).all().item()
+    )
+    assert torch.equal(custom_scores, reference_scores)
+
+
+def test_context_sharded_score_assertion_rejects_indices_past_valid_context():
+    torch = pytest.importorskip("torch")
+    custom = torch.tensor([[[0, 1]]], dtype=torch.int32)
+    reduced = torch.zeros(1, 1, 4)
+    reference_scores = torch.zeros(1, 1, 2)
+    valid = torch.tensor([[1]], dtype=torch.int32)
+
+    with pytest.raises(AssertionError):
+        _assert_context_sharded_scores_and_indices(
+            torch, custom, reduced, reference_scores, valid
+        )
+
+
 def test_context_sharded_decode_matches_target_reference_scores():
     torch = _require_context_sharded_npu_custom_op()
     query, keys, weights, valid = _context_sharded_target_tensors(torch)
@@ -271,11 +323,12 @@ def test_context_sharded_decode_matches_target_reference_scores():
         phase="decode",
         family="family_64x128",
     )
-    custom_scores = reduced.gather(-1, custom.to(torch.int64))
 
     assert custom.shape == (2, 2, 2048)
     assert custom.dtype == torch.int32
-    assert torch.equal(custom_scores, reference_scores)
+    _assert_context_sharded_scores_and_indices(
+        torch, custom, reduced, reference_scores, valid
+    )
     assert not bool((custom[:, 0, :] == 32767).any().item())
 
 
@@ -301,5 +354,134 @@ def test_context_sharded_decode_is_stable_across_repeated_launches():
     torch.npu.synchronize()
 
     for output in outputs:
-        custom_scores = reduced.gather(-1, output.to(torch.int64))
-        assert torch.equal(custom_scores, reference_scores)
+        _assert_context_sharded_scores_and_indices(
+            torch, output, reduced, reference_scores, valid
+        )
+
+
+@pytest.mark.parametrize(
+    ("batch", "query_count", "shard_count", "seed"),
+    (
+        (2, 2, 16, 1602),
+        (3, 2, 8, 802),
+        (5, 1, 4, 402),
+        (9, 1, 2, 202),
+        (17, 1, 1, 102),
+    ),
+)
+def test_context_sharded_decode_random_bfloat16_tiers_match_reference(
+    batch, query_count, shard_count, seed
+):
+    torch = _require_context_sharded_npu_custom_op()
+    query, keys, weights, valid = _context_sharded_random_tensors(
+        torch, batch, query_count, seed
+    )
+    reduced, reference_scores = _context_sharded_reference_scores(
+        torch, query, keys, weights, valid
+    )
+
+    custom = ops.lightning_indexer_forward(
+        query,
+        keys,
+        weights,
+        valid_context_lengths=valid,
+        top_k=2048,
+        phase="decode",
+        family="family_64x128",
+    )
+    assert shard_count in {16, 8, 4, 2, 1}
+    assert custom.shape == (batch, query_count, 2048)
+    _assert_context_sharded_scores_and_indices(
+        torch, custom, reduced, reference_scores, valid
+    )
+
+
+def test_context_sharded_decode_s4_later_odd_tail_matches_random_reference():
+    torch = _require_context_sharded_npu_custom_op()
+    query, keys, weights, valid = _context_sharded_random_tensors(torch, 3, 3, 403)
+    reduced, reference_scores = _context_sharded_reference_scores(
+        torch, query, keys, weights, valid
+    )
+
+    custom = ops.lightning_indexer_forward(
+        query,
+        keys,
+        weights,
+        valid_context_lengths=valid,
+        top_k=2048,
+        phase="decode",
+        family="family_64x128",
+    )
+
+    assert custom.shape == (3, 3, 2048)
+    _assert_context_sharded_scores_and_indices(
+        torch, custom, reduced, reference_scores, valid
+    )
+
+
+@pytest.mark.parametrize(
+    ("batch", "query_count", "shard_count"),
+    ((2, 2, 16), (3, 2, 8), (5, 1, 4), (9, 1, 2), (17, 1, 1)),
+)
+def test_context_sharded_decode_local_topk_tiers_preserve_lower_index_ties(
+    batch,
+    query_count,
+    shard_count,
+):
+    torch = _require_context_sharded_npu_custom_op()
+    device = torch.device("npu")
+    query = torch.zeros(
+        batch, query_count, 64, 128, device=device, dtype=torch.bfloat16
+    )
+    keys = torch.zeros(batch, 32768, 128, device=device, dtype=torch.bfloat16)
+    weights = torch.ones(
+        batch, query_count, 64, device=device, dtype=torch.bfloat16
+    )
+    valid = torch.full(
+        (batch, query_count), 32768, device=device, dtype=torch.int32
+    )
+
+    custom = ops.lightning_indexer_forward(
+        query,
+        keys,
+        weights,
+        valid_context_lengths=valid,
+        top_k=2048,
+        phase="decode",
+        family="family_64x128",
+    )
+    expected = torch.arange(2048, device=device, dtype=torch.int32).expand_as(custom)
+
+    assert shard_count in {16, 8, 4, 2, 1}
+    assert custom.shape == (batch, query_count, 2048)
+    assert torch.equal(custom, expected)
+
+
+def test_context_sharded_decode_concurrent_streams_complete_with_stable_results():
+    torch = _require_context_sharded_npu_custom_op()
+    query, keys, weights, valid = _context_sharded_target_tensors(torch)
+    reduced, reference_scores = _context_sharded_reference_scores(
+        torch, query, keys, weights, valid
+    )
+    streams = [torch.npu.Stream() for _ in range(2)]
+    outputs = []
+
+    for launch_index in range(8):
+        with torch.npu.stream(streams[launch_index % len(streams)]):
+            outputs.append(
+                ops.lightning_indexer_forward(
+                    query,
+                    keys,
+                    weights,
+                    valid_context_lengths=valid,
+                    top_k=2048,
+                    phase="decode",
+                    family="family_64x128",
+                )
+            )
+    torch.npu.synchronize()
+
+    for output in outputs:
+        _assert_context_sharded_scores_and_indices(
+            torch, output, reduced, reference_scores, valid
+        )

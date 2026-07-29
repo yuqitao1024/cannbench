@@ -22,7 +22,8 @@ HOST_SOURCES = [
     os.path.join(EXTENSIONS_DIR, "register.asc"),
     os.path.join(EXTENSIONS_DIR, "lightning_indexer.asc"),
 ]
-# Keep one VF entry per device ELF so msopprof can replay mixed kernels reliably.
+# Device libraries may contain multiple SIMT VF entries per device ELF; profile
+# the combined mixed kernel to validate the actual launch and task layout.
 KERNEL_LIBRARIES = {
     "liblightning_indexer_family_4x64_kernel.so": os.path.join(
         EXTENSIONS_DIR, "simt", "lightning_indexer_fused_family_4x64.asc"
@@ -39,9 +40,6 @@ KERNEL_LIBRARIES = {
         EXTENSIONS_DIR,
         "simt",
         "lightning_indexer_prefill_q2_family_64x128.asc",
-    ),
-    "liblightning_indexer_topk_scores_kernel.so": os.path.join(
-        EXTENSIONS_DIR, "simt", "lightning_indexer_topk_scores.asc"
     ),
 }
 

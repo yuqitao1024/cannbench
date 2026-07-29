@@ -77,7 +77,7 @@ def test_prefill_q2_family_64x128_uses_16_tasks_and_both_aivs():
         assert expected in source
 
 
-def test_context_sharded_family_64x128_uses_q2_atom_and_both_aivs():
+def test_context_sharded_family_64x128_maps_dynamic_bq_query_atoms_and_shards():
     source = Path(
         "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
         "aten_dsa_lightning_indexer/csrc/simt/"
@@ -86,26 +86,75 @@ def test_context_sharded_family_64x128_uses_q2_atom_and_both_aivs():
 
     for expected in (
         "kQueryAtomSize = 2",
+        "kContextCount = 32768",
         "kContextTileSize = 32",
-        "kContextShardSize = 4096",
-        "kContextShardCount = 8",
-        "kLogicalTaskCount = 16",
         "kThreadsPerBlock = 1024",
         "__launch_bounds__(kThreadsPerBlock)",
-        "params.m = 128",
-        "kCrossCoreSyncMode = 2",
         "kScoreReadyFlag = 0",
         "kSharedScoresEntries = kHeadCount * kContextTileSize",
-        "fixpipe_params.dualDstCtl = 1",
+        "query_atom_count = (query_count + kQueryAtomSize - 1) / kQueryAtomSize",
+        "base_task_index = task_id / context_shard_count",
+        "batch_index = base_task_index / query_atom_count",
+        "atom_index = base_task_index % query_atom_count",
+        "shard_index = task_id % context_shard_count",
         "query_in_atom = static_cast<int32_t>(AscendC::GetSubBlockIdx())",
-        "context_start = shard_index * kContextShardSize",
+        "query_index = atom_index * kQueryAtomSize + query_in_atom",
+        "valid_query = query_index < query_count",
+        "shard_size = kContextCount / context_shard_count",
+        "context_start = shard_index * shard_size",
         "context_index >= valid_context_lengths[row_index]",
     ):
         assert expected in source
+    for stale in (
+        "kContextShardSize = 4096",
+        "kContextShardCount = 8",
+        "kLogicalTaskCount = 16",
+    ):
+        assert stale not in source
     assert (
         "shared_scores + query_in_atom * kHeadCount * kContextTileSize"
         not in source
     )
+
+
+def test_context_sharded_family_64x128_odd_q_does_not_read_padding_row():
+    source = Path(
+        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
+        "aten_dsa_lightning_indexer/csrc/simt/"
+        "lightning_indexer_context_sharded_family_64x128.asc"
+    ).read_text(encoding="utf-8")
+
+    for expected in (
+        "first_query_index = atom_index * kQueryAtomSize",
+        "second_query_index = first_query_index + 1",
+        "atom_query_rows = second_query_index < query_count",
+        "? kQueryAtomRows",
+        ": kHeadCount",
+        "params.m = atom_query_rows",
+        "fixpipe_params.mSize = atom_query_rows",
+        "fixpipe_params.dualDstCtl = atom_query_rows == kQueryAtomRows ? 1 : 0",
+    ):
+        assert expected in source
+    assert "safe_second_query_index" not in source
+
+
+def test_context_sharded_family_64x128_uses_c_api_mode2_sync_and_batch_schedule():
+    source = Path(
+        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
+        "aten_dsa_lightning_indexer/csrc/simt/"
+        "lightning_indexer_context_sharded_family_64x128.asc"
+    ).read_text(encoding="utf-8")
+
+    for expected in (
+        '#include "c_api/sync/sync.h"',
+        "asc_sync_block_arrive(PIPE_V, kScoreReadyFlag)",
+        "asc_sync_block_wait(PIPE_S, kScoreReadyFlag)",
+        "asc_sync_block_arrive(PIPE_FIX, kScoreReadyFlag)",
+        "__schedmode__(1)",
+    ):
+        assert expected in source
+    assert "CrossCoreSetFlag" not in source
+    assert "CrossCoreWaitFlag" not in source
 
 
 def test_lightning_indexer_fused_kernels_use_all_32_aics_and_64_aivs():
@@ -126,19 +175,21 @@ def test_lightning_indexer_fused_kernels_use_all_32_aics_and_64_aivs():
         assert "constexpr uint16_t kScoreReadyFlag = 0;" in source
 
 
-def test_context_sharded_topk_builds_a_separate_device_library():
+def test_context_sharded_topk_is_compiled_into_the_score_device_library():
     setup_py = Path(
         "src/cannbench/operators/builtin/lightning_indexer/simt/v1/setup.py"
     ).read_text(encoding="utf-8")
 
-    assert "lightning_indexer_topk_scores.asc" in setup_py
-    assert '"liblightning_indexer_topk_scores_kernel.so"' in setup_py
+    assert "lightning_indexer_topk_scores.asc" not in setup_py
+    assert '"liblightning_indexer_topk_scores_kernel.so"' not in setup_py
+    assert "multiple SIMT VF entries per device ELF" in setup_py
 
 
 def test_context_sharded_topk_uses_1024_threads_and_2048_score_tiles():
     source = Path(
         "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
-        "aten_dsa_lightning_indexer/csrc/simt/lightning_indexer_topk_scores.asc"
+        "aten_dsa_lightning_indexer/csrc/simt/"
+        "lightning_indexer_context_sharded_family_64x128.asc"
     ).read_text(encoding="utf-8")
 
     for expected in (
@@ -147,13 +198,81 @@ def test_context_sharded_topk_uses_1024_threads_and_2048_score_tiles():
         "kTopK = 2048",
         "kScoreTileSize = 2048",
         "kSortCapacity = 4096",
-        "kRowCount = 4",
-        "index < other_index",
+        "candidate_index < other_index",
+        "needs_local_topk = shard_size > kTopK",
     ):
         assert expected in source
 
 
-def test_context_sharded_bridge_launches_score_before_topk():
+def test_context_sharded_topk_strictly_skips_local_selection_for_s16():
+    source = Path(
+        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
+        "aten_dsa_lightning_indexer/csrc/simt/"
+        "lightning_indexer_context_sharded_family_64x128.asc"
+    ).read_text(encoding="utf-8")
+
+    for expected in (
+        "needs_local_topk = shard_size > kTopK",
+        "if (valid_query && needs_local_topk)",
+        "asc_sync_vec()",
+        "asc_sync_data_barrier(mem_dsb_t::DSB_DDR)",
+        "context_shard_count == 1",
+    ):
+        assert expected in source
+    assert "shard_size >= kTopK" not in source
+
+
+def test_context_sharded_topk_uses_one_global_barrier_and_shard0_final_owner():
+    source = Path(
+        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
+        "aten_dsa_lightning_indexer/csrc/simt/"
+        "lightning_indexer_context_sharded_family_64x128.asc"
+    ).read_text(encoding="utf-8")
+
+    assert source.count("asc_sync_inter_arrive(PIPE_V, kScoreReadyFlag)") == 1
+    assert source.count("asc_sync_inter_wait(PIPE_S, kScoreReadyFlag)") == 1
+    assert "if (context_shard_count > 1)" in source
+    assert (
+        "if (valid_query && shard_index == 0 && context_shard_count > 1)"
+        in source
+    )
+    for expected in (
+        "per_shard_candidate_count = shard_size < kTopK ? shard_size : kTopK",
+        "final_candidate_count = context_shard_count * per_shard_candidate_count",
+        "raw_score_candidates = shard_size == kTopK",
+    ):
+        assert expected in source
+
+
+def test_context_sharded_standalone_topk_source_is_removed():
+    source = Path(
+        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
+        "aten_dsa_lightning_indexer/csrc/simt/lightning_indexer_topk_scores.asc"
+    )
+
+    assert not source.exists()
+
+
+def test_context_sharded_bridge_plans_runtime_query_atoms_and_shards():
+    source = Path(
+        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
+        "aten_dsa_lightning_indexer/csrc/lightning_indexer.asc"
+    ).read_text(encoding="utf-8")
+
+    planner = source.split("int32_t select_context_shard_count(", 1)[1].split(
+        "\n}\n", 1
+    )[0]
+    for expected in (
+        "query_atom_count = (query_count + 1) / 2",
+        "base_task_count = batch_size * query_atom_count",
+        "base_task_count > 32",
+        "{16, 8, 4, 2, 1}",
+        "base_task_count * shard_count <= 32",
+    ):
+        assert expected in planner
+
+
+def test_context_sharded_bridge_uses_dynamic_workspaces_and_one_launch():
     source = Path(
         "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
         "aten_dsa_lightning_indexer/csrc/lightning_indexer.asc"
@@ -163,12 +282,13 @@ def test_context_sharded_bridge_launches_score_before_topk():
         1,
     )[1].split("\n}\n", 1)[0]
 
-    assert "{2, 2, 32768}" in body
+    assert "{batch_size, query_count, 32768}" in body
     assert "query.options().dtype(c10::kBFloat16)" in body
-    assert body.index("launch_lightning_indexer_context_sharded") < body.index(
-        "launch_lightning_indexer_topk_scores_bfloat16"
-    )
-    assert "{2, 2, 2048}" in body
+    assert "{batch_size, query_count, 2048}" in body
+    assert "context_shard_count > 1 && context_shard_count < 16" in body
+    assert "{batch_size, query_count, context_shard_count, 2048}" in body
+    assert body.count("launch_lightning_indexer_context_sharded") == 1
+    assert "launch_lightning_indexer_topk_scores_bfloat16" not in body
     for tensor in (
         "query",
         "keys",
@@ -180,7 +300,7 @@ def test_context_sharded_bridge_launches_score_before_topk():
         assert f"record_tensor_on_stream({tensor}, npu_stream);" in body
 
 
-def test_context_sharded_bridge_dispatches_only_exact_bfloat16_decode_shape():
+def test_context_sharded_bridge_dispatches_dynamic_bq_fixed_v32_family():
     source = Path(
         "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
         "aten_dsa_lightning_indexer/csrc/lightning_indexer.asc"
@@ -195,8 +315,6 @@ def test_context_sharded_bridge_dispatches_only_exact_bfloat16_decode_shape():
 
     for predicate in (
         "query.scalar_type() == at::ScalarType::BFloat16",
-        "query.size(0) == 2",
-        "query.size(1) == 2",
         "query.size(2) == 64",
         "query.size(3) == 128",
         "keys.size(1) == 32768",
@@ -204,6 +322,10 @@ def test_context_sharded_bridge_dispatches_only_exact_bfloat16_decode_shape():
         "top_k == 2048",
     ):
         assert predicate in body
+    assert "query.size(0) == 2" not in body
+    assert "query.size(1) == 2" not in body
+    assert "select_context_shard_count(query.size(0), query.size(1))" in body
+    assert "context_shard_count != 0" in body
     assert body.index(
         "lightning_indexer_forward_decode_family_64x128_context_sharded_bfloat16("
     ) < body.index("lightning_indexer_forward_decode_family_64x128_float(")
