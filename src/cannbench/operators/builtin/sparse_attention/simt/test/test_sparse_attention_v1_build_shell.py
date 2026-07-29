@@ -139,7 +139,8 @@ def test_sparse_attention_head64_fused_keeps_dual_aiv_1024_contract():
 
     assert "KERNEL_TYPE_MIX_AIC_1_2" in source
     assert "__launch_bounds__(1024)" in source
-    assert "dim3(1024, 1, 1)" in source
+    assert "kHead64FusedLaunchThreads = 1024" in source
+    assert "dim3(kHead64FusedLaunchThreads, 1, 1)" in source
     assert "GetSubBlockIdx()" in source
     assert "GetSubBlockIdx() != 0" not in source
     assert "threadIdx.x / 32" in source
@@ -171,6 +172,29 @@ def test_sparse_attention_head64_fused_scores_stay_tile_local():
     assert "running_sum" in source
 
 
+def test_sparse_attention_head64_fused_uses_one_explicit_l1_layout():
+    source = _head64_fused_source()
+    aiv = _function_definition(source, "sparse_attention_head64_fused_aiv(")
+    aic = _function_definition(source, "sparse_attention_head64_fused_aic(")
+
+    declaration = "__cbuf__ uint8_t l1_workspace[kHead64FusedL1Bytes];"
+    assert aiv.count(declaration) == 1
+    assert aic.count(declaration) == 1
+    for body in (aiv, aic):
+        assert "__cbuf__ bfloat16_t l1_query_buf[" not in body
+        assert "__cbuf__ bfloat16_t l1_keys_buf[" not in body
+        assert "__cbuf__ float l1_scores_buf[" not in body
+        assert "__cbuf__ bfloat16_t l1_probabilities_buf[" not in body
+        assert "__cbuf__ bfloat16_t l1_values_buf[" not in body
+        assert "__cbuf__ float l1_pv_buf[" not in body
+        assert "kHead64FusedL1QueryOffset" in body
+        assert "kHead64FusedL1KeysOffset" in body
+        assert "kHead64FusedL1ScoresOffset" in body
+        assert "kHead64FusedL1ProbabilitiesOffset" in body
+        assert "kHead64FusedL1ValuesOffset" in body
+        assert "kHead64FusedL1PvOffset" in body
+
+
 def test_sparse_attention_head64_fused_pv_is_m64_tensor_api():
     source = _head64_fused_source()
 
@@ -190,6 +214,110 @@ def test_sparse_attention_head64_fused_writes_combine_compatible_partials():
     assert "running_max + logf(running_sum)" in source
     assert "running_output_values[local_head * 512 + dim] / running_sum" in source
     assert "-std::numeric_limits<float>::infinity()" in source
+
+
+def test_sparse_attention_head64_fused_keeps_fixpipe_tiles_in_nz_layout():
+    source = _head64_fused_source()
+    helper = _normalized_whitespace(
+        _function_definition(source, "head64_copy_l0c_to_l1_nz(")
+    )
+
+    assert source.count("head64_copy_l0c_to_l1_nz(") == 3
+    assert "asc_copy_l0c2l1_sync(" in helper
+    assert "const uint16_t aligned_m" in helper
+    assert "const uint32_t dst_stride" in helper
+    assert "dst_stride, aligned_m" in helper
+    assert (
+        "0, 0, 0, 0, 0, false, false, 0, 0, false, 0, false, false, false, "
+        "false);"
+    ) in helper
+    assert "head64_fused_nz_offset(" in source
+
+
+def test_sparse_attention_head64_fused_scores_are_delivered_from_aic_to_both_aivs():
+    source = _head64_fused_source()
+    aiv = _function_definition(source, "sparse_attention_head64_fused_aiv(")
+    aic = _function_definition(source, "sparse_attention_head64_fused_aic(")
+
+    declaration = "__ubuf__ uint8_t ub_workspace[kHead64FusedUbBytes];"
+    assert aiv.count(declaration) == 1
+    assert aic.count(declaration) == 1
+    for body in (aiv, aic):
+        assert "kHead64FusedUbScoresOffset" in body
+
+    assert "asc_copy_l12ub(" not in aiv
+    assert "Copy(copy_l1_to_ub, ub_scores" not in aiv
+    assert aic.count("asc_copy_l12ub_sync(") >= 2
+    assert "l1_scores_buf, false, 4, 64, 64, 0" in (
+        _normalized_whitespace(aic)
+    )
+    assert "l1_scores_buf + 32 * 16, true, 4, 64, 64, 0" in (
+        _normalized_whitespace(aic)
+    )
+    assert "CrossCoreSetFlag<2, PIPE_MTE2>(kAicToAivReady)" in aic
+    assert "CrossCoreWaitFlag<2, PIPE_V>(kAicToAivReady)" in aiv
+
+
+def test_sparse_attention_head64_fused_1024_launch_covers_32_rows_with_28_warps():
+    source = _head64_fused_source()
+
+    assert "kHead64FusedLaunchThreads = 1024" in source
+    assert "kHead64FusedActiveThreads = 896" in source
+    assert "kHead64FusedActiveWarps = 28" in source
+    assert "dim3(kHead64FusedLaunchThreads, 1, 1)" in source
+    assert source.count("local_head += kHead64FusedActiveWarps") >= 5
+    assert "warp + kHead64FusedActiveWarps" in source
+    assert source.count("local_selected += kHead64FusedActiveWarps") >= 2
+    assert "index += kHead64FusedActiveThreads" in source
+
+
+def test_sparse_attention_head64_fused_pv_is_delivered_from_aic_to_both_aivs():
+    source = _head64_fused_source()
+    aiv = _function_definition(source, "sparse_attention_head64_fused_aiv(")
+    aic = _function_definition(source, "sparse_attention_head64_fused_aic(")
+
+    assert "Copy(copy_l1_to_ub, ub_pv" not in aiv
+    assert "l1_pv_buf, false, 8, 64, 64, 0" in _normalized_whitespace(aic)
+    assert "l1_pv_buf + 32 * 16, true, 8, 64, 64, 0" in (
+        _normalized_whitespace(aic)
+    )
+    assert aic.count("CrossCoreSetFlag<2, PIPE_MTE2>(kAicToAivReady)") >= 2
+
+
+def test_sparse_attention_head64_fused_has_no_s64_score_probe_shortcut():
+    source = _head64_fused_source()
+
+    assert "head64_fused_score_probe_vf" not in source
+    assert "plan.selected_tokens == 64" not in source
+
+
+def test_sparse_attention_head64_fused_pv_reuses_mte1_event_in_order():
+    source = _head64_fused_source()
+    aic = _function_definition(source, "sparse_attention_head64_fused_aic(")
+    probability_copy = aic.index("Copy(copy_l1_to_l0a, l0_probability")
+    value_loop = aic.index("for (int32_t value_start", probability_copy)
+    first_value_wait = aic.index("if (value_start != 0)", value_loop)
+    value_ready = aic.index(
+        "CrossCoreSetFlag<2, PIPE_MTE1>(kAicToAivReady)", first_value_wait
+    )
+    value_copy = aic.index("Copy(copy_l1_to_l0b, l0_values", value_ready)
+    mte1_ready = aic.index(
+        "asc_sync_notify(PIPE_MTE1, PIPE_M, EVENT_ID1)", value_copy
+    )
+    pv_mmad = aic.index("Mmad(pv_mm.with(pv_params)", mte1_ready)
+
+    assert "asc_sync_notify(PIPE_MTE1, PIPE_M, EVENT_ID1)" not in aic[
+        probability_copy:value_loop
+    ]
+    assert (
+        probability_copy
+        < value_loop
+        < first_value_wait
+        < value_ready
+        < value_copy
+        < mte1_ready
+        < pv_mmad
+    )
 
 
 def test_sparse_attention_head64_plan_keeps_dynamic_task_mapping():
