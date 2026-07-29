@@ -195,12 +195,14 @@ def test_sparse_attention_head64_fused_uses_one_explicit_l1_layout():
         assert "kHead64FusedL1PvOffset" in body
 
 
-def test_sparse_attention_head64_fused_key_gather_uses_two_l1_slots():
+def test_sparse_attention_head64_fused_gather_uses_two_l1_slots():
     source = _head64_fused_source()
 
-    assert "kHead64FusedKeyGatherSlots = 2" in source
+    assert "kHead64FusedGatherSlots = 2" in source
     assert "kHead64FusedL1KeySlotBytes" in source
+    assert "kHead64FusedL1ValueSlotBytes" in source
     assert "slot * kHead64FusedL1KeySlotBytes" in source
+    assert "slot * kHead64FusedL1ValueSlotBytes" in source
 
 
 def test_sparse_attention_head64_fused_gather_slots_use_mode2_flags():
@@ -230,6 +232,34 @@ def test_sparse_attention_head64_fused_prefetches_key_before_current_qk_mmad():
     qk_mmad = aic.index("Mmad(mm.with(params)", qk_request)
 
     assert qk_request < qk_mmad
+
+
+def test_sparse_attention_head64_fused_prefetches_value_before_current_pv_mmad():
+    source = _head64_fused_source()
+    aic = _function_definition(source, "sparse_attention_head64_fused_aic(")
+
+    value_loop = aic.index("for (int32_t value_start")
+    value_request = aic.index(
+        "head64_aic_request_gather_slot(next_slot)", value_loop
+    )
+    pv_mmad = aic.index("Mmad(pv_mm.with(pv_params)", value_request)
+
+    assert value_request < pv_mmad
+
+
+def test_sparse_attention_head64_fused_waits_for_output_update_before_pv_release():
+    source = _head64_fused_source()
+    aiv = _function_definition(source, "sparse_attention_head64_fused_aiv(")
+
+    update = aiv.index("asc_vf_call<head64_fused_output_update_vf>")
+    output_done = aiv.index(
+        "asc_sync_wait(PIPE_V, PIPE_MTE3, EVENT_ID1);", update
+    )
+    release = aiv.index(
+        "CrossCoreSetFlag<2, PIPE_MTE3>(kAivToAicReady);", output_done
+    )
+
+    assert update < output_done < release
 
 
 def test_sparse_attention_head64_fused_pv_is_m64_tensor_api():
@@ -328,31 +358,37 @@ def test_sparse_attention_head64_fused_has_no_s64_score_probe_shortcut():
     assert "plan.selected_tokens == 64" not in source
 
 
-def test_sparse_attention_head64_fused_pv_reuses_mte1_event_in_order():
+def test_sparse_attention_head64_fused_pv_reuses_mte1_event_with_prefetch():
     source = _head64_fused_source()
     aic = _function_definition(source, "sparse_attention_head64_fused_aic(")
     probability_copy = aic.index("Copy(copy_l1_to_l0a, l0_probability")
+    first_value_request = aic.index(
+        "head64_aic_request_gather_slot(0)", probability_copy
+    )
     value_loop = aic.index("for (int32_t value_start", probability_copy)
     first_value_wait = aic.index("if (value_start != 0)", value_loop)
-    value_ready = aic.index(
-        "CrossCoreSetFlag<2, PIPE_MTE1>(kAicToAivReady)", first_value_wait
-    )
+    value_ready = aic.index("head64_aic_wait_gather_slot(slot)", first_value_wait)
     value_copy = aic.index("Copy(copy_l1_to_l0b, l0_values", value_ready)
     mte1_ready = aic.index(
         "asc_sync_notify(PIPE_MTE1, PIPE_M, EVENT_ID1)", value_copy
     )
-    pv_mmad = aic.index("Mmad(pv_mm.with(pv_params)", mte1_ready)
+    next_value_request = aic.index(
+        "head64_aic_request_gather_slot(next_slot)", mte1_ready
+    )
+    pv_mmad = aic.index("Mmad(pv_mm.with(pv_params)", next_value_request)
 
     assert "asc_sync_notify(PIPE_MTE1, PIPE_M, EVENT_ID1)" not in aic[
         probability_copy:value_loop
     ]
     assert (
         probability_copy
+        < first_value_request
         < value_loop
         < first_value_wait
         < value_ready
         < value_copy
         < mte1_ready
+        < next_value_request
         < pv_mmad
     )
 
