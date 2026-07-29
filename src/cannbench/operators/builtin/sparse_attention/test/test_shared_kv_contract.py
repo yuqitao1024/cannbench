@@ -46,6 +46,8 @@ def test_simt_wrapper_passes_shared_kv_once_to_registered_op(monkeypatch):
         phase,
         family,
         causal,
+        head_tile,
+        selected_partitions,
     ):
         captured.update(
             query=query,
@@ -55,6 +57,8 @@ def test_simt_wrapper_passes_shared_kv_once_to_registered_op(monkeypatch):
             phase=phase,
             family=family,
             causal=causal,
+            head_tile=head_tile,
+            selected_partitions=selected_partitions,
         )
         return "custom"
 
@@ -82,6 +86,8 @@ def test_simt_wrapper_passes_shared_kv_once_to_registered_op(monkeypatch):
         "phase": "prefill",
         "family": "family_hd576",
         "causal": True,
+        "head_tile": 1,
+        "selected_partitions": 1,
     }
 
 
