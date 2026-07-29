@@ -47,6 +47,83 @@ Atlas 350 validation for the corrected V3.2 workflows:
 | Decode | `deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048` | `family_hd576` | Full BF16 decode pass for Head64 P=1/P=2/P=4 | All `262144` output and `512` LSE elements passed at `atol=rtol=0.05`. P=1 output/LSE max abs errors were `0.009765625`/`0.0092773438`; P=2 errors were `0.0078125`/`0.0092763901`; P=4 errors were `0.009765625`/`0.0092763901`. |
 | Prefill | `deepseek_v32_flashmla_prefill_q4096_ctx32768_top2048` | `family_hd576` | Reduced-shape pass; full case pending | Corrected `Dqk = 576`, `Dv = 512` path passed at B1/H128/Q4/C256/S64 with output max abs `0.015625` and LSE `0.014242`. Previous reduced-Q result used the wrong 576/576 layout. |
 
+## Fused P=4 Ping-Pong Device Record
+
+This record was measured on 2026-07-29 on `Ascend950PR_9589`, with CANN 9.2.0,
+`dav-3510`, and the exact V3.2 realistic decode shape shown below. The final
+implementation is commit `9cca869`; the single-buffer baseline is `a38d5cd`.
+
+```text
+B=2 Q=2 H=128 KV_H=1 context=32768 selected=2048 Dqk=576 Dv=512 causal=true
+head_tile=64 selected_partitions=4
+```
+
+The fused MIX kernel keeps online softmax, 1024 SIMT threads per AIV,
+`CrossCoreFlag` mode 2, and the independent Combine launch. K and V gather each
+use two L1 slots. The next gather is requested after the current L1-to-L0 copy,
+so AIV gather overlaps the current AIC MMAD. The output-update VF completes
+before AIV publishes that the current PV buffer may be reused. The full design
+and the PV lifetime root cause are recorded in
+[`HEAD64_P4_PINGPONG_DESIGN.zh-CN.md`](../HEAD64_P4_PINGPONG_DESIGN.zh-CN.md).
+
+### Accuracy
+
+The rebuilt final source passed:
+
+- five consecutive P=4 `valid_s64` runs;
+- all `36 / 36` reduced, boundary, invalid-index, empty-contract and physical
+  core-reuse results;
+- all `262144` realistic output and `512` LSE elements with zero mismatches at
+  `atol=rtol=0.05`.
+
+Reduced maximum output/LSE absolute errors were
+`0.0185546875 / 0.0199785233`. Full realistic maximum errors were
+`0.009765625 / 0.0092763901`.
+
+### Wall Time
+
+Each variant used three warmups and seven measured rounds of five calls. Every
+call was followed by `torch.npu.synchronize()`. The K+V result was repeated
+after reinstalling the K-only binary to expose device-state drift.
+
+| Variant | Commit | Seven round means (ms) | Median (ms) |
+| --- | --- | --- | ---: |
+| Single buffer | `a38d5cd` | `0.583123, 0.576859, 0.581521, 0.581873, 0.593459, 0.594727, 0.588158` | `0.583123` |
+| K-only ping-pong | `c40c78c` | `0.574136, 0.572341, 0.572862, 0.568187, 0.572342, 0.586400, 0.578845` | `0.572862` |
+| K+V ping-pong, run 1 | `9cca869` | `0.557186, 0.553204, 0.550888, 0.554370, 0.555444, 0.551369, 0.555174` | `0.554370` |
+| K+V ping-pong, run 2 | `9cca869` | `0.576293, 0.564699, 0.571445, 0.565802, 0.564048, 0.567052, 0.565348` | `0.565802` |
+
+The two K+V runs show about `0.01 ms` of device-state drift. The conservative
+end-to-end conclusion is therefore an approximately `3%` improvement over the
+single-buffer fused baseline, with an observed range of roughly `3%` to `5%`.
+
+### Exact-Kernel Profile
+
+Single-buffer and K+V binaries were rebuilt from their isolated source trees
+and collected with `msopprof --aic-metrics=Default --warm-up=5
+--launch-count=1`. Both fused profiles reported `32 / 64` launch dimensions,
+32 AIC rows with Cube work, and 64 AIV rows with Vector work.
+
+| Variant | Fused (us) | Combine (us) | Sum (us) |
+| --- | ---: | ---: | ---: |
+| Single buffer `a38d5cd` | `388.953979` | `36.410000` | `425.363979` |
+| K+V ping-pong `9cca869` | `365.545990` | `36.264000` | `401.809990` |
+
+The fused kernel improved by `6.02%`; fused plus Combine improved by `5.54%`.
+Combine was unchanged within measurement noise. The smaller wall-time gain is
+consistent with Host, launch and synchronization overhead outside these two
+profiled kernels.
+
+Exact source and artifact identities:
+
+- final fused source SHA-256:
+  `f7d573ae26b846e47f9bc9b45e4c0b59d57cb396f1c99ef3f0af5bbbca9c75bb`;
+- single-buffer source SHA-256:
+  `9d9fa4c231ba5d926fda3ada1b9884b7a1ec857075900acd57cd3f687c2a4942`;
+- final remote tree: `/tmp/cannbench-head64-pingpong-v-output-sync-20260729`;
+- single-buffer remote tree:
+  `/tmp/cannbench-head64-single-buffer-a38d5cd-20260729`.
+
 ## Split-KV Device Record
 
 This record was measured on 2026-07-28 from source commit

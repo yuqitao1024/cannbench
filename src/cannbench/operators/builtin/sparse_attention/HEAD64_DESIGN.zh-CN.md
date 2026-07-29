@@ -19,7 +19,7 @@ Host 参数、设备侧任务映射、开发检查点和验收标准。
 | 1. 控制面与编译骨架 | 已完成 | tuning、Host plan、1024-thread 双 AIV 骨架 |
 | 2. Head64 QK | 已完成 | M64 Cube QK 和 partition-aware scores |
 | 3. 双 AIV softmax 与 Cube PV | 已完成 | P=4 Split-KV、partial output/LSE 和 Combine |
-| 4. 最终融合与性能验收 | 未完成 | 本文定义的 P=4 fused 主 kernel 和验收 |
+| 4. 最终融合与性能验收 | 已完成 | P=4 fused 主 kernel、K/V ping-pong 和验收 |
 
 检查点一至三保留了从 `selected_partitions=1` 到 Split-KV 的演进过程；对应的
 Split-KV 细节与实测记录见
@@ -79,7 +79,7 @@ PV: [64, S_tile] x [S_tile, 512]
 - 不优化 `family_hd128`、`family_hd256` 或普通 `family_hd512`。
 - 不优化 prefill。
 - 不修改公共 CLI、Backend、Workflow 或全局配置。
-- 未通过检查点四验收前不将 P=4 设为 V3.2 decode 自动默认值。
+- 检查点四只完成显式 P=4 路径，不在本设计内将其设为 V3.2 decode 自动默认值。
 - 不新增 C++ Basic API、`SetFlag`、`WaitFlag` 或 `PipeBarrier` 依赖。当前源码仍
   过渡性保留 `basic_api/kernel_common.h` 和 AIC/AIV 握手所需的
   `basic_api/kernel_operator_block_sync_intf.h`。
@@ -382,13 +382,20 @@ Q、K、probability 和 V 在 L1 中按阶段复用。最终布局以 `dav-3510`
 4. 两个 AIV 都执行实际 gather、softmax、probability pack、output update 和 writeback；
    不允许任一 AIV 通过提前 return 退化为空闲 subblock。
 
-逻辑状态机使用单 buffer 严格顺序：
+首版使用单 buffer 严格验证状态转换；profiler 确认 gather 等待后，K/V L1 staging
+扩为两个 slot。每个 slot 使用独立的 mode-2 request/ready flag，状态机为：
 
 ```text
 QUERY_READY
-  -> K_READY -> SCORE_READY -> PROBABILITY_READY
-  -> V_READY -> PV_READY -> OUTPUT_UPDATED
+  -> request K[next] -> K[current] READY -> QK[current]
+  -> SCORE_READY -> PROBABILITY_READY
+  -> request V[next] -> V[current] READY -> PV[current]
+  -> OUTPUT_UPDATED -> PV_CONSUMED
 ```
+
+`PV_CONSUMED` 只能在 output-update VF 的 `PIPE_V` 工作完成后发布，避免 AIC 提前
+覆写仍被 AIV 读取的 `ub_pv`。详细的双 slot 生命周期和精度竞态见
+[`HEAD64_P4_PINGPONG_DESIGN.zh-CN.md`](HEAD64_P4_PINGPONG_DESIGN.zh-CN.md)。
 
 query buffer 继续遵守所有权顺序：AIC 等待 query ready 后，先通过 MTE1 把当前 query
 tile 从 L1 拷入 L0A，再发布 AIC-to-AIV ready 允许 AIV 覆盖共享 L1。这样即使物理核
@@ -402,8 +409,8 @@ tile 从 L1 拷入 L0A，再发布 AIC-to-AIV ready 允许 AIV 覆盖共享 L1�
   CrossCoreFlag 声明所需 header 之外的 Basic API header。
 - 使用 `SetFlag/WaitFlag/PipeBarrier`。
 - 使用 mode 0/1 全核同步。
-- 在首版正确性和 profiler 结果出来前引入 ping-pong；只有单 buffer 的等待或搬运数据
-  证明双缓冲有收益时，才把它作为同一检查点内的后续优化。
+- 在没有 profiler 证据时继续增加 buffer 层级或同步点；当前只保留已验证的 K/V L1
+  双 slot，不扩大到 PV UB、running output 或 Combine。
 
 ## 9. 文件边界
 
@@ -527,7 +534,8 @@ write partition-local output/LSE
 - 保留 P=4 Combine 所需的 partition-local FP32 `task_output` 和 `task_lse`；Combine
   仍负责跨四个 partition 的稳定 log-sum-exp 归约。
 - staged P=1/P=2 只作为历史对照保留，不要求迁移到 fused kernel，也不作为默认候选。
-- 首版使用单 buffer；是否增加 ping-pong 由 fused kernel profiler 决定。
+- 首版单 buffer 完成精度和 profiler 后，K/V gather 增加 L1 ping-pong；online
+  softmax、running output 和 Combine 保持原结构。
 - fused 路径通过 reduced/boundary、物理核复用和 full realistic decode 精度验证。
 
 P=4 是否成为 V3.2 decode 的自动默认值，必须在最终精度和性能门槛通过后另行决定；
@@ -621,6 +629,13 @@ realistic_decode::deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048
 基线。已有分阶段 profiler 参考值为 QK `136.606 us`、PV `211.732 us`、Combine
 `36.054 us`；新的采集必须使用同一输入、warmup、重复次数和同步方式。
 
+检查点四最终验证结果：single-buffer fused `a38d5cd` 的端到端中位延迟为
+`0.583123 ms`，K+V ping-pong `9cca869` 的两次中位延迟为 `0.554370 ms` 和
+`0.565802 ms`。同环境精确 kernel profile 从 fused/Combine
+`388.953979/36.410000 us` 降至 `365.545990/36.264000 us`，主 kernel 提升
+`6.02%`，kernel 合计提升 `5.54%`。两版均记录 32 个 AIC Cube work row 和
+64 个 AIV Vector work row。
+
 至少记录：
 
 - 端到端 Sparse Attention 延迟。
@@ -640,13 +655,15 @@ realistic_decode::deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048
 - 分别记录 fused 主 kernel 和 Combine 的 kernel-side duration，并与原
   QK + PV + Combine 三段之和比较。
 
-如果端到端性能回退，保持 staged P=4 为可用实现，不切换默认路径；根据 profiler
-判断是继续做单 buffer 调度优化还是引入 ping-pong，不能仅凭 launch 维度判定通过。
+本轮端到端与 kernel profile 均未回退，因此保留 fused P=4 + K/V ping-pong；默认
+tuning 仍不在本检查点切换。后续改动若导致回退，必须保留当前提交作为对照并重新
+依据 profiler 定位，不能仅凭 launch 维度判定通过。
 
 ## 13. 后续演进
 
-检查点四验收后再考虑：
+检查点四和 K/V ping-pong 验收后再考虑：
 
-- 根据单 buffer profiler 决定是否引入 ping-pong，而不是预先增加同步复杂度。
+- 若继续增加 buffer 层级、融合 Combine 或调整 online softmax，需依据新的 profiler
+  单独设计，不在当前 ping-pong 实现上继续堆叠同步点。
 - 根据完整 workflow 数据决定是否让 V3.2 decode 自动选择 `(64,4)`。
 - P=1/P=2、`head_tile=16` 或其他 family 的对比与扩展另立设计，不进入本检查点。
