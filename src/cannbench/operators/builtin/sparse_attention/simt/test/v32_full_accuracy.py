@@ -76,7 +76,31 @@ def _fill_deterministic(torch, tensor, *, seed: int, nonnegative: bool) -> None:
         flat[start:end].copy_(values)
 
 
-def _build_indices(torch, case, *, seed: int, device):
+def causal_boundary_values(*, context: int, causal_limit: int) -> tuple[int, ...]:
+    boundary = max(0, causal_limit - 1)
+    future_or_end = causal_limit if causal_limit < context else context - 1
+    return (0, boundary, future_or_end, -1, context)
+
+
+def index_category_counts(
+    row: list[int], *, context: int, causal_limit: int
+) -> dict[str, int]:
+    return {
+        "negative": sum(index < 0 for index in row),
+        "out_of_range": sum(index >= context for index in row),
+        "valid_past": sum(0 <= index < causal_limit for index in row),
+        "valid_future": sum(causal_limit <= index < context for index in row),
+    }
+
+
+def _build_indices(
+    torch,
+    case,
+    *,
+    seed: int,
+    device,
+    inject_causal_boundaries: bool = False,
+):
     selected = torch.arange(case.selected_tokens, dtype=torch.int64, device="cpu")
     rows = []
     for batch_index in range(case.batch):
@@ -92,9 +116,28 @@ def _build_indices(torch, case, *, seed: int, device):
                 valid_context = case.resolved_context_lens[batch_index]
             row_number = batch_index * case.query_tokens + query_index
             rows.append((selected * 17 + row_number * 31 + seed) % valid_context)
-    return torch.stack(rows).reshape(
+    indices = torch.stack(rows).reshape(
         case.batch, case.query_tokens, case.selected_tokens
-    ).to(device=device)
+    )
+    if inject_causal_boundaries and case.causal:
+        for batch_index in range(case.batch):
+            for query_index in validation_query_rows(
+                case.query_tokens, phase=case.phase
+            ):
+                context = case.resolved_context_lens[batch_index]
+                causal_limit = min(
+                    context,
+                    case.resolved_query_start_positions[batch_index]
+                    + query_index
+                    + 1,
+                )
+                values = causal_boundary_values(
+                    context=context, causal_limit=causal_limit
+                )[: case.selected_tokens]
+                indices[batch_index, query_index, : len(values)] = torch.tensor(
+                    values, dtype=torch.int64, device="cpu"
+                )
+    return indices.to(device=device)
 
 
 def _compare_chunk(torch, actual, expected, *, atol: float, rtol: float):
@@ -148,8 +191,19 @@ def _chunked_reference_metrics(
         kv = shared_kv[batch_index, 0]
         for query_index in query_rows:
             row_indices = indices[batch_index, query_index]
-            selected_keys = kv.index_select(0, row_indices)
+            safe_indices = row_indices.clamp(min=0, max=max(kv.shape[0] - 1, 0))
+            selected_keys = kv.index_select(0, safe_indices)
             selected_values = selected_keys[:, : case.value_head_dim]
+            context = case.resolved_context_lens[batch_index]
+            valid_indices = (row_indices >= 0) & (row_indices < context)
+            if case.causal:
+                causal_limit = min(
+                    context,
+                    case.resolved_query_start_positions[batch_index]
+                    + query_index
+                    + 1,
+                )
+                valid_indices &= row_indices < causal_limit
             for head_start in range(0, case.query_heads, head_chunk):
                 head_end = min(head_start + head_chunk, case.query_heads)
                 query_chunk = query[
@@ -159,8 +213,20 @@ def _chunked_reference_metrics(
                     query_chunk[:, None, :] * selected_keys[None, :, :]
                 ).sum(dim=-1)
                 scores = scores.float() * scale
-                probabilities = torch.softmax(scores, dim=-1)
-                expected_lse = torch.logsumexp(scores, dim=-1)
+                scores = scores.masked_fill(
+                    ~valid_indices[None, :], float("-inf")
+                )
+                if bool(valid_indices.any().item()):
+                    probabilities = torch.softmax(scores, dim=-1)
+                    expected_lse = torch.logsumexp(scores, dim=-1)
+                else:
+                    probabilities = torch.zeros_like(scores)
+                    expected_lse = torch.full(
+                        (head_end - head_start,),
+                        float("-inf"),
+                        dtype=scores.dtype,
+                        device=scores.device,
+                    )
                 expected_output = (
                     probabilities.to(query.dtype).unsqueeze(-1)
                     * selected_values[None, :, :]
@@ -236,7 +302,13 @@ def run_case(
     )
     _fill_deterministic(torch, query, seed=seed + 1, nonnegative=False)
     _fill_deterministic(torch, shared_kv, seed=seed + 2, nonnegative=False)
-    indices = _build_indices(torch, case, seed=seed + 3, device=device)
+    indices = _build_indices(
+        torch,
+        case,
+        seed=seed + 3,
+        device=device,
+        inject_causal_boundaries=not runtime_only,
+    )
     torch.npu.synchronize()
 
     started = time.monotonic()
@@ -282,10 +354,29 @@ def run_case(
         output_metrics["mismatch_count"] == 0
         and lse_metrics["mismatch_count"] == 0
     )
+    causal_index_categories = {}
+    if case.causal:
+        for batch_index in range(case.batch):
+            context = case.resolved_context_lens[batch_index]
+            for query_index in query_rows:
+                causal_limit = min(
+                    context,
+                    case.resolved_query_start_positions[batch_index]
+                    + query_index
+                    + 1,
+                )
+                causal_index_categories[f"{batch_index}:{query_index}"] = (
+                    index_category_counts(
+                        indices[batch_index, query_index].detach().cpu().tolist(),
+                        context=context,
+                        causal_limit=causal_limit,
+                    )
+                )
     return {
         **common_result,
         "validated_query_rows": list(query_rows),
         "validated_all_heads": True,
+        "causal_index_categories": causal_index_categories,
         "atol": atol,
         "rtol": rtol,
         "output": output_metrics,

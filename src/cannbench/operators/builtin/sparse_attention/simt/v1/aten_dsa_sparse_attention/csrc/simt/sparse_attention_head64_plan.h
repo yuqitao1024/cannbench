@@ -12,6 +12,11 @@ constexpr int32_t kHead64Threads = 1024;
 constexpr int32_t kHead64ThreadsPerHead = 32;
 constexpr int32_t kHead64PhysicalAicLimit = 32;
 
+enum SparseAttentionHead64OutputMode : int32_t {
+  kHead64OutputPartialFloat = 0,
+  kHead64OutputDirectBfloat16 = 1,
+};
+
 struct SparseAttentionHead64Plan {
   int32_t used_core_num;
   int32_t task_count;
@@ -27,6 +32,7 @@ struct SparseAttentionHead64Plan {
   int32_t selected_tile;
   int32_t selected_partitions;
   int32_t selected_partition_tile_capacity;
+  int32_t output_mode;
 };
 
 }  // namespace aten_dsa_sparse_attention

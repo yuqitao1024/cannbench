@@ -507,3 +507,149 @@ selected_partitions = clamp(target_partitions, 1, max_selected_partitions)
 - `head_tile=16` 应保留为不带 combine 的满核对照，而不是提前选为默认方案。
 
 最终默认参数仍需由上述三组对照和目标设备 profiler 决定。
+
+## 12. V3.2 Prefill Head64/P=1 实测结论（2026-07-29）
+
+本节补充 exact V3.2 prefill case 的实现与设备证据：
+
+```text
+B=1 Q=4096 H=128 KV_H=1 C=32768 S=2048 Dqk=576 Dv=512
+dtype=BF16 phase=prefill family=family_hd576 seed=7
+```
+
+该 shape 与本文前半部分的 decode case 不同。它天然包含：
+
+```text
+B * Q * ceil(H / 64) = 1 * 4096 * 2 = 8192
+```
+
+个 `(batch, query_token, head_group64)` 逻辑任务，因此无需沿 `S` 做 Split-KV
+也能让 32 个物理 MIX task 持续取任务。最终实现选择 Head64/P=1：单次 fused
+launch 直接写 BF16 output 和 FP32 LSE，不分配 partial，不启动 Combine，也不做
+output Cast。只有 exact 默认 shape 自动选择该路径；显式 P=1 可用于缩小 shape
+验证，其他默认 shape 与既有 decode P=1/P=2/P=4 路径保持不变。
+
+### 12.1 来源、环境与正确性
+
+通用 baseline 为
+`1297d3eb4ac5af62b0113f318136fdfae8ad52ea`，远端目录为
+`/tmp/cannbench-sa-v32-prefill-baseline-W1p49H`。最终设备候选为
+`fe376f33130c3757d552a95e8337c1e9c024fa18`（base `2c4b7aa`），远端目录为
+`/tmp/cannbench-sa-v32-prefill-candidate-rebased-wsnZON`。候选 Head64 device/Host
+源码 SHA-256 分别为
+`0e61fa35102a088b3f2d6ae482bff0678b524f27f352f7944803a54c2d44842d` 和
+`48ee3b1e2bed64a4eb5a697ffae08c24189909c790dd86a0934fbd106c458fda`。
+
+两者都在 `Ascend950PR_9589` 上以 `dav-3510` 构建，CANN 路径为
+`/usr/local/Ascend/cann-9.2.0`，clang/bisheng 为 15.0.5、build
+`5c68a1cb1231`。最终候选验证结果为：
+
+- reduced prefill P=1：`14 / 14` 通过；新增 `B=1,H=128,Q=4,C=256,S=64`
+  causal case 的 row `0/1/2` 分别包含 `2/2/1` 个 in-range future index，row 3
+  覆盖 causal end boundary，四行均含 valid-past、negative 和 out-of-range；
+  output/LSE 最大绝对误差为 `0.017578125 / 0.020476341247558594`；
+- decode 回归：P=1/P=2/P=4 共 `36 / 36` 通过；output/LSE 最大绝对误差为
+  `0.0185546875 / 0.01997852325439453`；
+- full automatic prefill：seed 7、`atol=rtol=0.05`，检查 query row
+  `0,1365,2730,4095` 的全部 128 heads；前三行各注入一个 in-range future，末行
+  注入 causal end boundary，四行均含 negative/out-of-range。output `262144` 个、
+  LSE `512` 个采样元素 mismatch 都为 0，最大绝对误差为
+  `0.0078125 / 0.008250236511230469`。
+
+最终 review 的 causal-boundary 验证副本为
+`/tmp/cannbench-sa-v32-prefill-final-review-ACYDoO`，只同步两个 accuracy
+runner。该副本再次通过 reduced `14 / 14` 和 full causal 检查，full output/LSE
+mismatch 仍均为 0。device/Host/`_C` hash 仍为
+`0e61fa35102a088b3f2d6ae482bff0678b524f27f352f7944803a54c2d44842d`、
+`48ee3b1e2bed64a4eb5a697ffae08c24189909c790dd86a0934fbd106c458fda`、
+`433da93827b198a03eb0c7b8b9d396353f1023e96677bed9d3c95d58fa628a8b`。
+benchmark runner hash 仍为
+`c41fdcc4defc8a4f5c42859b4683f17df58bdd04c33351429e4fd63e1db850de`，
+默认 seed-10 indices 与历史候选逐 byte 相同（SHA-256
+`9b2a3011fbe8a05c64c21f856aa469dcbd1857393f4194d7cac1a82b17d8cdfd`），
+因此未重跑 wall-time 或 profiler，既有性能证据继续适用。
+
+### 12.2 同输入 Wall Time
+
+三组测量均使用 seed 7、一次 warmup、三个逐次同步样本，并清除两个 tuning
+环境变量。baseline 提交早于 benchmark runner，因此执行候选 runner 文件，但
+`PYTHONPATH` 和 extension 都只指向 baseline tree；输入构造与计时语义相同。
+
+| 实现 | 三个样本（ms） | 中位数（ms） |
+| --- | --- | ---: |
+| 通用 baseline `1297d3e` | `272551.605669, 272569.785186, 272568.230243` | `272568.230243` |
+| 初始候选 `81b7165` | `358.798329, 359.500686, 358.652544` | `358.798329` |
+| 最终 profile 候选 `fe376f3` | `335.586126, 336.215180, 335.327427` | `335.586126` |
+
+最终候选是主对照，因为它是上游 Head64 gather-pipeline rebase 后重新构建、重新
+验证并 profile 的源码；初始候选也完整保留，未挑选较快的一组隐藏漂移。主对照
+相对 baseline 为 `812.215432x`，中位数降低 `99.876880%`，绝对降低
+`272232.644117 ms`。初始候选为 `759.669731x`。
+
+### 12.3 最终候选 Default Profile
+
+最终候选使用 `--aic-metrics=Default --warm-up=5 --launch-count=1` 和 exact glob
+`*sparse_attention_head64_fused_kernel*`。600 秒隔离 profiler executable 与
+injection library SHA-256 分别为
+`9648516a3404b7162c8044d7d9ff9c5bcddf9762d27d68808f00c824fdcf7f0a`、
+`abcd89c2651c6c457be10cdc83f61f347d02709455a8b829b64bd7437c387831`。
+完整目录为：
+
+`/tmp/msopprof-sa-v32-prefill-head64-candidate-rebased-wsnZON-timeout600/OPPROF_20260729062747_IMRDMKLOXXKVQZVU`
+
+BasicInfo 为 `334959.437500 us`、`Block Dim = 32`、
+`Mix Block Dim = 64`。独立于 launch dimension 重新数 CSV 工作行：32/32 AIC
+满足 `aic_cube_total_instr_number > 0`，64/64 AIV 满足
+`aiv_vec_time(us) > 0`；每个 AIC 都记录 106496 条 Cube 指令。应用 trace 没有
+Combine；唯一 Cast 位于 selected kernel 之前，属于确定性输入构造，selected
+kernel 之后没有其他 kernel，因此 output Cast 为 0。
+
+有限行上的算术平均值为：
+
+| Cube % | Vector % | Scalar % AIC/AIV | AIC MTE1/MTE2/MTE3 % | AIV MTE2/MTE3 % |
+| ---: | ---: | ---: | ---: | ---: |
+| `1.674416` | `86.654003` | `0.895138 / 1.324269` | `4.410788 / 0 / 0` | `0 / 1.530755` |
+
+| AIC wait Cube/MTE1/MTE2/MTE3 % | AIV wait Vector/MTE2/MTE3 % |
+| ---: | ---: |
+| `93.574156 / 93.077944 / 0 / 0` | `99.947698 / 0 / 99.954256` |
+
+GM/L1/L0/UB 流量采用 CSV 原始 `KB` 字段并跨行求和：
+
+| GM read/write | GM-to-L1 | L0C-to-L1 | L0C-to-GM | GM-to-UB | UB-to-GM |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| `19878032.375 / 1342591.750` | `12.000` | `37748736.000` | `0` | `90187.750` | `n/a` |
+
+L2 hit rate 由 close/far 的 hit、miss、victim 原始 counter 求和后重算：AIC read
+为 `96.875000%`；AIC write 没有事件，因此为 `n/a`；AIV read/write 分别为
+`96.271313% / 68.104965%`。L0A read/write、L0B read/write、L0C Cube
+read/write 平均带宽依次为 `1.586013 / 1.865898`、
+`1.586013 / 3.172026`、`2.985436 / 6.344052 GB/s`。AIV UB Vector
+read/write 平均带宽为 `45.321101 / 37.093105 GB/s`，UB write-to-GM 为
+`0.004012 GB/s`；UB read-from-GM 和 UB-to-GM traffic 在 schema 中为 `NA`。
+
+Default schema 不提供直接 FLOP/s 或 occupancy；同时 Cube FP instruction 字段为
+0、但 total Cube instruction 非 0，因此不从该字段反推 FLOP/s。AIC L2 write
+也因零事件而不可用，不能把 CSV 的 0% sentinel 当成命中率。
+
+### 12.4 Baseline Profile 缺口与默认策略
+
+原 100 秒 baseline capture 保留在：
+
+`/tmp/msopprof-sa-v32-prefill-head64-baseline-W1p49H/OPPROF_20260729051202_ECEOIVYVHMWJMVMR`
+
+其应用发生 AI Core timeout；stdout 明确包含
+`Get op basic info [Task Duration] failed` 并显示 `0.000000 us`，
+`OpBasicInfo.csv` 则写成 `NA`。其余 CSV 只有 timeout 后的 32 行截断数据，不能
+作为 baseline 指标。随后 600 秒重试在 warmup 阶段按要求停止，仅在
+`/tmp/msopprof-sa-v32-prefill-head64-baseline-W1p49H-timeout600/OPPROF_20260729063339_VNOZAPWFXZNBSNXC`
+留下包含 `pc_start_addr.txt` 和 `aicore_binary.o` 两个 setup dump 的局部目录；
+没有 BasicInfo、metric CSV、可用 duration 或 exit marker。该局部目录和 baseline
+tree 中的 `task-5-artifacts/profile-timeout600.*` 日志均予以保留。
+
+因此，候选与 baseline 的 selected-kernel duration 严格对比没有通过或完成，
+这是明确的证据缺口，不能用 wall time 或截断 counter 代替。经批准豁免该项后，
+仍保留 exact shape 的自动 Head64/P=1 dispatch：reduced/full accuracy、decode
+回归、稳定性、同输入 wall median、候选有效 duration、32/32 Cube、64/64
+Vector、零 Combine、零 output Cast 均通过。该决定不引用任何 baseline profiler
+counter，也不扩展 P=4 或 ping-pong 方案。

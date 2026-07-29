@@ -45,7 +45,168 @@ Atlas 350 validation for the corrected V3.2 workflows:
 | Phase | Case ID | Family | Status | Accuracy / runtime |
 | --- | --- | --- | --- | --- |
 | Decode | `deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048` | `family_hd576` | Full BF16 decode pass for Head64 P=1/P=2/P=4 | All `262144` output and `512` LSE elements passed at `atol=rtol=0.05`. P=1 output/LSE max abs errors were `0.009765625`/`0.0092773438`; P=2 errors were `0.0078125`/`0.0092763901`; P=4 errors were `0.009765625`/`0.0092763901`. |
-| Prefill | `deepseek_v32_flashmla_prefill_q4096_ctx32768_top2048` | `family_hd576` | Reduced-shape pass; full case pending | Corrected `Dqk = 576`, `Dv = 512` path passed at B1/H128/Q4/C256/S64 with output max abs `0.015625` and LSE `0.014242`. Previous reduced-Q result used the wrong 576/576 layout. |
+| Prefill | `deepseek_v32_flashmla_prefill_q4096_ctx32768_top2048` | `family_hd576` | Full automatic BF16 Head64/P=1 pass | Reduced P=1 passed `14 / 14`, including Q4 causal-future rejection; the full seeded run validated four causal-boundary rows and every head with zero mismatches at `atol=rtol=0.05`. Full output/LSE max abs errors were `0.0078125 / 0.0082502365`. |
+
+## V3.2 Prefill Head64/P=1 Device Record
+
+This record was collected on 2026-07-29 on `Ascend950PR_9589`, with CANN
+9.2.0 at `/usr/local/Ascend/cann-9.2.0`, `dav-3510`, and clang/bisheng 15.0.5
+build `5c68a1cb1231`. The generic baseline is source
+`1297d3eb4ac5af62b0113f318136fdfae8ad52ea` in
+`/tmp/cannbench-sa-v32-prefill-baseline-W1p49H`. The final profiled candidate
+is source `fe376f33130c3757d552a95e8337c1e9c024fa18`, based on `2c4b7aa`, in
+`/tmp/cannbench-sa-v32-prefill-candidate-rebased-wsnZON`. Its Head64 device
+and Host source SHA-256 values are
+`0e61fa35102a088b3f2d6ae482bff0678b524f27f352f7944803a54c2d44842d` and
+`48ee3b1e2bed64a4eb5a697ffae08c24189909c790dd86a0934fbd106c458fda`.
+
+The exact automatically selected case is:
+
+```text
+B=1 Q=4096 H=128 KV_H=1 context=32768 selected=2048 Dqk=576 Dv=512
+dtype=BF16 phase=prefill family=family_hd576 seed=7
+```
+
+Default tuning maps its 8192 logical `(batch, query_token, head_group64)`
+tasks persistently across 32 mixed tasks. One Head64/P=1 fused launch writes
+public BF16 output and FP32 LSE directly; it allocates no partial output and
+launches no Combine or output Cast. Explicit P=1 remains available for reduced
+prefill shapes, while non-target default shapes and existing decode P=1/P=2/P=4
+routes remain unchanged.
+
+### Accuracy And Stability
+
+The final rebuilt candidate passed all `14 / 14` reduced prefill P=1 cases,
+including `S=0/17/64/70/128/2048`, invalid and overflowing indices, `C=0`,
+width rejection, physical-core reuse at `B=2,Q=9`, repeated launches, and
+eight alternating launches retained across two streams. The added
+`B=1,H=128,Q=4,C=256,S=64` causal case exercised valid-past, negative, and
+out-of-range indices on every row; rows `0/1/2` contained `2/2/1` in-range
+future indices and row 3 exercised the causal end boundary. Maximum reduced
+output/LSE absolute errors were `0.017578125 / 0.020476341247558594`.
+
+The unchanged decode path passed all `36 / 36` P=1/P=2/P=4 results, with
+maximum output/LSE absolute errors of
+`0.0185546875 / 0.01997852325439453`. The full automatic prefill run used
+seed 7 and `atol=rtol=0.05`; rows `0,1365,2730,4095` and all 128 heads per row
+had zero mismatches. Rows `0/1365/2730` each included one deterministic
+in-range future index, while row `4095` included the causal end boundary; all
+four also included one negative and one out-of-range index. Its output/LSE
+maximum absolute errors were `0.0078125 / 0.008250236511230469`.
+
+The fresh final-review rerun used the preserved runner-only copy
+`/tmp/cannbench-sa-v32-prefill-final-review-ACYDoO`. It again passed the
+reduced `14 / 14` and full causal checks with the counts above and zero full
+output/LSE mismatches. The Head64 device, Host, and built `_C` SHA-256 values
+remained
+`0e61fa35102a088b3f2d6ae482bff0678b524f27f352f7944803a54c2d44842d`,
+`48ee3b1e2bed64a4eb5a697ffae08c24189909c790dd86a0934fbd106c458fda`, and
+`433da93827b198a03eb0c7b8b9d396353f1023e96677bed9d3c95d58fa628a8b`.
+The benchmark runner SHA-256 remained
+`c41fdcc4defc8a4f5c42859b4683f17df58bdd04c33351429e4fd63e1db850de`, and its
+default seed-10 index tensor was byte-identical to the historical candidate
+(`9b2a3011fbe8a05c64c21f856aa469dcbd1857393f4194d7cac1a82b17d8cdfd`),
+so the existing wall-time and profile evidence remains applicable and was not
+rerun.
+
+### Wall Time
+
+Every run used the same deterministic seed-7 inputs, one warmup, three timed
+calls, unset tuning variables, and synchronization after every call. The
+baseline predates the benchmark runner, so it executed the candidate runner
+file while `PYTHONPATH` and extension loading selected only the baseline
+implementation. Both candidate runs are retained: the first predates the
+upstream Head64 gather-pipeline rebase, while the final row is the primary
+comparison because it measures the rebuilt, revalidated source that was
+profiled and kept.
+
+| Tree | Three samples (ms) | Median (ms) |
+| --- | --- | ---: |
+| Generic baseline `1297d3e` | `272551.605669, 272569.785186, 272568.230243` | `272568.230243` |
+| Initial candidate `81b7165` | `358.798329, 359.500686, 358.652544` | `358.798329` |
+| Final profiled candidate `fe376f3` | `335.586126, 336.215180, 335.327427` | `335.586126` |
+
+The primary final median is `812.215432x` faster than the same-input generic
+baseline, a `99.876880%` reduction (`272232.644117 ms`). The initial candidate
+was `759.669731x` faster; it is shown rather than discarded so the result does
+not depend on selecting the faster of the two candidate runs.
+
+### Candidate Exact-Kernel Profile
+
+The final candidate used `msopprof --aic-metrics=Default --warm-up=5
+--launch-count=1` with the exact glob
+`*sparse_attention_head64_fused_kernel*`. The isolated profiler raised the
+operator and synchronization timeouts to 600 seconds. Its executable SHA-256
+is `9648516a3404b7162c8044d7d9ff9c5bcddf9762d27d68808f00c824fdcf7f0a`;
+the injection library SHA-256 is
+`abcd89c2651c6c457be10cdc83f61f347d02709455a8b829b64bd7437c387831`.
+The complete result is:
+
+`/tmp/msopprof-sa-v32-prefill-head64-candidate-rebased-wsnZON-timeout600/OPPROF_20260729062747_IMRDMKLOXXKVQZVU`
+
+`OpBasicInfo.csv` reports `334959.437500 us`, `Block Dim = 32`, and
+`Mix Block Dim = 64`. The 96 sub-block rows contain 32/32 AIC rows with
+`aic_cube_total_instr_number > 0` and 64/64 AIV rows with
+`aiv_vec_time(us) > 0`; every AIC row records 106496 Cube instructions.
+The application trace contains no Combine. Its only Cast is immediately
+before the selected kernel and belongs to deterministic input materialization;
+there is no kernel after the selected kernel, so output Cast launches are zero.
+
+The following utilization and wait values are arithmetic means over finite
+AIC or AIV rows:
+
+| Cube % | Vector % | Scalar % AIC/AIV | AIC MTE1/MTE2/MTE3 % | AIV MTE2/MTE3 % |
+| ---: | ---: | ---: | ---: | ---: |
+| `1.674416` | `86.654003` | `0.895138 / 1.324269` | `4.410788 / 0 / 0` | `0 / 1.530755` |
+
+| AIC wait Cube/MTE1/MTE2/MTE3 % | AIV wait Vector/MTE2/MTE3 % |
+| ---: | ---: |
+| `93.574156 / 93.077944 / 0 / 0` | `99.947698 / 0 / 99.954256` |
+
+Summed profiler traffic fields, in the CSV's `KB` unit, are:
+
+| GM read/write | GM-to-L1 | L0C-to-L1 | L0C-to-GM | GM-to-UB | UB-to-GM |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| `19878032.375 / 1342591.750` | `12.000` | `37748736.000` | `0` | `90187.750` | `n/a` |
+
+L2 hit rates are recomputed from summed close/far hit, miss, and victim
+counters. AIC writes recorded zero events, so their hit rate is unavailable:
+
+| AIC read/write hit % | AIV read/write hit % |
+| ---: | ---: |
+| `96.875000 / n/a` | `96.271313 / 68.104965` |
+
+Mean L0A read/write, L0B read/write, and L0C Cube read/write bandwidths were
+`1.586013 / 1.865898`, `1.586013 / 3.172026`, and
+`2.985436 / 6.344052 GB/s`. Mean AIV UB Vector read/write bandwidths were
+`45.321101 / 37.093105 GB/s`; UB read-from-GM and UB-to-GM traffic are `NA`
+in this schema, while UB write-to-GM bandwidth was `0.004012 GB/s`.
+The Default metric schema does not provide direct FLOP/s or occupancy, and its
+Cube FP instruction field is zero despite nonzero total Cube instructions, so
+no FLOP/s value is inferred.
+
+### Baseline Profile Gap And Dispatch Decision
+
+The original 100-second baseline capture is preserved at
+`/tmp/msopprof-sa-v32-prefill-head64-baseline-W1p49H/OPPROF_20260729051202_ECEOIVYVHMWJMVMR`.
+The application exceeded the profiler's AI Core timeout: stdout reports
+`Get op basic info [Task Duration] failed` and `0.000000 us`, while
+`OpBasicInfo.csv` stores `NA`; its 32-row CSVs are truncated post-timeout data
+and are not used. A requested 600-second retry was stopped during warmup. It
+left a partial capture hierarchy under
+`/tmp/msopprof-sa-v32-prefill-head64-baseline-W1p49H-timeout600/OPPROF_20260729063339_VNOZAPWFXZNBSNXC`,
+containing only the setup dumps `pc_start_addr.txt` and `aicore_binary.o`. It
+has no BasicInfo, metric CSV, analyzed duration, or exit marker. The partial
+hierarchy and the baseline tree's `task-5-artifacts/profile-timeout600.*` logs
+are preserved.
+
+Consequently, the strict selected-kernel-duration comparison against the
+generic baseline was not passed or evaluated; it is an explicit evidence gap,
+not an inferred success. Automatic dispatch is nevertheless retained under
+the approved waiver because reduced/full accuracy, decode regression,
+stability, the same-input wall-time gate, the valid candidate duration,
+32/32 Cube work, 64/64 Vector work, and zero Combine/output-Cast gates all
+passed. No baseline profiler counter is used to support that decision.
 
 ## Fused P=4 Ping-Pong Device Record
 
