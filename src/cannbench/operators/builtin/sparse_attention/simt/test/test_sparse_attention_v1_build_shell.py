@@ -195,6 +195,43 @@ def test_sparse_attention_head64_fused_uses_one_explicit_l1_layout():
         assert "kHead64FusedL1PvOffset" in body
 
 
+def test_sparse_attention_head64_fused_key_gather_uses_two_l1_slots():
+    source = _head64_fused_source()
+
+    assert "kHead64FusedKeyGatherSlots = 2" in source
+    assert "kHead64FusedL1KeySlotBytes" in source
+    assert "slot * kHead64FusedL1KeySlotBytes" in source
+
+
+def test_sparse_attention_head64_fused_gather_slots_use_mode2_flags():
+    source = _head64_fused_source()
+
+    assert "kAicToAivGatherSlot0 = 0" in source
+    assert "kAicToAivGatherSlot1 = 1" in source
+    assert "kAivToAicGatherSlot0 = 2" in source
+    assert "kAivToAicGatherSlot1 = 3" in source
+    for helper in (
+        "head64_aic_request_gather_slot(",
+        "head64_aiv_wait_gather_slot(",
+        "head64_aiv_publish_gather_slot(",
+        "head64_aic_wait_gather_slot(",
+    ):
+        body = _function_definition(source, helper)
+        assert "CrossCore" in body
+        assert "<2," in body
+
+
+def test_sparse_attention_head64_fused_prefetches_key_before_current_qk_mmad():
+    source = _head64_fused_source()
+    aic = _function_definition(source, "sparse_attention_head64_fused_aic(")
+
+    qk_loop = aic.index("for (int32_t k_start")
+    qk_request = aic.index("head64_aic_request_gather_slot(next_slot)", qk_loop)
+    qk_mmad = aic.index("Mmad(mm.with(params)", qk_request)
+
+    assert qk_request < qk_mmad
+
+
 def test_sparse_attention_head64_fused_pv_is_m64_tensor_api():
     source = _head64_fused_source()
 
