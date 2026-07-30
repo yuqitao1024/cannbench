@@ -1,6 +1,20 @@
 from cannbench.operators import get_operator_plugin
 
 
+def test_simt_profile_sums_all_sparse_attention_kernel_stages():
+    selection = get_operator_plugin("sparse_attention").profile_kernel_selection(
+        backend="ascend",
+        implementation="simt",
+        implementation_version="v1",
+    )
+
+    assert selection.kernel_name_patterns == (
+        "sparse_attention",
+        "aten_dsa_sparse_attention",
+    )
+    assert selection.aggregate_across_files is True
+
+
 def test_cuda_library_profile_uses_fixed_dynamic_kernel_selection():
     selection = get_operator_plugin("sparse_attention").profile_kernel_selection(
         backend="nvidia",

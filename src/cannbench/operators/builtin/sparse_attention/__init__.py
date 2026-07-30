@@ -331,7 +331,8 @@ def _build_ragged_simt_operator(
 def _build_profile_kernel_selection(ctx: ProfileKernelSelectionContext):
     if ctx.implementation == "simt":
         return ProfileKernelSelection(
-            kernel_name_patterns=("sparse_attention", "aten_dsa_sparse_attention")
+            kernel_name_patterns=("sparse_attention", "aten_dsa_sparse_attention"),
+            aggregate_across_files=True,
         )
     if ctx.backend == "nvidia" and ctx.implementation == "cuda_library":
         return ProfileKernelSelection(
