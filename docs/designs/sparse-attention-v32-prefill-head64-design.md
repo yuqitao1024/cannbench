@@ -2,8 +2,9 @@
 
 ## Status
 
-Approved design for automatically routing the exact DeepSeek V3.2 BF16
-Sparse Attention prefill case through a 32-AIC/64-AIV Head64 fused kernel.
+Implemented and merged. The exact DeepSeek V3.2 BF16 Sparse Attention prefill
+case automatically routes through the 32-AIC/64-AIV Head64 P1 fused kernel and
+writes final BF16 output and FP32 LSE without a Combine launch.
 
 Design date: 2026-07-29.
 

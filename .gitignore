@@ -4,7 +4,6 @@ __pycache__/
 dist/
 runs/
 uploads/
-docs/superpowers/
 .superpowers/
 .worktrees/
 web/node_modules/

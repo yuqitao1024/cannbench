@@ -2,6 +2,14 @@
 
 Date: 2026-07-16
 
+## Status
+
+Not completed. The four score-kernel sources in this design still contain
+Basic API headers or synchronization facilities such as `LocalTensor`,
+`SetFlag`, `WaitFlag`, `PipeBarrier`, and `CrossCoreSetFlag` /
+`CrossCoreWaitFlag`. The operator implementations have continued to evolve,
+but the boundary defined here remains follow-up work.
+
 ## Goal
 
 Contract the Ascend DSA SIMT implementation boundary for `lightning_indexer` and

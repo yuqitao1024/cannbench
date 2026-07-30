@@ -2,9 +2,11 @@
 
 ## Status
 
-Approved design for the first DeepSeek V3.2 `lightning_indexer` prefill
-optimization. The implementation remains gated by remote correctness and
-performance measurements.
+Closed by the performance gate. The Q=2 dual-AIV candidate was implemented and
+validated, but its standalone median was 11.11% slower than the corrected
+baseline, so automatic dispatch remains disabled. The separate 32-mixed-task,
+1024-thread common-path correction was retained. Candidate workflow timing was
+intentionally skipped after the required standalone gate failed.
 
 ## Context
 

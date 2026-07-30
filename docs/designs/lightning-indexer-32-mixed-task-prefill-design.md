@@ -1,5 +1,12 @@
 # Lightning Indexer 32 Mixed-Task Prefill Design
 
+## Status
+
+Implemented and retained. The common prefill kernels launch up to 32 mixed
+tasks with 1024-thread VFs. Accuracy, repeated-launch stability, and the
+32-AIC/64-AIV kernel-side profile were validated; the operator-local README
+records the separate synchronized wall-time limitation.
+
 ## Context
 
 The target Atlas 350 device exposes 32 AICs and 64 AIVs. The Lightning

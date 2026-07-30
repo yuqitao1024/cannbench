@@ -611,5 +611,5 @@ Sparse Attention:  blockDim = 32
 6. [`sparse_attention/data/realistic_decode.json`](../sparse_attention/data/realistic_decode.json)：Sparse Attention shape。
 7. [`sparse_attention/simt/README.md`](../sparse_attention/simt/README.md)：Sparse Attention 数学过程和 shape。
 8. [`sparse_attention_score_family_hd512.asc`](../sparse_attention/simt/v1/aten_dsa_sparse_attention/csrc/simt/sparse_attention_score_family_hd512.asc)：V3.2 wide-head 融合 kernel。
-9. [`docs/designs/2026-07-25-dsa-v32-three-path-semantics.md`](../../../../../docs/designs/2026-07-25-dsa-v32-three-path-semantics.md)：三条实现路径的语义合同。
+9. [`docs/designs/dsa-v32-three-path-semantics.md`](../../../../../docs/designs/dsa-v32-three-path-semantics.md)：三条实现路径的语义合同。
 10. [`docs/designs/dsa-inference-fusion-spec.md`](../../../../../docs/designs/dsa-inference-fusion-spec.md)：DSA workflow 的整体设计背景。

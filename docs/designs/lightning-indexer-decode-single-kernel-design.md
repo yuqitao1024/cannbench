@@ -8,7 +8,7 @@ kernel. The enabled path covers every supported planner tier (S16, S8, S4,
 S2, and S1); unsupported shapes retain the existing generic fused fallback.
 
 This design extends the exact `B=2, Q=2` implementation described in
-`2026-07-27-lightning-indexer-context-sharded-decode-design.md`. It does not
+`lightning-indexer-context-sharded-decode-design.md`. It does not
 make the complete Lightning Indexer algorithm dynamic across every head,
 context, and TopK shape.
 

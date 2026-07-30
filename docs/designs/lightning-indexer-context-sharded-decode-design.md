@@ -2,7 +2,10 @@
 
 ## Status
 
-Approved design for the first context-sharded `lightning_indexer` decode path.
+Implemented as the first two-launch context-sharded `lightning_indexer` decode
+path. The later parameterized single-kernel implementation supersedes it for
+the enabled S16, S8, S4, S2, and S1 planner tiers; this document is retained as
+historical design context.
 
 This design prioritizes the production-shaped DeepSeek V3.2 decode case. It does
 not yet implement the A/B/C comparison matrix from the parallel-splitting

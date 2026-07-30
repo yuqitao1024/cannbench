@@ -1,5 +1,12 @@
 # msopprof Two-VF Standalone Reproduction Design
 
+## Status
+
+The standalone diagnostic is implemented and validated. Tests with available
+26.0 and 26.1 profiler builds did not reproduce the historical failure. Final
+root-cause reproduction remains externally blocked because the exact affected
+profiler binary and original operator binaries were not retained.
+
 ## Purpose
 
 Provide a small source package that can be handed to msopprof maintainers to
