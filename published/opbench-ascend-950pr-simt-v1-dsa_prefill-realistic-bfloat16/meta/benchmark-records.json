@@ -23,7 +23,7 @@
       "source_file": "docs/datasets/dsa-real-sources.md#deepseek-v32-flashmla-prefill",
       "source_op": "dsa_prefill",
       "metrics": {
-        "latency_ms": 3472.6095
+        "latency_ms": 3467.4783125
       },
       "accuracy": {
         "passed": true,
