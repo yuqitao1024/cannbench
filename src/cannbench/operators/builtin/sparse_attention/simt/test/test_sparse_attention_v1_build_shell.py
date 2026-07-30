@@ -537,6 +537,36 @@ def test_sparse_attention_v32_prefill_head64_automatic_predicate_is_exact():
     )
 
 
+def test_sparse_attention_v32_decode_head64_automatic_predicate_is_supported_shape():
+    bridge = _bridge_source()
+
+    assert "bool is_automatic_v32_decode_head64(" in bridge
+    predicate = _function_definition(
+        bridge,
+        "is_automatic_v32_decode_head64(",
+        declaration_marker="bool",
+    )
+
+    assert _normalized_whitespace(predicate) == _normalized_whitespace(
+        """
+        bool is_automatic_v32_decode_head64(
+            const at::Tensor& query,
+            const at::Tensor& shared_kv,
+            const at::Tensor& indices,
+            int64_t value_head_dim,
+            std::string_view phase,
+            std::string_view family) {
+          return phase == "decode" && family == "family_hd576" &&
+              query.scalar_type() == at::ScalarType::BFloat16 &&
+              shared_kv.scalar_type() == at::ScalarType::BFloat16 &&
+              query.size(1) == 128 && shared_kv.size(1) == 1 &&
+              query.size(3) == 576 && shared_kv.size(3) == 576 &&
+              indices.size(2) <= 2048 && value_head_dim == 512;
+        }
+        """
+    )
+
+
 def test_sparse_attention_v32_prefill_automatically_routes_head64_p1():
     private = _function_definition(
         _bridge_source(), "sparse_attention_forward_privateuse1("
@@ -553,13 +583,13 @@ def test_sparse_attention_v32_prefill_automatically_routes_head64_p1():
         in tuning_normalized
     )
     assert (
-        "const int64_t effective_head_tile = auto_head64_prefill ? 64 : "
-        "head_tile;"
+        "const int64_t effective_head_tile = auto_head64_prefill || "
+        "auto_head64_decode ? 64 : head_tile;"
         in tuning_normalized
     )
     assert (
-        "const int64_t effective_selected_partitions = auto_head64_prefill ? "
-        "1 : selected_partitions;"
+        "const int64_t effective_selected_partitions = auto_head64_decode ? "
+        "4 : (auto_head64_prefill ? 1 : selected_partitions);"
         in tuning_normalized
     )
     assert (
@@ -581,6 +611,39 @@ def test_sparse_attention_v32_prefill_automatically_routes_head64_p1():
     assert private.count("if (use_head64) {") == 2
     assert private.rindex("if (use_head64) {") < private.index(
         "const bool is_wide_family"
+    )
+
+
+def test_sparse_attention_v32_decode_automatically_routes_head64_p4():
+    private = _function_definition(
+        _bridge_source(), "sparse_attention_forward_privateuse1("
+    )
+
+    assert "const bool auto_head64_decode =" in private
+    tuning = private.split("const bool auto_head64_prefill =", 1)[1].split(
+        "SparseAttentionHead64Plan head64_plan", 1
+    )[0]
+    tuning_normalized = _normalized_whitespace(tuning)
+
+    assert (
+        "const bool auto_head64_decode = head_tile == 1 && "
+        "selected_partitions == 1 && is_automatic_v32_decode_head64( query, "
+        "shared_kv, indices, value_head_dim, phase, family);"
+        in tuning_normalized
+    )
+    assert (
+        "const int64_t effective_head_tile = auto_head64_prefill || "
+        "auto_head64_decode ? 64 : head_tile;"
+        in tuning_normalized
+    )
+    assert (
+        "const int64_t effective_selected_partitions = auto_head64_decode ? "
+        "4 : (auto_head64_prefill ? 1 : selected_partitions);"
+        in tuning_normalized
+    )
+    assert (
+        "use_head64 || (head_tile == 1 && selected_partitions == 1)"
+        in tuning_normalized
     )
 
 
