@@ -2,7 +2,7 @@
   "records": [
     {
       "schema_version": 1,
-      "run_id": "opbench-ascend-950pr-vllm-ascend-dsa_prefill-realistic-bfloat16/dsa_prefill-realistic-deepseek_v32_flashmla_prefill_q4096_ctx32768_top2048-bfloat16-seed0",
+      "run_id": "opbench-ascend-950pr-simt-v1-dsa_prefill-realistic-bfloat16/dsa_prefill-realistic-deepseek_v32_flashmla_prefill_q4096_ctx32768_top2048-bfloat16-seed0",
       "operator": "dsa_prefill",
       "dataset": "realistic",
       "case_id": "deepseek_v32_flashmla_prefill_q4096_ctx32768_top2048",
@@ -15,15 +15,15 @@
       "dtype": "bfloat16",
       "backend": "ascend",
       "device_class": "950PR",
-      "implementation": "vllm_ascend",
-      "implementation_version": "vllm-ascend",
+      "implementation": "simt",
+      "implementation_version": "v1",
       "source_kind": "official_operator_test",
       "source_project": "DeepSeek-V3.2+FlashMLA",
       "source_model": "DeepSeek-V3.2",
       "source_file": "docs/datasets/dsa-real-sources.md#deepseek-v32-flashmla-prefill",
       "source_op": "dsa_prefill",
       "metrics": {
-        "latency_ms": 18.60168856
+        "latency_ms": 3472.6095
       },
       "accuracy": {
         "passed": true,
