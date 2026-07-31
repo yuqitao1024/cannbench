@@ -69,6 +69,28 @@ minimum recall was `0.973145`, and sampled attention/workflow output and LSE
 had zero mismatches at `atol=0.05, rtol=0.05`. The Q=2 workflow timing was not
 run because its standalone gate had already failed.
 
+### Full-score plus radix TopK candidate
+
+On July 31, 2026, the exact V3.2 prefill candidate was implemented as a
+256 MiB BF16 score workspace (`[1,4096,32768]`) followed by a separate
+two-pass radix-select TopK kernel. Both device libraries and the host bridge
+compile with Bisheng for `dav-3510`, using only C API, Tensor API, and SIMT
+API in the new device sources.
+
+The candidate did not pass the runtime stability gate. Isolated synchronized
+calls completed, but a call after the sampled PyTorch reference sequence
+failed with device error `507015`. Device plog located the fault in
+`lightning_indexer_prefill_full_score_family_64x128_kernel` on the AIC
+Fixpipe/L1 path, before the radix kernel for that call. Explicit public-C-API
+attempts to restore the AIC padding state, atomic state, and the full relevant
+split-core state did not make the sequence stable.
+
+The exact-shape dispatch is therefore disabled. Canonical V3.2 prefill keeps
+using the retained common fused path; canonical decode and all generic
+fallbacks are unchanged. The separate experimental sources and bridge remain
+buildable for a future C API/Tensor API runtime-state investigation, but no
+performance claim is made for this candidate.
+
 ## Parameterized context-sharded decode benchmark
 
 Measured on Ascend 950PR (`dav-3510`, CANN 9.2.0) on July 29, 2026. The BF16

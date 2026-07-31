@@ -346,7 +346,7 @@ def test_prefill_full_score_and_radix_topk_build_as_separate_libraries():
     assert '"liblightning_indexer_radix_topk_bfloat16_kernel.so"' in setup_py
 
 
-def test_exact_v32_prefill_dispatches_full_score_then_radix_topk():
+def test_exact_v32_prefill_bridge_is_built_but_not_dispatched():
     source = Path(
         "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
         "aten_dsa_lightning_indexer/csrc/lightning_indexer.asc"
@@ -375,15 +375,7 @@ def test_exact_v32_prefill_dispatches_full_score_then_radix_topk():
     dispatch = source.split(
         'if (phase == "prefill" && family == "family_64x128")', 1
     )[1].split("\n  }", 1)[0]
-    for expected in (
-        "query.scalar_type() == at::ScalarType::BFloat16",
-        "query.size(0) == 1",
-        "query.size(1) == 4096",
-        "keys.size(1) == 32768",
-        "top_k == 2048",
-        "lightning_indexer_forward_prefill_full_score_bfloat16",
-    ):
-        assert expected in dispatch
+    assert "lightning_indexer_forward_prefill_full_score_bfloat16" not in dispatch
 
 
 def test_context_sharded_bridge_dispatches_dynamic_bq_fixed_v32_family():
