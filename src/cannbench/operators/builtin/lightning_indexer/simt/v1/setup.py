@@ -41,6 +41,11 @@ KERNEL_LIBRARIES = {
         "simt",
         "lightning_indexer_prefill_q2_family_64x128.asc",
     ),
+    "liblightning_indexer_prefill_full_score_family_64x128_kernel.so": os.path.join(
+        EXTENSIONS_DIR,
+        "simt",
+        "lightning_indexer_prefill_full_score_family_64x128.asc",
+    ),
     "liblightning_indexer_radix_topk_bfloat16_kernel.so": os.path.join(
         EXTENSIONS_DIR,
         "simt",
