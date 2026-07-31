@@ -22,3 +22,32 @@ def test_fused_indexer_uses_parallel_ub_topk_merge(family):
     assert "insert_at" not in topk_source
     assert "basic_api/" not in topk_source
     assert "CrossCore" not in topk_source
+
+
+def test_prefill_radix_topk_selects_bf16_threshold_then_sorts_only_topk():
+    source = Path(
+        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
+        "aten_dsa_lightning_indexer/csrc/simt/"
+        "lightning_indexer_radix_topk_bfloat16.asc"
+    ).read_text(encoding="utf-8")
+
+    for expected in (
+        "kRadixBits = 8",
+        "kRadixBins = 256",
+        "kRadixPassCount = 2",
+        "asc_atomic_add",
+        "threshold_key",
+        "score_key > threshold_key",
+        "score_key == threshold_key",
+        "candidate_index < other_index",
+        "bitonic_size <= kTopK",
+        "row_index += kPersistentBlockCount",
+    ):
+        assert expected in source
+    for forbidden in (
+        "kSortCapacity = 4096",
+        "basic_api/",
+        "kernel_operator.h",
+        "AscendC::LocalTensor",
+    ):
+        assert forbidden not in source

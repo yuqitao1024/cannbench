@@ -300,6 +300,92 @@ def test_context_sharded_bridge_uses_dynamic_workspaces_and_one_launch():
         assert f"record_tensor_on_stream({tensor}, npu_stream);" in body
 
 
+def test_prefill_full_score_path_uses_q2_persistent_tasks_and_allowed_apis():
+    source = Path(
+        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
+        "aten_dsa_lightning_indexer/csrc/simt/"
+        "lightning_indexer_prefill_full_score_family_64x128.asc"
+    ).read_text(encoding="utf-8")
+
+    for expected in (
+        "kQueryAtomSize = 2",
+        "kPersistentTaskCount = 32",
+        "kContextTileSize = 32",
+        "kThreadsPerBlock = 1024",
+        "atom_index += kPersistentTaskCount",
+        "dual_dst_ctl = 1",
+        "asc_sync_block_arrive",
+        "asc_sync_block_wait",
+        "reduced_scores[output_base + context_index]",
+    ):
+        assert expected in source
+    for forbidden in (
+        "basic_api/",
+        "kernel_operator.h",
+        "AscendC::LocalTensor",
+        "SetFlag",
+        "WaitFlag",
+        "PipeBarrier",
+        "CrossCore",
+        "lightning_indexer_merge_topk_ub",
+    ):
+        assert forbidden not in source
+
+
+def test_prefill_full_score_and_radix_topk_build_as_separate_libraries():
+    setup_py = Path(
+        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/setup.py"
+    ).read_text(encoding="utf-8")
+
+    assert "lightning_indexer_prefill_full_score_family_64x128.asc" in setup_py
+    assert "lightning_indexer_radix_topk_bfloat16.asc" in setup_py
+    assert (
+        '"liblightning_indexer_prefill_full_score_family_64x128_kernel.so"'
+        in setup_py
+    )
+    assert '"liblightning_indexer_radix_topk_bfloat16_kernel.so"' in setup_py
+
+
+def test_exact_v32_prefill_dispatches_full_score_then_radix_topk():
+    source = Path(
+        "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
+        "aten_dsa_lightning_indexer/csrc/lightning_indexer.asc"
+    ).read_text(encoding="utf-8")
+    body = source.split(
+        "lightning_indexer_forward_prefill_full_score_bfloat16(", 1
+    )[1].split("\n}\n", 1)[0]
+
+    assert "{1, 4096, 32768}" in body
+    assert "query.options().dtype(c10::kBFloat16)" in body
+    assert "{1, 4096, 2048}" in body
+    assert "query.options().dtype(c10::kInt)" in body
+    assert body.index("launch_lightning_indexer_prefill_full_score") < body.index(
+        "launch_lightning_indexer_radix_topk_bfloat16"
+    )
+    for tensor in (
+        "query",
+        "keys",
+        "weights",
+        "valid_context_lengths",
+        "reduced_scores",
+        "output",
+    ):
+        assert f"record_tensor_on_stream({tensor}, npu_stream);" in body
+
+    dispatch = source.split(
+        'if (phase == "prefill" && family == "family_64x128")', 1
+    )[1].split("\n  }", 1)[0]
+    for expected in (
+        "query.scalar_type() == at::ScalarType::BFloat16",
+        "query.size(0) == 1",
+        "query.size(1) == 4096",
+        "keys.size(1) == 32768",
+        "top_k == 2048",
+        "lightning_indexer_forward_prefill_full_score_bfloat16",
+    ):
+        assert expected in dispatch
+
+
 def test_context_sharded_bridge_dispatches_dynamic_bq_fixed_v32_family():
     source = Path(
         "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
