@@ -250,7 +250,8 @@ def _requires_direct_device_inputs(case) -> bool:
 def _build_profile_kernel_selection(ctx: ProfileKernelSelectionContext):
     if ctx.implementation == "simt":
         return ProfileKernelSelection(
-            kernel_name_patterns=("lightning_indexer", "aten_dsa_lightning_indexer")
+            kernel_name_patterns=("lightning_indexer", "aten_dsa_lightning_indexer"),
+            aggregate_across_files=True,
         )
     if ctx.backend == "nvidia" and ctx.implementation == "cuda_library":
         return ProfileKernelSelection(
