@@ -77,19 +77,26 @@ two-pass radix-select TopK kernel. Both device libraries and the host bridge
 compile with Bisheng for `dav-3510`, using only C API, Tensor API, and SIMT
 API in the new device sources.
 
-The candidate did not pass the runtime stability gate. Isolated synchronized
-calls completed, but a call after the sampled PyTorch reference sequence
-failed with device error `507015`. Device plog located the fault in
-`lightning_indexer_prefill_full_score_family_64x128_kernel` on the AIC
-Fixpipe/L1 path, before the radix kernel for that call. Explicit public-C-API
-attempts to restore the AIC padding state, atomic state, and the full relevant
-split-core state did not make the sequence stable.
+The first implementation failed with device error `507015` only when launched
+after the sampled PyTorch `einsum` reference. Device plog and an optimized
+debug build mapped the primary AIC exception to `asc_copy_l0c2ub`; the AIV
+exceptions were secondary waits on the failed AIC. The Fixpipe call requested
+NZ2DN even though the two AIV destinations consume row-major M slices. That
+made the copy depend on `CHANNEL_PARA` state left by the preceding Cube
+operator. The fix selects NZ2ND and explicitly disables NZ2DN, matching the
+working Basic API `CO2Layout::ROW_MAJOR` behavior without adding Basic API
+dependencies.
 
-The exact-shape dispatch is therefore disabled. Canonical V3.2 prefill keeps
-using the retained common fused path; canonical decode and all generic
-fallbacks are unchanged. The separate experimental sources and bridge remain
-buildable for a future C API/Tensor API runtime-state investigation, but no
-performance claim is made for this candidate.
+The original `custom -> einsum -> custom` reproduction now passes. The full
+gate used one warmup, five synchronized samples, the four sampled rows above,
+and three additional stability launches. All sampled TopK score sets matched
+and all stability launches passed. Synchronized samples were `299.689408`,
+`300.047016`, `299.456405`, `299.444190`, and `299.425726` ms, for a
+`299.456405 ms` median. Against the retained common-path public-op median this
+is `55.67463x` faster, a `98.2038%` latency reduction.
+
+The exact BF16 V3.2 shape now dispatches to the full-score plus radix TopK
+path. Canonical decode and all generic fallbacks are unchanged.
 
 ## Parameterized context-sharded decode benchmark
 

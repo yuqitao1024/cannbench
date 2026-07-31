@@ -312,6 +312,8 @@ def test_prefill_full_score_path_uses_q2_persistent_tasks_and_allowed_apis():
         "kPersistentTaskCount = 32",
         "kContextTileSize = 32",
         "kThreadsPerBlock = 1024",
+        "kFixpipeNz2ndEnabled = true",
+        "kFixpipeNz2dnEnabled = false",
         "atom_index += kPersistentTaskCount",
         "dual_dst_ctl = 1",
         "asc_sync_block_arrive",
@@ -346,7 +348,7 @@ def test_prefill_full_score_and_radix_topk_build_as_separate_libraries():
     assert '"liblightning_indexer_radix_topk_bfloat16_kernel.so"' in setup_py
 
 
-def test_exact_v32_prefill_bridge_is_built_but_not_dispatched():
+def test_exact_v32_prefill_bridge_is_built_and_dispatched():
     source = Path(
         "src/cannbench/operators/builtin/lightning_indexer/simt/v1/"
         "aten_dsa_lightning_indexer/csrc/lightning_indexer.asc"
@@ -375,7 +377,7 @@ def test_exact_v32_prefill_bridge_is_built_but_not_dispatched():
     dispatch = source.split(
         'if (phase == "prefill" && family == "family_64x128")', 1
     )[1].split("\n  }", 1)[0]
-    assert "lightning_indexer_forward_prefill_full_score_bfloat16" not in dispatch
+    assert "lightning_indexer_forward_prefill_full_score_bfloat16" in dispatch
 
 
 def test_context_sharded_bridge_dispatches_dynamic_bq_fixed_v32_family():
