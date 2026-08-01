@@ -4,9 +4,13 @@
 
 Approved for staged implementation on 2026-08-01. The launch-geometry-only
 experiment was rejected after device measurement. The 1024-thread,
-head-parallel Lightning Indexer decode and V3.2 full-score prefill reductions
-and the Sparse Attention QK=128 tile are retained after correctness and
-repeated performance validation. Later stages remain gated by device results.
+head-parallel Lightning Indexer decode and V3.2 full-score prefill reductions,
+the Sparse Attention QK=128 tile, restoration of all 32 fused-kernel warps, and
+canonical decode `int32` KV row-offset reuse are retained after correctness and
+repeated performance validation. Pairwise PV coarsening and 2048-thread
+Key/Value Pack widening were rejected after device measurement. The current
+published V2 decode workflow checkpoint is 572.848 us at commit `6c821c2`.
+Later stages remain gated by device results.
 
 ## Scope And Baseline
 
@@ -470,7 +474,44 @@ cases, and repeated launches. Retain it only when two clean-process BasicInfo
 runs show at least a 5% fused-kernel improvement and the full workflow does not
 regress.
 
-#### A3.2: Occupancy-Gated 2048-Thread Pack VFs
+The production `-O3` `dav-3510` build restored 1024 active threads and 32
+active warps. It removed the four-warp second-row workaround while preserving
+the existing `PIPE_V -> PIPE_MTE3` completion event before PV-buffer reuse.
+Bisheng reported zero Stack bytes for every VF:
+
+| VF | Registers per thread | Stack size |
+| --- | ---: | ---: |
+| Query Pack | 16 | 0 B |
+| Key Pack | 19 | 0 B |
+| Value Pack | 18 | 0 B |
+| Output Update | 14 | 0 B |
+| Softmax | 32 | 0 B |
+| Output Write | 24 | 0 B |
+
+Full V3.2 decode accuracy passed five repeated launches in one process. Output
+and LSE both had zero mismatches at `atol=rtol=0.05`; maximum absolute errors
+were 0.0078125 for output and 0.0092830658 for LSE. Coverage included negative,
+out-of-range, and causal-future indices.
+
+Two clean-process BasicInfo runs reported:
+
+| Boundary | A0 baseline (us) | 1024/32 run 1 (us) | 1024/32 run 2 (us) | Median change |
+| --- | ---: | ---: | ---: | ---: |
+| Sparse Attention fused | 327.363 | 283.422 | 283.517 | -13.4% |
+| Sparse Attention + Combine | 362.868 | 319.437 | 319.784 | -11.9% |
+| Full decode workflow | 642.075 | 598.477 | 598.536 | -6.8% |
+
+The variant passed the 5% fused-kernel gate and was retained in `4b6f38c`.
+The measured source SHA-256 was
+`4eef8bf63e80abd218c4535876e5cb5e61f6e98d61d7e7480cf5ee19ece86355`.
+Raw artifacts are preserved under:
+
+```text
+/tmp/cannbench-dsa-v2-sparse-a1-1024-runs/
+/tmp/cannbench-dsa-v2-sparse-a1-1024-OZbhzH/  # Ascend 950PR host
+```
+
+#### A3.2: KV Offset Reuse (Retained) And 2048-Thread Pack VFs (Rejected)
 
 Ascend 950 assigns at most 16 registers per thread when `launch_bounds` is in
 the `1025-2048` tier. A current 1024-tier report below 16 registers is only a
@@ -481,16 +522,18 @@ and zero Stack bytes.
 Do not switch every fused VF to 2048. Softmax keeps its one-warp-per-head
 reduction and remains at 1024. The current initialization VFs satisfy the
 resource screen but represent too little latency to justify an isolated
-experiment. The first material 2048 target is canonical V3.2 decode Key/Value
-packing, after reducing register pressure and repeated index work.
+experiment. The first material 2048 target was canonical V3.2 decode Key/Value
+packing after reducing register pressure and repeated index work.
 
 For each 64-selected-token tile, each AIV owns 32 selected rows. Its first Key
-Pack call computes and stores one signed 64-bit KV row offset per local row,
-using `-1` for an invalid context index, and packs the first QK dimension tile.
-The following Key Pack calls and all Value Pack calls consume those offsets.
-This removes repeated index loads, range checks, batch/query/partition address
-construction, and long-lived 64-bit intermediates without adding another VF
-call. The per-AIV UB cost is 256 bytes plus alignment.
+Pack call computes and stores one signed `int32` relative KV row offset per
+local row, using `-1` for an invalid context index, and packs the first QK
+dimension tile. The following Key Pack calls and all Value Pack calls consume
+those offsets. The exact canonical shape keeps every valid relative offset in
+the signed `int32` range. This removes repeated index loads, range checks,
+batch/query/partition address construction, and long-lived 64-bit
+intermediates without adding another VF call. The per-AIV UB cost is 128 bytes
+plus alignment.
 
 The fast canonical pack signatures receive preadjusted source and destination
 pointers, the row-offset buffer, and the dimension start. Exact V3.2 decode
@@ -498,8 +541,7 @@ constants such as context length, selected length, row stride, QK tile, and
 Value tile are compile-time values. Generic decode, prefill, tails, and other
 shapes keep the existing fallback signatures and semantics.
 
-Once both fast Pack VFs satisfy the final 2048 resource gate, map the 64 warps
-as:
+The evaluated 64-warp Key/Value mapping was:
 
 ```text
 local selected row = warp / 2
@@ -508,12 +550,14 @@ first dimension    = dimension half * 32 + lane
 dimension stride   = 64
 ```
 
-The two warps for a row write disjoint dimension intervals and require no
-cross-warp reduction. Evaluate Output Update separately after pointer
-preadjustment and fixed 128-dimension specialization reduce its current 19
-registers below the same gate. Output Write already has a 16-byte Stack at the
-1024 tier; specialize its canonical output mode and stop passing complete plan
-and task objects by value before considering a wider launch.
+The two warps for a row wrote disjoint dimension intervals and required no
+cross-warp reduction. Output Update remains a separate candidate after pointer
+preadjustment and fixed 128-dimension specialization. Its current 1024-tier
+report is 14 registers with zero Stack bytes, so any 2048 experiment must still
+confirm the final-tier report. Output Write is currently 24 registers with zero
+Stack bytes at the 1024 tier; specialize its canonical output mode and stop
+passing complete plan and task objects by value before considering a wider
+launch.
 
 Do not use manual unrolling as a register-reduction technique without a
 resource report: the occupancy benchmark showed that manual expansion can
@@ -526,6 +570,67 @@ workflow regression.
 Do not move cross-core waits into an opaque monolithic VF merely to reduce the
 visible event count. Accept only a reduction in repeated BasicInfo/Default
 latency with unchanged correctness.
+
+The first offset-reuse prototype used signed `int64` offsets and 256 bytes of
+UB. It increased the Prepare/Key/Value resource reports to 18/22/20 registers
+per thread, so it was not a viable 2048 candidate. Changing only the stored
+representation to safe signed `int32` offsets reduced both UB use and register
+pressure. The final production report was:
+
+| VF | Registers per thread | Stack size |
+| --- | ---: | ---: |
+| Key Prepare | 14 | 0 B |
+| Fast Key | 14 | 0 B |
+| Fast Value | 13 | 0 B |
+| Generic Key | 19 | 0 B |
+| Generic Value | 18 | 0 B |
+
+Full V3.2 decode accuracy again passed five repeated launches with zero output
+and LSE mismatches at `atol=rtol=0.05`. Maximum absolute errors remained
+0.0078125 for output and 0.0092830658 for LSE. Generic decode, prefill, tails,
+noncanonical shapes, and V1 were unchanged.
+
+Two clean-process BasicInfo runs reported:
+
+| Boundary | 1024/32 baseline (us) | Offset run 1 (us) | Offset run 2 (us) | Median change |
+| --- | ---: | ---: | ---: | ---: |
+| Sparse Attention fused | 283.470 | 257.467 | 258.487 | -9.0% |
+| Sparse Attention + Combine | 319.611 | 294.272 | 294.892 | -7.8% |
+| Full decode workflow | 598.507 | 572.848 | 574.461 | -4.2% |
+
+The fused-kernel gain passed the 5% gate, so `int32` offset reuse was retained
+in `8561209`. Its measured source SHA-256 was
+`c3f53b6ef675f1ec24b9b65be3039023f9c7c21622cdee1acadd91dce00ec8ab`.
+The first run was published as 0.572848014 ms in `6c821c2`.
+
+The subsequent 2048-thread experiment widened only the fast Key and Value Pack
+VFs, mapping two warps to each selected row. The final 2048-tier build passed
+the resource gate: Fast Key used 12 registers, Fast Value used 13, both had
+zero Stack bytes, and Key Prepare remained at 1024 threads with 14 registers.
+The measured source SHA-256 was
+`1ef97d1b746ce6a2a94b0426e89ebf3cc7dddb7dd21be5c29931b524f210145d`.
+Accuracy passed, but the first BasicInfo run regressed every retained boundary:
+
+| Boundary | Retained offset run 1 (us) | 2048 Pack run 1 (us) | Change |
+| --- | ---: | ---: | ---: |
+| Sparse Attention fused | 257.467 | 260.857 | +1.3% |
+| Sparse Attention + Combine | 294.272 | 296.750 | +0.8% |
+| Full decode workflow | 572.848 | 576.394 | +0.6% |
+
+The 2048 Pack variant therefore failed the performance gate and was reverted
+without a second run. The result demonstrates that satisfying the register and
+Stack gate is necessary but does not imply useful scaling when the extra warp
+only splits one row's dimension work. Do not retry this exact Key/Value mapping
+without a different work decomposition or profile evidence.
+
+Raw artifacts are preserved under:
+
+```text
+/tmp/cannbench-dsa-v2-sparse-a2-offset-runs/
+/tmp/cannbench-dsa-v2-sparse-a3-pack2048-runs/
+/tmp/cannbench-dsa-v2-sparse-a2-offset-ZDy60C/   # Ascend 950PR host
+/tmp/cannbench-dsa-v2-sparse-a3-pack2048-SOh6z4/ # Ascend 950PR host
+```
 
 ### A4: Combine And Output Materialization
 
