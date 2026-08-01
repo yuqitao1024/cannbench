@@ -33,5 +33,6 @@ checked against the current codebase on 2026-07-30.
 - [DSA V4/V4Pro alignment backlog](dsa-v4-v4pro-alignment-backlog.md)
 - [Lightning Indexer FP16 fused kernel](lightning-indexer-fp16-fused-kernel-design.md)
 - [Lightning Indexer SIMT custom-op V1](lightning-indexer-simt-custom-op-v1-design.md)
+- [Lightning Indexer V2 unordered radix Top-K](lightning-indexer-v2-unordered-radix-topk-design.md)
 - [Operator and hardware visualization](operator-and-hardware-visualization-design.md)
 - [Sparse Attention HD128 prefill fusion](sparse-attention-hd128-prefill-fused-design.md)

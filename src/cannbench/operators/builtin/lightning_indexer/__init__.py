@@ -78,8 +78,11 @@ def _build_torch_callable(ctx):
 
 
 def _simt_module_name(version: str | None) -> str | None:
-    if (version or "v1") == "v1":
+    resolved_version = version or "v1"
+    if resolved_version == "v1":
         return "aten_dsa_lightning_indexer"
+    if resolved_version == "v2":
+        return "aten_dsa_lightning_indexer_v2"
     return None
 
 

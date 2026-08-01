@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+import re
 from types import SimpleNamespace
 
 import pytest
@@ -59,10 +61,46 @@ def test_select_simt_family_falls_back_for_unknown_shape():
     assert _select_simt_family(payload) == "fallback"
 
 
-def test_simt_module_name_registers_only_v1():
+def test_simt_module_name_registers_version_isolated_v2():
     assert _simt_module_name(None) == "aten_dsa_lightning_indexer"
     assert _simt_module_name("v1") == "aten_dsa_lightning_indexer"
-    assert _simt_module_name("v2") is None
+    assert _simt_module_name("v2") == "aten_dsa_lightning_indexer_v2"
+
+
+def test_v2_project_has_independent_python_package():
+    project_dir = Path(__file__).parents[1] / "v2"
+
+    assert (project_dir / "install.sh").is_file()
+    assert (project_dir / "setup.py").is_file()
+    assert (project_dir / "aten_dsa_lightning_indexer_v2" / "__init__.py").is_file()
+
+
+def test_v2_device_libraries_have_independent_sonames():
+    setup_source = (Path(__file__).parents[1] / "v2" / "setup.py").read_text(
+        encoding="utf-8"
+    )
+    kernel_libraries = re.findall(r'"(lib[^\"]+_kernel\.so)"\s*:', setup_source)
+
+    assert kernel_libraries
+    assert all(name.endswith("_v2_kernel.so") for name in kernel_libraries)
+
+
+def test_v2_device_launch_abi_is_version_isolated():
+    csrc_dir = (
+        Path(__file__).parents[1]
+        / "v2"
+        / "aten_dsa_lightning_indexer_v2"
+        / "csrc"
+    )
+    source = "\n".join(
+        path.read_text(encoding="utf-8") for path in csrc_dir.rglob("*.asc")
+    )
+    launch_symbols = re.findall(
+        r"\b(launch_lightning_indexer_[A-Za-z0-9_]+)\s*\(", source
+    )
+
+    assert launch_symbols
+    assert all(name.endswith("_v2") for name in launch_symbols)
 
 
 def test_build_simt_callable_requires_loaded_module():

@@ -294,6 +294,27 @@ def _assert_context_sharded_scores_and_indices(
     assert torch.equal(custom_scores, reference_scores)
 
 
+def _assert_context_sharded_unordered_scores_and_indices(
+    torch, custom, reduced, reference_scores, valid
+):
+    assert bool(((custom >= 0) & (custom < reduced.shape[-1])).all().item())
+    assert bool((custom < valid.unsqueeze(-1)).all().item())
+
+    sorted_indices = torch.sort(custom, dim=-1).values
+    assert bool(
+        (sorted_indices[..., :-1] != sorted_indices[..., 1:]).all().item()
+    )
+
+    custom_scores = reduced.gather(-1, custom.to(torch.int64))
+    sorted_custom_scores = torch.sort(
+        custom_scores, dim=-1, descending=True
+    ).values
+    sorted_reference_scores = torch.sort(
+        reference_scores, dim=-1, descending=True
+    ).values
+    assert torch.equal(sorted_custom_scores, sorted_reference_scores)
+
+
 def test_context_sharded_score_assertion_rejects_indices_past_valid_context():
     torch = pytest.importorskip("torch")
     custom = torch.tensor([[[0, 1]]], dtype=torch.int32)
@@ -305,6 +326,23 @@ def test_context_sharded_score_assertion_rejects_indices_past_valid_context():
         _assert_context_sharded_scores_and_indices(
             torch, custom, reduced, reference_scores, valid
         )
+
+
+def test_v2_score_assertion_accepts_an_unordered_topk_set():
+    assert callable(_assert_context_sharded_unordered_scores_and_indices)
+    torch = pytest.importorskip("torch")
+    custom = torch.tensor([[[1, 0]]], dtype=torch.int32)
+    reduced = torch.tensor([[[5.0, 4.0, 3.0, 2.0]]])
+    reference_scores = torch.tensor([[[5.0, 4.0]]])
+    valid = torch.tensor([[4]], dtype=torch.int32)
+
+    with pytest.raises(AssertionError):
+        _assert_context_sharded_scores_and_indices(
+            torch, custom, reduced, reference_scores, valid
+        )
+    _assert_context_sharded_unordered_scores_and_indices(
+        torch, custom, reduced, reference_scores, valid
+    )
 
 
 def test_context_sharded_decode_matches_target_reference_scores():
