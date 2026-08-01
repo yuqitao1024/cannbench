@@ -551,13 +551,12 @@ dimension stride   = 64
 ```
 
 The two warps for a row wrote disjoint dimension intervals and required no
-cross-warp reduction. Output Update remains a separate candidate after pointer
-preadjustment and fixed 128-dimension specialization. Its current 1024-tier
-report is 14 registers with zero Stack bytes, so any 2048 experiment must still
-confirm the final-tier report. Output Write is currently 24 registers with zero
-Stack bytes at the 1024 tier; specialize its canonical output mode and stop
-passing complete plan and task objects by value before considering a wider
-launch.
+cross-warp reduction. Output Update was screened separately after pointer
+preadjustment and fixed 128-dimension specialization; A3.3 records why it did
+not pass the profile gate for a 2048-thread experiment. Output Write is
+currently 24 registers with zero Stack bytes at the 1024 tier; specialize its
+canonical output mode and stop passing complete plan and task objects by value
+before considering a wider launch.
 
 Do not use manual unrolling as a register-reduction technique without a
 resource report: the occupancy benchmark showed that manual expansion can
@@ -630,6 +629,59 @@ Raw artifacts are preserved under:
 /tmp/cannbench-dsa-v2-sparse-a3-pack2048-runs/
 /tmp/cannbench-dsa-v2-sparse-a2-offset-ZDy60C/   # Ascend 950PR host
 /tmp/cannbench-dsa-v2-sparse-a3-pack2048-SOh6z4/ # Ascend 950PR host
+```
+
+#### A3.3: 2048-Thread Output Update (Rejected By Profile Gate)
+
+The retained offset-reuse source was profiled before making another launch-
+geometry change. The local source and the deployed A2 package both had SHA-256
+`c3f53b6ef675f1ec24b9b65be3039023f9c7c21622cdee1acadd91dce00ec8ab`.
+CannBench collected separate `Default` and `InstrTimeline` runs for the exact
+canonical V3.2 decode workflow. `Default` reported 259.246 us for fused Sparse
+Attention and 573.903 us for the full workflow; `InstrTimeline` reproduced the
+fused boundary at 259.448 us, so metric perturbation was negligible for this
+attribution.
+
+The timeline exposes the repeated eight-selected-tile sequence on every
+recorded AIV lane. For each selected tile, the first Value Pack occurs at PC
+`0x120053e0116c`; the next three Value Pack calls occur at
+`0x120053e01388`; and all four Output Update calls occur at
+`0x120053e012ac`. This matches the source pipeline exactly:
+
+```text
+first Value Pack
+3 x (next Value Pack, wait for AIC PV, Output Update)
+wait for AIC PV, final Output Update
+```
+
+Across the 12 recorded lanes, each lane had exactly 32 Output Update regions.
+Their per-lane sum ranged from 23.416 to 23.978 us, with a 23.628 us mean. The
+384 individual calls had a 0.738 us mean, 0.734 us median, and 1.493 us
+maximum. In contrast, the 32 Value Pack calls consumed about 111.647 us per
+lane on average, including eight first-pack and 24 pipelined-pack regions. The
+roughly 3.458 us regions are therefore Value Pack, not Output Update.
+
+The AIC-to-AIV waits immediately preceding Output Update used PC
+`0x120053e0127c`. They totaled 6.242 to 7.468 us per lane and remain a separate
+dependency cost; widening Output Update cannot remove them and may only expose
+more of that wait. Because lanes execute concurrently, the relevant fused
+critical-path contribution is the maximum per-lane Output Update sum, not the
+sum over all 12 recorded lanes.
+
+Five percent of the 259.448 us fused boundary is 12.972 us. Even an ideal 2x
+speedup of the worst recorded 23.978 us Output Update path can save only
+11.989 us, or 4.62% of the fused boundary, before accounting for launch,
+synchronization, or scheduling overhead. This misses the predeclared 26 us
+profile gate. The canonical 2048-thread Output Update specialization was
+therefore rejected before source or test changes. Do not retry the identical
+two-warps-per-head mapping unless a later profile shows at least 26 us of
+Output Update work on the fused critical path or the acceptance threshold is
+intentionally changed.
+
+Raw profile artifacts are preserved under:
+
+```text
+/tmp/cannbench-dsa-v2-output-update-baseline/
 ```
 
 ### A4: Combine And Output Materialization
