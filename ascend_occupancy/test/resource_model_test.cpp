@@ -39,14 +39,10 @@ AscOccupancyAnalysis MakeAnalysis() {
   return analysis;
 }
 
-bool TestStaticDav3510DeviceModel() {
+bool TestHostOnlyDeviceDiscoveryIsExplicitlyUnsupported() {
   AscOccupancyDeviceProperties properties = ASC_OCCUPANCY_DEVICE_PROPERTIES_INIT;
-  CHECK(ascOccupancyGetDeviceProperties(0, &properties) == ASC_OCCUPANCY_SUCCESS);
-  CHECK(properties.device_id == 0);
-  CHECK(properties.vector_core_count == 64U);
-  CHECK(properties.warp_size == 32U);
-  CHECK(properties.max_threads_per_vector_core == 2048U);
-  CHECK(properties.ub_bytes_per_vector_core > 0U);
+  CHECK(ascOccupancyGetDeviceProperties(0, &properties) ==
+        ASC_OCCUPANCY_UNSUPPORTED_DEVICE);
   CHECK(ascOccupancyGetDeviceProperties(-1, &properties) ==
         ASC_OCCUPANCY_UNSUPPORTED_DEVICE);
   return true;
@@ -200,13 +196,68 @@ bool TestCandidateEnumeration() {
   return true;
 }
 
+bool TestNonEndpointLaunchBoundsCandidatesWithSpill() {
+  const AscOccupancyDeviceProperties device = MakeDevice();
+  const uint32_t current_bounds[] = {257U, 513U, 1025U};
+  const uint32_t expected_counts[] = {2U, 3U, 4U};
+  const uint32_t expected_bounds[][4] = {
+      {256U, 257U, 0U, 0U},
+      {256U, 512U, 513U, 0U},
+      {256U, 512U, 1024U, 1025U},
+  };
+
+  for (size_t test_case = 0U; test_case < 3U; ++test_case) {
+    AscKernelResourceUsage resources = MakeResources(current_bounds[test_case], 16U);
+    resources.stack_size_bytes = 8U;
+    AscLaunchBoundsCandidate candidates[4] = {};
+    size_t count = 4U;
+    CHECK(ascOccupancyEnumerateLaunchBounds(&device, &resources, candidates, &count) ==
+          ASC_OCCUPANCY_SUCCESS);
+    CHECK(count == expected_counts[test_case]);
+    for (size_t index = 0U; index < count; ++index) {
+      CHECK(candidates[index].launch_bounds == expected_bounds[test_case][index]);
+      CHECK(candidates[index].requires_recompile ==
+            (candidates[index].launch_bounds != current_bounds[test_case]));
+    }
+  }
+  return true;
+}
+
+bool TestNonEndpointLaunchBoundsCandidatesWithoutSpill() {
+  const AscOccupancyDeviceProperties device = MakeDevice();
+  const uint32_t current_bounds[] = {257U, 513U, 1025U};
+  const uint32_t registers[] = {64U, 32U, 16U};
+  const uint32_t expected_bounds[][2] = {
+      {257U, 512U},
+      {513U, 1024U},
+      {1025U, 2048U},
+  };
+
+  for (size_t test_case = 0U; test_case < 3U; ++test_case) {
+    AscKernelResourceUsage resources =
+        MakeResources(current_bounds[test_case], registers[test_case]);
+    AscLaunchBoundsCandidate candidates[2] = {};
+    size_t count = 2U;
+    CHECK(ascOccupancyEnumerateLaunchBounds(&device, &resources, candidates, &count) ==
+          ASC_OCCUPANCY_SUCCESS);
+    CHECK(count == 2U);
+    for (size_t index = 0U; index < count; ++index) {
+      CHECK(candidates[index].launch_bounds == expected_bounds[test_case][index]);
+      CHECK(candidates[index].requires_recompile == (index != 0U));
+    }
+  }
+  return true;
+}
+
 }  // namespace
 
 int main() {
-  const bool passed = TestStaticDav3510DeviceModel() &&
+  const bool passed = TestHostOnlyDeviceDiscoveryIsExplicitlyUnsupported() &&
                       TestRegisterLimitBoundaries() &&
                       TestLaunchConstraintsAndTailWarpOccupancy() &&
                       TestUbAccountingAndSpillRisk() &&
-                      TestCandidateEnumeration();
+                      TestCandidateEnumeration() &&
+                      TestNonEndpointLaunchBoundsCandidatesWithSpill() &&
+                      TestNonEndpointLaunchBoundsCandidatesWithoutSpill();
   return passed ? EXIT_SUCCESS : EXIT_FAILURE;
 }

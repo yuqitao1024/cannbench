@@ -1,17 +1,18 @@
 #include <ascend_occupancy/asc_occupancy.h>
 
 #include <algorithm>
+#include <limits>
+
+#if defined(ASC_OCCUPANCY_WITH_ACL)
+#include <acl/acl.h>
+#endif
 
 namespace {
-
-constexpr uint32_t kDav3510VectorCoreCount = 64U;
-constexpr uint32_t kDav3510WarpSize = 32U;
-constexpr uint32_t kDav3510MaxThreadsPerVectorCore = 2048U;
-constexpr uint64_t kDav3510UbBytesPerVectorCore = 512U * 1024U;
 
 constexpr uint32_t kDefaultLaunchBounds = 1024U;
 constexpr uint32_t kLaunchBoundsValues[] = {256U, 512U, 1024U, 2048U};
 constexpr uint32_t kRegisterLimits[] = {127U, 64U, 32U, 16U};
+constexpr int64_t kDav3510NpuArchitecture = 3510;
 
 template <typename T>
 bool HasCompatibleHeader(const T* value) {
@@ -41,17 +42,19 @@ uint32_t RegisterLimitForLaunchBounds(uint32_t launch_bounds) {
   return kRegisterLimits[3];
 }
 
-uint32_t CanonicalLaunchBounds(uint32_t launch_bounds) {
-  for (uint32_t value : kLaunchBoundsValues) {
-    if (launch_bounds <= value) {
-      return value;
-    }
-  }
-  return 0U;
-}
-
 uint32_t CeilDiv(uint32_t numerator, uint32_t denominator) {
   return numerator == 0U ? 0U : 1U + (numerator - 1U) / denominator;
+}
+
+void AppendDistinctLaunchBounds(uint32_t* selected_bounds,
+                                size_t* selected_count,
+                                uint32_t launch_bounds) {
+  for (size_t index = 0U; index < *selected_count; ++index) {
+    if (selected_bounds[index] == launch_bounds) {
+      return;
+    }
+  }
+  selected_bounds[(*selected_count)++] = launch_bounds;
 }
 
 AscOccupancyStatus ValidateDevice(const AscOccupancyDeviceProperties* device) {
@@ -132,21 +135,55 @@ extern "C" AscOccupancyStatus ascOccupancyGetDeviceProperties(
   if (!HasCompatibleHeader(properties)) {
     return ASC_OCCUPANCY_INVALID_ARGUMENT;
   }
-  if (device_id < 0) {
+
+#if !defined(ASC_OCCUPANCY_WITH_ACL)
+  (void)device_id;
+  return ASC_OCCUPANCY_UNSUPPORTED_DEVICE;
+#else
+  int64_t npu_architecture = 0;
+  int64_t vector_core_count = 0;
+  int64_t warp_size = 0;
+  int64_t max_threads_per_vector_core = 0;
+  int64_t ub_bytes_per_vector_core = 0;
+  int64_t max_threads_per_block = 0;
+  if (aclrtGetDeviceInfo(device_id, ACL_DEV_ATTR_NPU_ARCH, &npu_architecture) !=
+          ACL_SUCCESS ||
+      aclrtGetDeviceInfo(device_id, ACL_DEV_ATTR_VECTOR_CORE_NUM,
+                          &vector_core_count) != ACL_SUCCESS ||
+      aclrtGetDeviceInfo(device_id, ACL_DEV_ATTR_WARP_SIZE, &warp_size) !=
+          ACL_SUCCESS ||
+      aclrtGetDeviceInfo(device_id, ACL_DEV_ATTR_MAX_THREAD_PER_VECTOR_CORE,
+                          &max_threads_per_vector_core) != ACL_SUCCESS ||
+      aclrtGetDeviceInfo(device_id, ACL_DEV_ATTR_UBUF_PER_VECTOR_CORE,
+                          &ub_bytes_per_vector_core) != ACL_SUCCESS ||
+      aclrtGetDeviceInfo(device_id, ACL_DEV_ATTR_MAX_THREADS_PER_BLOCK,
+                          &max_threads_per_block) != ACL_SUCCESS) {
+    return ASC_OCCUPANCY_RESOURCE_DATA_MISSING;
+  }
+  if (npu_architecture != kDav3510NpuArchitecture) {
     return ASC_OCCUPANCY_UNSUPPORTED_DEVICE;
   }
+  if (max_threads_per_vector_core != max_threads_per_block ||
+      vector_core_count <= 0 || warp_size <= 0 ||
+      max_threads_per_vector_core <= 0 || ub_bytes_per_vector_core <= 0 ||
+      vector_core_count > std::numeric_limits<uint32_t>::max() ||
+      warp_size > std::numeric_limits<uint32_t>::max() ||
+      max_threads_per_vector_core > std::numeric_limits<uint32_t>::max()) {
+    return ASC_OCCUPANCY_RESOURCE_DATA_INCONSISTENT;
+  }
 
-  // This is a versioned dav-3510 model, not ACL runtime discovery. A later ACL
-  // integration may replace this lookup after each queried attribute is verified.
   *properties = {};
   properties->abi_version = ASC_OCCUPANCY_ABI_VERSION;
   properties->struct_size = sizeof(*properties);
   properties->device_id = device_id;
-  properties->vector_core_count = kDav3510VectorCoreCount;
-  properties->warp_size = kDav3510WarpSize;
-  properties->max_threads_per_vector_core = kDav3510MaxThreadsPerVectorCore;
-  properties->ub_bytes_per_vector_core = kDav3510UbBytesPerVectorCore;
+  properties->vector_core_count = static_cast<uint32_t>(vector_core_count);
+  properties->warp_size = static_cast<uint32_t>(warp_size);
+  properties->max_threads_per_vector_core =
+      static_cast<uint32_t>(max_threads_per_vector_core);
+  properties->ub_bytes_per_vector_core =
+      static_cast<uint64_t>(ub_bytes_per_vector_core);
   return ASC_OCCUPANCY_SUCCESS;
+#endif
 }
 
 extern "C" AscOccupancyStatus ascOccupancyAnalyzeKernel(
@@ -218,18 +255,18 @@ extern "C" AscOccupancyStatus ascOccupancyEnumerateLaunchBounds(
   uint32_t selected_bounds[4] = {};
   size_t selected_count = 0U;
   if (resources->stack_size_bytes > 0U) {
-    const uint32_t current_tier = CanonicalLaunchBounds(current_bounds);
     for (uint32_t bound : kLaunchBoundsValues) {
-      if (bound <= current_tier) {
-        selected_bounds[selected_count++] = bound;
+      if (bound < current_bounds) {
+        AppendDistinctLaunchBounds(selected_bounds, &selected_count, bound);
       }
     }
+    AppendDistinctLaunchBounds(selected_bounds, &selected_count, current_bounds);
   } else {
-    selected_bounds[selected_count++] = CanonicalLaunchBounds(current_bounds);
+    AppendDistinctLaunchBounds(selected_bounds, &selected_count, current_bounds);
     for (uint32_t bound : kLaunchBoundsValues) {
       if (bound > current_bounds &&
           resources->used_registers_per_thread <= RegisterLimitForLaunchBounds(bound)) {
-        selected_bounds[selected_count++] = bound;
+        AppendDistinctLaunchBounds(selected_bounds, &selected_count, bound);
       }
     }
   }
