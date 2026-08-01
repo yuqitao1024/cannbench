@@ -26,7 +26,14 @@ if(ASC_OCCUPANCY_BUILD_PERF_TESTS)
   if(NOT CMAKE_ASC_ENABLE_SIMT)
     message(FATAL_ERROR "ASC_OCCUPANCY_BUILD_PERF_TESTS requires CMAKE_ASC_ENABLE_SIMT=ON")
   endif()
+  add_subdirectory(perf_tests/register_spill)
   add_subdirectory(perf_tests/launch_geometry)
+  add_subdirectory(perf_tests/loop_unroll)
+  find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  asc_occupancy_generate_benchmark_runner(
+    OUTPUT "${CMAKE_BINARY_DIR}/run-all-occupancy-benchmarks.sh"
+    PYTHON_EXECUTABLE "${Python3_EXECUTABLE}"
+    AGGREGATOR "${CMAKE_CURRENT_SOURCE_DIR}/perf_tests/common/aggregate_results.py")
 endif()
 
 add_library(ascend_occupancy STATIC src/asc_occupancy.cpp)

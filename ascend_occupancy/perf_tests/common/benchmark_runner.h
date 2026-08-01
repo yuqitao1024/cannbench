@@ -21,6 +21,10 @@ struct LaunchGeometry {
 struct BenchmarkOptions {
   uint32_t warmup = 10;
   uint32_t iterations = 100;
+  bool has_candidate_index = false;
+  uint32_t candidate_index = 0;
+  std::string environment_id;
+  std::string profile_path;
   std::string json_path;
   std::string csv_path;
 };
@@ -33,9 +37,10 @@ struct BenchmarkRecord {
   double median_us = 0;
   double min_us = 0;
   double max_us = 0;
+  bool is_best_candidate = false;
 };
 
-inline bool parse_positive_u32(const char* value, uint32_t* result) {
+inline bool parse_nonnegative_u32(const char* value, uint32_t* result) {
   if (value == nullptr || *value == '\0') return false;
   uint64_t parsed = 0;
   for (const char* cursor = value; *cursor != '\0'; ++cursor) {
@@ -43,9 +48,12 @@ inline bool parse_positive_u32(const char* value, uint32_t* result) {
     parsed = parsed * 10 + static_cast<uint64_t>(*cursor - '0');
     if (parsed > UINT32_MAX) return false;
   }
-  if (parsed == 0) return false;
   *result = static_cast<uint32_t>(parsed);
   return true;
+}
+
+inline bool parse_positive_u32(const char* value, uint32_t* result) {
+  return parse_nonnegative_u32(value, result) && *result != 0;
 }
 
 inline bool parse_benchmark_options(int argc, char** argv, BenchmarkOptions* options,
@@ -53,6 +61,8 @@ inline bool parse_benchmark_options(int argc, char** argv, BenchmarkOptions* opt
   for (int index = 1; index < argc; ++index) {
     const std::string argument(argv[index]);
     if (argument == "--warmup" || argument == "--iterations" ||
+        argument == "--candidate-index" ||
+        argument == "--environment-id" || argument == "--profile-path" ||
         argument == "--json" || argument == "--csv") {
       if (++index == argc) {
         *error = "missing value for " + argument;
@@ -67,6 +77,15 @@ inline bool parse_benchmark_options(int argc, char** argv, BenchmarkOptions* opt
         *error = "--iterations must be a positive integer";
         return false;
       }
+      if (argument == "--candidate-index") {
+        if (!parse_nonnegative_u32(argv[index], &options->candidate_index)) {
+          *error = "--candidate-index must be a non-negative integer";
+          return false;
+        }
+        options->has_candidate_index = true;
+      }
+      if (argument == "--environment-id") options->environment_id = argv[index];
+      if (argument == "--profile-path") options->profile_path = argv[index];
       if (argument == "--json") options->json_path = argv[index];
       if (argument == "--csv") options->csv_path = argv[index];
       continue;
@@ -107,6 +126,19 @@ inline std::string csv_escape(const std::string& value) {
   return escaped + "\"";
 }
 
+inline std::string filename_component(const std::string& value) {
+  std::string result;
+  result.reserve(value.size());
+  for (const unsigned char character : value) {
+    const bool safe = (character >= 'a' && character <= 'z') ||
+                      (character >= 'A' && character <= 'Z') ||
+                      (character >= '0' && character <= '9') || character == '-' ||
+                      character == '_' || character == '.';
+    result += safe ? static_cast<char>(character) : '_';
+  }
+  return result.empty() ? "occupancy" : result;
+}
+
 inline void finalize_statistics(BenchmarkRecord* record) {
   std::vector<double> sorted = record->samples_us;
   std::sort(sorted.begin(), sorted.end());
@@ -117,6 +149,27 @@ inline void finalize_statistics(BenchmarkRecord* record) {
       ? (sorted[middle - 1] + sorted[middle]) / 2.0 : sorted[middle];
 }
 
+inline void mark_best_candidates(std::vector<BenchmarkRecord>* records,
+                                 uint32_t expected_iterations) {
+  BenchmarkRecord* best = nullptr;
+  for (BenchmarkRecord& record : *records) {
+    if (!record.validation_passed || !record.error.empty() ||
+        record.samples_us.size() != expected_iterations) {
+      continue;
+    }
+    if (best == nullptr || record.median_us < best->median_us) best = &record;
+  }
+  if (best == nullptr) return;
+  for (BenchmarkRecord& record : *records) {
+    if (!record.validation_passed || !record.error.empty() ||
+        record.samples_us.size() != expected_iterations) {
+      continue;
+    }
+    record.is_best_candidate =
+        std::max(record.min_us, best->min_us) <= std::min(record.max_us, best->max_us);
+  }
+}
+
 template <typename Adapter>
 inline void write_json(std::ostream& output, const Adapter& adapter,
                        const BenchmarkOptions& options,
@@ -124,6 +177,8 @@ inline void write_json(std::ostream& output, const Adapter& adapter,
   const auto& resources = adapter.resource_usage();
   output << "{\"benchmark\":\"" << json_escape(adapter.benchmark_name())
          << "\",\"variant\":\"" << json_escape(adapter.variant_name())
+         << "\",\"environment_id\":\"" << json_escape(options.environment_id)
+         << "\",\"profile_path\":\"" << json_escape(options.profile_path)
          << "\",\"launch_bounds\":" << resources.launch_bounds
          << ",\"used_registers_per_thread\":" << resources.used_registers_per_thread
          << ",\"stack_size_bytes\":" << resources.stack_size_bytes
@@ -143,7 +198,9 @@ inline void write_json(std::ostream& output, const Adapter& adapter,
     output << "],\"validation_passed\":" << (record.validation_passed ? "true" : "false")
            << ",\"error\":\"" << json_escape(record.error) << "\""
            << ",\"median_us\":" << record.median_us
-           << ",\"min_us\":" << record.min_us << ",\"max_us\":" << record.max_us << '}';
+           << ",\"min_us\":" << record.min_us << ",\"max_us\":" << record.max_us
+           << ",\"is_best_candidate\":"
+           << (record.is_best_candidate ? "true" : "false") << '}';
   }
   output << "]}\n";
 }
@@ -153,9 +210,10 @@ inline void write_csv(std::ostream& output, const Adapter& adapter,
                       const BenchmarkOptions& options,
                       const std::vector<BenchmarkRecord>& records) {
   const auto& resources = adapter.resource_usage();
-  output << "benchmark,variant,launch_bounds,used_registers_per_thread,stack_size_bytes,"
+  output << "benchmark,variant,environment_id,profile_path,launch_bounds,"
+            "used_registers_per_thread,stack_size_bytes,"
             "grid_blocks,block_threads,work_items,warmup,iterations,samples_us,"
-            "validation_passed,error,median_us,min_us,max_us\n";
+            "validation_passed,error,median_us,min_us,max_us,is_best_candidate\n";
   for (const auto& record : records) {
     std::ostringstream samples;
     for (size_t index = 0; index < record.samples_us.size(); ++index) {
@@ -163,12 +221,14 @@ inline void write_csv(std::ostream& output, const Adapter& adapter,
       samples << record.samples_us[index];
     }
     output << csv_escape(adapter.benchmark_name()) << ',' << csv_escape(adapter.variant_name())
+           << ',' << csv_escape(options.environment_id) << ',' << csv_escape(options.profile_path)
            << ',' << resources.launch_bounds << ',' << resources.used_registers_per_thread
            << ',' << resources.stack_size_bytes << ',' << record.geometry.grid_blocks << ','
            << record.geometry.block_threads << ',' << adapter.work_items() << ',' << options.warmup
            << ',' << options.iterations << ',' << csv_escape(samples.str()) << ','
            << (record.validation_passed ? "true" : "false") << ',' << csv_escape(record.error)
-           << ',' << record.median_us << ',' << record.min_us << ',' << record.max_us << '\n';
+           << ',' << record.median_us << ',' << record.min_us << ',' << record.max_us << ','
+           << (record.is_best_candidate ? "true" : "false") << '\n';
   }
 }
 
@@ -181,13 +241,28 @@ int run_benchmark(int argc, char** argv, Adapter& adapter, Runtime& runtime,
     error_output << error << '\n';
     return 2;
   }
+  const std::string default_result_stem =
+      filename_component(adapter.benchmark_name()) + "-" +
+      filename_component(adapter.variant_name());
+  if (options.json_path.empty()) options.json_path = default_result_stem + ".json";
+  if (options.csv_path.empty()) options.csv_path = default_result_stem + ".csv";
   if (!adapter.initialize(&error)) {
+    adapter.shutdown();
     error_output << "initialize failed: " << error << '\n';
     return 1;
   }
+  std::vector<LaunchGeometry> candidates = adapter.candidates();
+  if (options.has_candidate_index) {
+    if (options.candidate_index >= candidates.size()) {
+      adapter.shutdown();
+      error_output << "--candidate-index is out of range\n";
+      return 2;
+    }
+    candidates = {candidates[options.candidate_index]};
+  }
   std::vector<BenchmarkRecord> records;
   int status = 0;
-  for (const LaunchGeometry geometry : adapter.candidates()) {
+  for (const LaunchGeometry geometry : candidates) {
     BenchmarkRecord record;
     record.geometry = geometry;
     if (!adapter.reset_iteration_state(&record.error) || !adapter.launch(geometry, &record.error) ||
@@ -235,6 +310,7 @@ int run_benchmark(int argc, char** argv, Adapter& adapter, Runtime& runtime,
     records.push_back(record);
     if (status != 0) break;
   }
+  mark_best_candidates(&records, options.iterations);
   if (!options.json_path.empty()) {
     std::ofstream json(options.json_path);
     if (!json) { error_output << "cannot open JSON output\n"; status = 1; }
