@@ -22,3 +22,10 @@ add_test(
     "-DASC_OCCUPANCY_SOURCE_DIR=${PROJECT_SOURCE_DIR}"
     "-DASC_OCCUPANCY_TEST_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/cmake_discovery"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake_discovery_test.cmake")
+
+add_test(
+  NAME asc_occupancy_bisheng_resource_usage_test
+  COMMAND "${CMAKE_COMMAND}"
+    "-DASC_OCCUPANCY_SOURCE_DIR=${PROJECT_SOURCE_DIR}"
+    "-DASC_OCCUPANCY_TEST_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/bisheng_resource_usage"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/bisheng_resource_usage_test.cmake")
