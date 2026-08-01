@@ -1,0 +1,3 @@
+add_executable(asc_occupancy_resource_model_test resource_model_test.cpp)
+target_link_libraries(asc_occupancy_resource_model_test PRIVATE ascend_occupancy)
+add_test(NAME asc_occupancy_resource_model_test COMMAND asc_occupancy_resource_model_test)
