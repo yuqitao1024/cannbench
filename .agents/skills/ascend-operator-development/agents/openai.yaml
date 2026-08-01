@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ascend Operator Development"
+  short_description: "Develop, debug, profile, and optimize Ascend operators"
+  default_prompt: "Use $ascend-operator-development to develop or diagnose this Ascend operator with evidence from correctness tests and device profiling."
