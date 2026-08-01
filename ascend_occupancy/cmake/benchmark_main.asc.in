@@ -1,0 +1,11 @@
+#include "@ASC_OCCUPANCY_BENCHMARK_RESOURCE_HEADER@"
+#include "@ASC_OCCUPANCY_BENCHMARK_ADAPTER_HEADER@"
+#include "acl_event_runtime.h"
+
+#include <iostream>
+
+int main(int argc, char** argv) {
+  @ASC_OCCUPANCY_BENCHMARK_ADAPTER_TYPE@ adapter;
+  asc_occupancy::AclEventRuntime runtime;
+  return asc_occupancy::run_benchmark(argc, argv, adapter, runtime, std::cerr);
+}

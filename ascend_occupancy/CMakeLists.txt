@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.20)
 project(ascend_occupancy LANGUAGES C CXX)
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/AscOccupancyProbe.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/AscOccupancyBenchmark.cmake")
 
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -15,6 +16,17 @@ check_c_source_compiles(
   ASC_OCCUPANCY_PUBLIC_HEADER_IS_C99)
 if(NOT ASC_OCCUPANCY_PUBLIC_HEADER_IS_C99)
   message(FATAL_ERROR "asc_occupancy.h must be consumable from C99")
+endif()
+
+option(ASC_OCCUPANCY_BUILD_PERF_TESTS "Build ASC SIMT occupancy benchmark executables" OFF)
+if(ASC_OCCUPANCY_BUILD_PERF_TESTS)
+  set(CMAKE_ASC_ENABLE_SIMT ON CACHE BOOL "Enable SIMT for occupancy benchmarks" FORCE)
+  find_package(ASC REQUIRED)
+  enable_language(ASC)
+  if(NOT CMAKE_ASC_ENABLE_SIMT)
+    message(FATAL_ERROR "ASC_OCCUPANCY_BUILD_PERF_TESTS requires CMAKE_ASC_ENABLE_SIMT=ON")
+  endif()
+  add_subdirectory(perf_tests/launch_geometry)
 endif()
 
 add_library(ascend_occupancy STATIC src/asc_occupancy.cpp)

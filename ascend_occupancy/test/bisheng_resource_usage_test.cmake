@@ -241,6 +241,35 @@ if(NOT parameter_result EQUAL 0)
     "Probe parameter round-trip failed:\n${parameter_output}\n${parameter_error}")
 endif()
 
+set(benchmark_module_path "${ASC_OCCUPANCY_SOURCE_DIR}/cmake/AscOccupancyBenchmark.cmake")
+set(benchmark_main "${ASC_OCCUPANCY_TEST_BINARY_DIR}/generated_benchmark.asc")
+set(benchmark_contract_script "${ASC_OCCUPANCY_TEST_BINARY_DIR}/benchmark_contract.cmake")
+file(WRITE "${benchmark_contract_script}"
+  "include(\"${benchmark_module_path}\")\n"
+  "asc_occupancy_configure_benchmark_main(\n"
+  "  OUTPUT \"${benchmark_main}\" ADAPTER_HEADER \"adapter.h\"\n"
+  "  ADAPTER_TYPE TestAdapter RESOURCE_HEADER \"test_resources.h\")\n")
+execute_process(
+  COMMAND "${CMAKE_COMMAND}" -P "${benchmark_contract_script}"
+  RESULT_VARIABLE benchmark_contract_result
+  OUTPUT_VARIABLE benchmark_contract_output
+  ERROR_VARIABLE benchmark_contract_error)
+if(NOT benchmark_contract_result EQUAL 0)
+  message(FATAL_ERROR
+    "Benchmark main generation failed:\n${benchmark_contract_output}\n${benchmark_contract_error}")
+endif()
+file(READ "${benchmark_main}" benchmark_main_contents)
+foreach(expected_line
+    "#include \"test_resources.h\""
+    "#include \"adapter.h\""
+    "TestAdapter adapter;"
+    "return asc_occupancy::run_benchmark(argc, argv, adapter, runtime, std::cerr);")
+  string(FIND "${benchmark_main_contents}" "${expected_line}" expected_index)
+  if(expected_index EQUAL -1)
+    message(FATAL_ERROR "Generated benchmark main missed: ${expected_line}")
+  endif()
+endforeach()
+
 set(invalid_contract_script "${ASC_OCCUPANCY_TEST_BINARY_DIR}/invalid_contract.cmake")
 file(WRITE "${invalid_contract_script}"
   "include(\"${probe_module_path}\")\n"

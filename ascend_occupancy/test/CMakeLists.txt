@@ -16,6 +16,13 @@ target_include_directories(asc_occupancy_acl_device_test PRIVATE "${CMAKE_CURREN
 target_link_libraries(asc_occupancy_acl_device_test PRIVATE ascend_occupancy_fake_acl)
 add_test(NAME asc_occupancy_acl_device_test COMMAND asc_occupancy_acl_device_test)
 
+add_executable(asc_occupancy_benchmark_runner_test benchmark_runner_test.cpp)
+target_compile_features(asc_occupancy_benchmark_runner_test PRIVATE cxx_std_17)
+target_include_directories(asc_occupancy_benchmark_runner_test PRIVATE
+  "${PROJECT_SOURCE_DIR}/include"
+  "${PROJECT_SOURCE_DIR}/perf_tests/common")
+add_test(NAME asc_occupancy_benchmark_runner_test COMMAND asc_occupancy_benchmark_runner_test)
+
 add_test(
   NAME asc_occupancy_cmake_discovery_test
   COMMAND "${CMAKE_COMMAND}"
