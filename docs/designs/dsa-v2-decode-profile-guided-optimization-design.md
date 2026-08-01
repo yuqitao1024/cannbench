@@ -4,9 +4,9 @@
 
 Approved for staged implementation on 2026-08-01. The launch-geometry-only
 experiment was rejected after device measurement. The 1024-thread,
-head-parallel Lightning Indexer decode score reduction is retained after
-correctness and repeated performance validation. Prefill propagation is the
-next staged score experiment; later stages remain gated by device results.
+head-parallel Lightning Indexer decode and V3.2 full-score prefill reductions
+are retained after correctness and repeated performance validation. Later
+stages remain gated by device results.
 
 ## Scope And Baseline
 
@@ -268,6 +268,31 @@ Run the existing sampled-reference and repeated-stability prefill tests, then
 measure the complete V3.2 prefill workflow. Retain each path independently only
 if its selected-kernel boundary improves by at least 10% without changing the
 Top-K score set.
+
+The mapping was implemented in both sources. The q2 source builds successfully
+and keeps all tail warps alive through the existing block-wide barrier, but it
+is not currently called by the V2 public dispatch and therefore has no claimed
+runtime gain. The canonical V3.2 q4096 case exercises the full-score source.
+
+Real-device accuracy on Ascend 950PR passed three repeats each for canonical,
+masked-tail, tied-threshold, signed near-threshold, and negative-score inputs.
+Every case preserved the sampled Top-K score multiset, valid unique indices,
+and a stable selected index set. Production `-O3` BasicInfo results were:
+
+| Boundary | Baseline (ms) | Optimized 1 (ms) | Optimized 2 (ms) | Gain vs baseline |
+| --- | ---: | ---: | ---: | ---: |
+| Full-score kernel | 276.019 | 136.848 | 136.839 | 50.4% |
+| Lightning Indexer | 299.560 | 160.543 | 160.583 | 46.4% |
+| DSA workflow | 635.266 | 494.284 | 497.748 | 21.6% |
+
+Radix Top-K stayed near 23.6 ms and Sparse Attention ranged from 333.7 to
+337.2 ms, isolating the retained gain to full-score reduction. Raw artifacts
+are preserved under:
+
+```text
+/tmp/cannbench-dsa-v2-prefill-baseline-runs/
+/tmp/cannbench-dsa-v2-prefill-optimized-runs/
+```
 
 ### A0: Sparse Attention QK Tile 64 -> 128
 
