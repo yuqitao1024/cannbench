@@ -367,11 +367,62 @@ Retain P4 unless a repeated full-component median proves otherwise.
 
 ### A3: Sparse Attention VF And Flag Coarsening
 
-After selecting QK/Value tiles and partitions, reduce the number of separate
-VF regions and AIV/AIC handshakes. Candidate changes include folding adjacent
-initialization calls, keeping per-task state live across selected tiles, and
-requesting the next gather slot earlier. Every flag must have one documented
-producer, consumer, buffer lifetime, and reuse point.
+The post-A0 InstrTimeline shows that each AIV lane spends about 292 us of its
+roughly 325 us span in `VF_SIMT`. The compiler already presents the three
+initialization/query calls as one contiguous approximately 7.6 us VF region,
+and the gaps between adjacent key-pack and Value-pack VFs are generally below
+0.4 us. Folding those calls therefore has insufficient standalone upside.
+
+The selected first experiment is pairwise PV coarsening at QK=128, Value=128,
+and automatic P4. Add a second 32-by-128 FP32 PV slot in UB, increasing the
+source-level UB worksheet from approximately 147,840 bytes to 164,224 bytes.
+Keep the two existing L1 Value gather slots and the existing ready flags. AIC
+computes two consecutive 128-dimension PV tiles into alternating UB slots and
+publishes one ready event for the pair. AIV applies `old_scale` and accumulates
+both slots into the corresponding 256 output dimensions with one VF, then
+acknowledges the pair. The odd/tail case publishes and consumes a single tile.
+
+The pipeline ownership is:
+
+```text
+L1 Value slot s   AIV produces -> AIC consumes -> AIC requests reuse
+UB PV slot s      AIC produces -> AIV consumes -> pair acknowledgement
+running_output    AIV owns for the complete logical task
+```
+
+This schedule keeps the existing one-tile-ahead Value gather: after AIC loads
+the second tile of a pair, it requests the first L1 slot for the next pair;
+AIV may refill that slot while Cube finishes the second PV. It adds no flag ID,
+no cross-core primitive, and no Basic API dependency. A four-tile version is
+rejected because its source-level UB requirement is approximately 196,992
+bytes before compiler temporaries and runtime reservation.
+
+Retain pairwise coarsening only if full V3.2 decode output and LSE accuracy pass,
+two clean-process BasicInfo runs show at least a 5% fused-kernel improvement,
+and the full workflow does not regress. If it misses the gate, revert the
+kernel and source-contract changes while preserving the negative result here.
+
+The pairwise PV experiment was rejected. Its production `-O3` `dav-3510`
+build completed without a fused-kernel resource or spill diagnostic, and full
+V3.2 decode accuracy passed with zero output and LSE mismatches at
+`atol=rtol=0.05`. The additional UB and coarser update nevertheless regressed
+the measured boundary in two clean CannBench BasicInfo processes:
+
+| Boundary | A0 baseline (us) | PV pair run 1 (us) | PV pair run 2 (us) | Median change |
+| --- | ---: | ---: | ---: | ---: |
+| Indexer | 279.207 | 280.374 | 279.283 | +0.2% |
+| Sparse Attention fused | 327.363 | 336.378 | 336.616 | +2.8% |
+| Sparse Attention + Combine | 362.868 | 372.703 | 373.067 | +2.8% |
+| Full decode workflow | 642.075 | 653.077 | 652.350 | +1.7% |
+
+The implementation and source-contract changes were reverted, and published
+data remains on A0. Raw controller artifacts are preserved under
+`/tmp/cannbench-dsa-v2-sparse-a3-pvpair-runs/`; the unique remote build,
+accuracy result, and profiler outputs are under
+`/tmp/cannbench-dsa-v2-sparse-a3-pvpair-eeccd1f/` on the Ascend 950PR host.
+This result rules out pairwise PV buffering as a useful A3 continuation on the
+current schedule; future work should not retry it without a different producer
+or buffer-lifetime mechanism.
 
 Do not move cross-core waits into an opaque monolithic VF merely to reduce the
 visible event count. Accept only a reduction in repeated BasicInfo/Default
