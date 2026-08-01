@@ -15,3 +15,10 @@ add_executable(asc_occupancy_acl_device_test acl_device_test.cpp)
 target_include_directories(asc_occupancy_acl_device_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/fake_acl")
 target_link_libraries(asc_occupancy_acl_device_test PRIVATE ascend_occupancy_fake_acl)
 add_test(NAME asc_occupancy_acl_device_test COMMAND asc_occupancy_acl_device_test)
+
+add_test(
+  NAME asc_occupancy_cmake_discovery_test
+  COMMAND "${CMAKE_COMMAND}"
+    "-DASC_OCCUPANCY_SOURCE_DIR=${PROJECT_SOURCE_DIR}"
+    "-DASC_OCCUPANCY_TEST_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/cmake_discovery"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake_discovery_test.cmake")

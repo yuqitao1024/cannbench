@@ -249,6 +249,34 @@ bool TestNonEndpointLaunchBoundsCandidatesWithoutSpill() {
   return true;
 }
 
+bool TestMinimumLaunchBoundsWithoutSpillNeedsFiveCandidates() {
+  const AscOccupancyDeviceProperties device = MakeDevice();
+  const AscKernelResourceUsage resources = MakeResources(1U, 16U);
+
+  size_t required_count = 0U;
+  CHECK(ascOccupancyEnumerateLaunchBounds(&device, &resources, nullptr,
+                                          &required_count) == ASC_OCCUPANCY_SUCCESS);
+  CHECK(required_count == 5U);
+
+  AscLaunchBoundsCandidate too_small[4] = {};
+  size_t too_small_capacity = 4U;
+  CHECK(ascOccupancyEnumerateLaunchBounds(&device, &resources, too_small,
+                                          &too_small_capacity) ==
+        ASC_OCCUPANCY_INSUFFICIENT_CAPACITY);
+  CHECK(too_small_capacity == 5U);
+
+  const uint32_t expected_bounds[] = {1U, 256U, 512U, 1024U, 2048U};
+  AscLaunchBoundsCandidate candidates[5] = {};
+  size_t capacity = 5U;
+  CHECK(ascOccupancyEnumerateLaunchBounds(&device, &resources, candidates,
+                                          &capacity) == ASC_OCCUPANCY_SUCCESS);
+  CHECK(capacity == 5U);
+  for (size_t index = 0U; index < capacity; ++index) {
+    CHECK(candidates[index].launch_bounds == expected_bounds[index]);
+  }
+  return true;
+}
+
 }  // namespace
 
 int main() {
@@ -258,6 +286,7 @@ int main() {
                       TestUbAccountingAndSpillRisk() &&
                       TestCandidateEnumeration() &&
                       TestNonEndpointLaunchBoundsCandidatesWithSpill() &&
-                      TestNonEndpointLaunchBoundsCandidatesWithoutSpill();
+                      TestNonEndpointLaunchBoundsCandidatesWithoutSpill() &&
+                      TestMinimumLaunchBoundsWithoutSpillNeedsFiveCandidates();
   return passed ? EXIT_SUCCESS : EXIT_FAILURE;
 }

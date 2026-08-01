@@ -20,7 +20,7 @@ typedef enum aclrtDevAttr {
 
 #define ACL_SUCCESS 0
 
-aclError aclrtGetDeviceInfo(int32_t device_id, aclrtDevAttr attr, int64_t* value);
+aclError aclrtGetDeviceInfo(uint32_t device_id, aclrtDevAttr attr, int64_t* value);
 
 #ifdef __cplusplus
 }

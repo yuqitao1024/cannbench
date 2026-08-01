@@ -12,6 +12,8 @@ namespace {
 constexpr uint32_t kDefaultLaunchBounds = 1024U;
 constexpr uint32_t kLaunchBoundsValues[] = {256U, 512U, 1024U, 2048U};
 constexpr uint32_t kRegisterLimits[] = {127U, 64U, 32U, 16U};
+constexpr size_t kMaxSelectedLaunchBounds =
+    sizeof(kLaunchBoundsValues) / sizeof(kLaunchBoundsValues[0]) + 1U;
 constexpr int64_t kDav3510NpuArchitecture = 3510;
 
 template <typename T>
@@ -135,28 +137,34 @@ extern "C" AscOccupancyStatus ascOccupancyGetDeviceProperties(
   if (!HasCompatibleHeader(properties)) {
     return ASC_OCCUPANCY_INVALID_ARGUMENT;
   }
+  if (device_id < 0) {
+    return ASC_OCCUPANCY_UNSUPPORTED_DEVICE;
+  }
 
 #if !defined(ASC_OCCUPANCY_WITH_ACL)
   (void)device_id;
   return ASC_OCCUPANCY_UNSUPPORTED_DEVICE;
 #else
+  const uint32_t acl_device_id = static_cast<uint32_t>(device_id);
   int64_t npu_architecture = 0;
   int64_t vector_core_count = 0;
   int64_t warp_size = 0;
   int64_t max_threads_per_vector_core = 0;
   int64_t ub_bytes_per_vector_core = 0;
   int64_t max_threads_per_block = 0;
-  if (aclrtGetDeviceInfo(device_id, ACL_DEV_ATTR_NPU_ARCH, &npu_architecture) !=
+  if (aclrtGetDeviceInfo(acl_device_id, ACL_DEV_ATTR_NPU_ARCH,
+                         &npu_architecture) !=
           ACL_SUCCESS ||
-      aclrtGetDeviceInfo(device_id, ACL_DEV_ATTR_VECTOR_CORE_NUM,
+      aclrtGetDeviceInfo(acl_device_id, ACL_DEV_ATTR_VECTOR_CORE_NUM,
                           &vector_core_count) != ACL_SUCCESS ||
-      aclrtGetDeviceInfo(device_id, ACL_DEV_ATTR_WARP_SIZE, &warp_size) !=
+      aclrtGetDeviceInfo(acl_device_id, ACL_DEV_ATTR_WARP_SIZE, &warp_size) !=
           ACL_SUCCESS ||
-      aclrtGetDeviceInfo(device_id, ACL_DEV_ATTR_MAX_THREAD_PER_VECTOR_CORE,
+      aclrtGetDeviceInfo(acl_device_id,
+                          ACL_DEV_ATTR_MAX_THREAD_PER_VECTOR_CORE,
                           &max_threads_per_vector_core) != ACL_SUCCESS ||
-      aclrtGetDeviceInfo(device_id, ACL_DEV_ATTR_UBUF_PER_VECTOR_CORE,
+      aclrtGetDeviceInfo(acl_device_id, ACL_DEV_ATTR_UBUF_PER_VECTOR_CORE,
                           &ub_bytes_per_vector_core) != ACL_SUCCESS ||
-      aclrtGetDeviceInfo(device_id, ACL_DEV_ATTR_MAX_THREADS_PER_BLOCK,
+      aclrtGetDeviceInfo(acl_device_id, ACL_DEV_ATTR_MAX_THREADS_PER_BLOCK,
                           &max_threads_per_block) != ACL_SUCCESS) {
     return ASC_OCCUPANCY_RESOURCE_DATA_MISSING;
   }
@@ -252,7 +260,7 @@ extern "C" AscOccupancyStatus ascOccupancyEnumerateLaunchBounds(
   }
 
   const uint32_t current_bounds = EffectiveLaunchBounds(resources);
-  uint32_t selected_bounds[4] = {};
+  uint32_t selected_bounds[kMaxSelectedLaunchBounds] = {};
   size_t selected_count = 0U;
   if (resources->stack_size_bytes > 0U) {
     for (uint32_t bound : kLaunchBoundsValues) {

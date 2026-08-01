@@ -39,6 +39,15 @@ bool TestAclDevicePropertiesAreMeasured() {
   return true;
 }
 
+bool TestAclRejectsNegativeDeviceIdBeforeRuntimeQuery() {
+  SetDav3510DeviceInfo();
+  AscOccupancyDeviceProperties properties = ASC_OCCUPANCY_DEVICE_PROPERTIES_INIT;
+  CHECK(ascOccupancyGetDeviceProperties(-1, &properties) ==
+        ASC_OCCUPANCY_UNSUPPORTED_DEVICE);
+  CHECK(fakeAclDeviceInfoCallCount() == 0U);
+  return true;
+}
+
 bool TestAclQueryFailureIsResourceDataMissing() {
   SetDav3510DeviceInfo();
   fakeAclSetDeviceInfoStatus(ACL_DEV_ATTR_UBUF_PER_VECTOR_CORE, 107000);
@@ -70,6 +79,7 @@ bool TestAclRejectsInconsistentThreadLimits() {
 
 int main() {
   const bool passed = TestAclDevicePropertiesAreMeasured() &&
+                      TestAclRejectsNegativeDeviceIdBeforeRuntimeQuery() &&
                       TestAclQueryFailureIsResourceDataMissing() &&
                       TestAclRejectsNonDav3510PositiveDeviceId() &&
                       TestAclRejectsInconsistentThreadLimits();
