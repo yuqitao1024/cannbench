@@ -1,6 +1,6 @@
 # SIMT Add Traversal Repro
 
-该样例使用固定规模的 `float` 加法，对比以下三个二元因子组成的
+该样例使用固定规模的原地 `float` 累加，对比以下三个二元因子组成的
 `2 x 2 x 2 = 8` 个 case：
 
 - 执行方式：direct SIMT / SIMD-SIMT hybrid (`asc_vf_call`)
@@ -19,15 +19,17 @@ CannBench 运行时。
 | 配置 | 值 |
 | --- | ---: |
 | 数据类型 | `float` |
-| 操作 | `output[i] = input_x[i] + input_y[i]` |
+| 操作 | `output[i] += input_x[i] + input_y[i]` |
 | Grid Dim | 64 |
 | Block Dim | 2048 |
 | Launch Bounds | 2048 |
 | 每线程元素数 | 4 |
 | 总元素数 | `64 * 2048 * 4 = 524288` |
 
-每次执行都会生成确定性输入并校验全部输出元素。只有
-`mismatch_count=0` 且 `validation=pass` 才返回成功。
+每次执行都会生成确定性的两个输入和非零 `output` 初值。普通运行默认
+独立期望一次累加；profile replay 可通过可执行文件的第三个参数指定独立
+期望次数。实际次数必须等于期望次数，且全部输出元素与逐次累加的 host
+golden 完全一致，程序才返回成功。
 
 ## 八个 Case
 
@@ -52,13 +54,13 @@ direct target 使用 `--enable-simt`，host 侧以
 1. 计算 `index0-index3`；
 2. 读取 `input_x0-input_x3`；
 3. 读取 `input_y0-input_y3`；
-4. 执行四次加法并写回。
+4. 累加并写回 `output0-output3`。
 
 因此 global/block 展开版本之间只保留索引和步长差异。
 
 ## 编译
 
-完整 8-case profile 使用远端节点上的 CANN 9.1 环境：
+重新采集完整 8-case profile 时使用远端节点上的 CANN 9.1 环境：
 
 ```bash
 source /home/l00848653/Ascend/cann-9.1.0/set_env.sh
@@ -83,87 +85,73 @@ msopprof \
   --output=<profile-output> \
   --aic-metrics=Default \
   --launch-count=1 \
-  ./build/<executable> <mode>
+  ./build/<executable> <mode> 3
 ```
 
-命令不显式设置 `--warm-up`，使用 msopprof 默认行为。每个 case 独立
-采集两轮。主指标取 `OpBasicInfo.csv` 中的 `Task Duration(us)`；辅助指标
-取 `ArithmeticUtilization.csv` 中 64 个 block 的
-`aiv_total_cycles` 平均值。
+replay 和 warmup 使用 msopprof 默认行为。默认 kernel replay 会在同一
+`output` 上重复执行原地累加；host 从一个固定的非零增量元素推导统一的
+实际 `accumulation_count`，并要求它等于可执行文件参数给出的独立期望值。
+上例末尾的 `3` 是 CANN 9.1.0 当前默认 replay 行为对应的应用参数，不是
+msopprof 参数。每个 case 独立采集两轮。主指标取 `OpBasicInfo.csv` 中的
+`Task Duration(us)`；辅助指标取 `ArithmeticUtilization.csv` 中 64 个
+block 的 `aiv_total_cycles` 平均值。
+
+## 当前验证状态
+
+先前记录的数据来自覆盖写 `output = input_x + input_y` workload，不能用于
+当前原地累加 workload，因而已移除。
+
+2026-08-01 在 endpoint `ascend-950pr-lightning-indexer-v2` 上完成以下验证：
+
+- PCI device `19e5:d806`，编译目标 `dav-3510`，driver/firmware
+  `7.0.t9.0.B791`；
+- 同一份 `main.asc` 的 SHA-256 为
+  `016d39be7117799baa1b59ad584ddcb270464661959406c19a34b44dae359ba8`；
+- CANN 9.1.0 与 9.2.0 均成功构建 direct 和 hybrid target；
+- 两个 CANN 环境下的 8 个 executable/mode 组合均为
+  `accumulation_count=1`、`mismatch_count=0`、`validation=pass`；
+- CANN 9.1.0 下使用默认 replay/warmup 完成 8-case 两轮 `Default` metric
+  profile，16 次采集均为 `expected_accumulation_count=3`、
+  `accumulation_count=3`、`mismatch_count=0`、`validation=pass`；
+- 16 个 profile 各生成 1 条目标 kernel 基础记录和 64 条 block 级
+  arithmetic utilization 记录。
 
 ## 当前测试数据
 
-测试环境：远端端口 20002 节点，CANN 9.1 编译器、运行时和 msopprof。
-以下数据对应当前统一 load-all 排序的源码，8 个 case 均为
-`mismatch_count=0`、`validation=pass`。
+| 执行方式 | 遍历 | 形态 | Round 1 (us) | Round 2 (us) | 平均 (us) | 平均 AIV cycles | 两轮差/均值 |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: |
+| direct SIMT | global | loop | 7.177 | 8.061 | 7.619 | 9550.2 | 11.6% |
+| direct SIMT | global | unrolled | 9.572 | 9.707 | 9.640 | 13430.1 | 1.4% |
+| direct SIMT | block | loop | 9.094 | 8.143 | 8.618 | 11948.7 | 11.0% |
+| direct SIMT | block | unrolled | 10.207 | 10.137 | 10.172 | 14600.6 | 0.7% |
+| hybrid | global | loop | 6.516 | 7.450 | **6.983** | 9326.3 | 13.4% |
+| hybrid | global | unrolled | 8.923 | 8.805 | 8.864 | 12215.7 | 1.3% |
+| hybrid | block | loop | 7.267 | 7.338 | 7.302 | 9848.7 | 1.0% |
+| hybrid | block | unrolled | 8.951 | 9.039 | 8.995 | 12542.2 | 1.0% |
 
-| 执行方式 | 遍历 | 形态 | Round 1 (us) | Round 2 (us) | 平均 (us) | 平均 AIV cycles |
-| --- | --- | --- | ---: | ---: | ---: | ---: |
-| direct SIMT | global | loop | 6.460 | 6.737 | 6.599 | 8387.5 |
-| direct SIMT | global | unrolled | 7.717 | 7.666 | 7.692 | 10341.8 |
-| direct SIMT | block | loop | 6.056 | 6.696 | 6.376 | 8218.2 |
-| direct SIMT | block | unrolled | 8.130 | 8.196 | 8.163 | 11022.1 |
-| hybrid | global | loop | 5.831 | 5.829 | **5.830** | 7381.4 |
-| hybrid | global | unrolled | 7.752 | 7.861 | 7.807 | 10473.2 |
-| hybrid | block | loop | 6.304 | 6.336 | 6.320 | 8119.3 |
-| hybrid | block | unrolled | 7.889 | 7.628 | 7.759 | 10305.4 |
+16 份日志都提示超过 108 个 sub-block 时可能丢失部分动态插桩数据。因此
+`Task Duration(us)` 仍作为主指标，AIV cycles 仅作为可能不完整的辅助证据。
 
-原始 profile 产物位于远端：
+原始产物和逐 case 日志位于远端：
 
 ```text
-/tmp/simt-add-load-all-cann91-6XNAkA/full-profiles-round1
-/tmp/simt-add-load-all-cann91-6XNAkA/full-profiles-round2
+/tmp/cannbench-simt-accumulate-DHbV8Y/profiles-default-independent-cann91-round1
+/tmp/cannbench-simt-accumulate-DHbV8Y/profiles-default-independent-cann91-round2
+/tmp/cannbench-simt-accumulate-DHbV8Y/profile-logs-default-independent
 ```
 
 ## 测试结论
 
-### Loop 与手动展开
+- loop 在四组一一配对中均快于 unrolled，耗时降低 `15.3%-21.2%`；四个
+  loop case 平均 `7.631 us`，unrolled 平均 `9.418 us`，总体低 `19.0%`。
+- hybrid 在四组一一配对中均快于 direct SIMT，耗时降低 `8.0%-15.3%`；
+  hybrid 总体平均 `8.036 us`，direct SIMT 平均 `9.012 us`，总体低
+  `10.8%`。
+- global 总体平均 `8.276 us`，block 平均 `8.772 us`，总体低 `5.7%`，
+  但这是最弱的因子。hybrid loop 的两轮配对方向不一致，不能据此断言
+  global 必然快于 block。
+- 当前平均最快组合为 `hybrid + global stride + loop = 6.983 us`。
 
-loop 在四组一一配对中全部更快，是当前最稳定的结论：
-
-| 执行方式与遍历 | Loop 相对 unrolled 的耗时降低 |
-| --- | ---: |
-| direct global | 14.2% |
-| direct block | 21.9% |
-| hybrid global | 25.3% |
-| hybrid block | 18.5% |
-
-四个 loop case 平均为 `6.281 us`，四个 unrolled case 平均为
-`7.855 us`，loop 总体低约 20.0%。手工展开没有带来收益。
-
-### Global 与 Block
-
-global 四个 case 的总体平均为 `6.982 us`，block 为 `7.154 us`，global
-总体低约 2.4%，但该结论不在所有配对中成立：
-
-- direct loop：block 快约 3.4%；
-- direct unrolled：global 快约 5.8%；
-- hybrid loop：global 快约 7.8%；
-- hybrid unrolled：block 快约 0.6%，差距接近噪声。
-
-因此不能概括为“global 必然比 block 快”。
-
-### Hybrid 与 Direct SIMT
-
-hybrid 四个 case 的总体平均为 `6.929 us`，direct SIMT 为 `7.207 us`，
-hybrid 总体低约 3.9%，但同样不在所有配对中成立：
-
-- global loop：hybrid 快约 11.6%；
-- global unrolled：direct 快约 1.5%；
-- block loop：hybrid 快约 0.9%，差距接近噪声；
-- block unrolled：hybrid 快约 5.0%。
-
-因此不能概括为“hybrid 必然比 direct SIMT 快”。
-
-### 当前最优 Case
-
-当前最优组合为：
-
-```text
-hybrid + global stride + loop = 5.830 us
-```
-
-direct block loop 的两轮时间分别为 `6.056 us` 和 `6.696 us`，波动约
-10.6%，明显高于其他 case。涉及该 case 的小幅差异需要更多独立样本
-才能形成稳定结论。相比之下，loop 优于手动展开的幅度足够大，且四组
-配对方向一致。
+loop case 的两轮差/均值最高为 `13.4%`，明显高于 unrolled case 的
+`0.7%-1.4%`。因此 loop 与 unrolled、hybrid 与 direct 的方向在所有逐轮
+配对中一致，但涉及数个百分点的 traversal 差异仍需更多轮次确认。

@@ -3,7 +3,7 @@
 ## Purpose
 
 Provide a standalone Ascend reproduction for measuring three independent
-binary factors in a fixed `float` add workload:
+binary factors in a fixed in-place `float` accumulation workload:
 
 - direct SIMT versus SIMD/SIMT hybrid execution;
 - global-stride versus block-contiguous traversal;
@@ -28,15 +28,15 @@ src/cannbench/operators/builtin/lightning_indexer/simt/test/
 `main.asc` owns the device functions, host launchers, deterministic input
 generation, and full-output validation. `CMakeLists.txt` builds both execution
 models from that source. `DESIGN.md` describes the current implementation and
-acceptance criteria. `README.md` records commands, current measurements, and
-conclusions.
+acceptance criteria. `README.md` records commands and, when available for the
+current workload, measurements and conclusions.
 
 ## Fixed Workload
 
 Every case uses the same compile-time configuration:
 
 - element type: `float`;
-- operation: `output[i] = input_x[i] + input_y[i]`;
+- operation: `output[i] += input_x[i] + input_y[i]`;
 - grid dimension: 64 blocks;
 - block dimension: 2048 threads;
 - launch bound: `__launch_bounds__(2048)`;
@@ -111,7 +111,7 @@ expanded variants use the same load-all ordering:
 1. compute `index0` through `index3`;
 2. load `input_x0` through `input_x3`;
 3. load `input_y0` through `input_y3`;
-4. perform and store all four additions.
+4. accumulate into and store `output0` through `output3`.
 
 This alignment keeps traversal indexing as the only intended difference
 between the two manually expanded bodies. No explicit unroll pragma,
@@ -122,12 +122,16 @@ between the two manually expanded bodies. No explicit unroll pragma,
 Each invocation:
 
 1. initializes device 0 and creates one stream;
-2. allocates two inputs and one output in device memory;
-3. copies deterministic inputs to the device;
+2. allocates two inputs and one in-place output in device memory;
+3. copies deterministic inputs and nonzero initial output values to the device;
 4. launches only the selected kernel;
 5. synchronizes and copies the complete output to the host;
-6. validates every element against the host result;
-7. releases all ACL resources.
+6. infers the actual uniform accumulation count from one fixed nonzero probe;
+7. requires that count to equal the independent expected count from the
+   executable argument, which defaults to one;
+8. validates every element after applying `output += input_x + input_y` the
+   expected number of times on the host;
+9. releases all ACL resources.
 
 The program reports the execution model, mode, launch dimensions, element
 count, mismatch count, and validation result. It exits zero only when all
@@ -140,8 +144,8 @@ elements match.
 - `simt_add_traversal_direct` with `--npu-arch=dav-3510 --enable-simt`;
 - `simt_add_traversal_hybrid` with `--npu-arch=dav-3510`.
 
-The current complete direct-versus-hybrid matrix uses the installed CANN 9.1
-compiler, runtime, and msopprof. Its direct SIMT binary uses the ordinary
+The previously validated profiling setup used the installed CANN 9.1 compiler,
+runtime, and msopprof. Its direct SIMT binary used the ordinary
 `aclrtLaunchKernelWithHostArgs` path, which that profiler intercepts. The
 tested CANN 9.2 direct binary uses `aclrtLaunchSIMTKernelWithHostArgs`, which
 the installed msopprof injection library does not intercept; the hybrid binary
@@ -151,13 +155,18 @@ Profile every case independently with:
 
 ```text
 msopprof --output=<output> --aic-metrics=Default --launch-count=1 \
-  ./<executable> <mode>
+  ./<executable> <mode> 3
 ```
 
-Do not set `--warm-up`; use the profiler default. Use `Task Duration(us)` from
-`OpBasicInfo.csv` as the primary metric and the mean `aiv_total_cycles` across
-64 blocks as supporting data. The current two-round results are maintained in
-the reproduction README.
+Use the profiler's default replay and warmup behavior. Kernel replay can apply
+the stateful accumulation repeatedly to the same output buffer, so the host
+infers the actual uniform positive accumulation count and requires it to match
+the independent executable argument. The trailing `3` is an application
+argument matching the observed CANN 9.1.0 default replay count, not a profiler
+option. Use `Task Duration(us)` from `OpBasicInfo.csv` as the primary metric and
+the mean `aiv_total_cycles` across 64 blocks as supporting data. Record fresh
+two-round results in the reproduction README after all accumulation cases pass
+full-output validation.
 
 ## Acceptance
 
@@ -168,9 +177,10 @@ The reproduction is complete when:
    `validation=pass`;
 3. every compared profile emits exactly one matching kernel record;
 4. global and block manual expansions retain identical instruction ordering;
-5. the README records the exact environment, commands, measurements,
-   variability, and conclusions.
+5. the operator-local source contract test confirms the in-place accumulation
+   and initialized-output setup;
+6. the README records the exact environment, commands, measurements,
+   variability, and conclusions after the accumulation workload is profiled.
 
-No additional Python test is required because this is an intentionally small
-standalone ASC reproduction. Target compilation, full-output validation, and
-profiler artifacts are its executable verification.
+Target compilation, full-output validation, and profiler artifacts remain the
+real-device verification.
