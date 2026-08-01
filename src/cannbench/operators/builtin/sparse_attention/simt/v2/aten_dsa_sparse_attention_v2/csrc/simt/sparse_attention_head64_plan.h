@@ -6,7 +6,7 @@ namespace aten_dsa_sparse_attention_v2 {
 
 constexpr int32_t kHead64Tile = 64;
 constexpr int32_t kHead64SelectedTile = 64;
-constexpr int32_t kHead64QkTile = 64;
+constexpr int32_t kHead64QkTile = 128;
 constexpr int32_t kHead64ValueTile = 128;
 constexpr int32_t kHead64Threads = 1024;
 constexpr int32_t kHead64ThreadsPerHead = 32;

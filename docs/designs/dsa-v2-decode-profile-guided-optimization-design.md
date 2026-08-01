@@ -5,8 +5,8 @@
 Approved for staged implementation on 2026-08-01. The launch-geometry-only
 experiment was rejected after device measurement. The 1024-thread,
 head-parallel Lightning Indexer decode and V3.2 full-score prefill reductions
-are retained after correctness and repeated performance validation. Later
-stages remain gated by device results.
+and the Sparse Attention QK=128 tile are retained after correctness and
+repeated performance validation. Later stages remain gated by device results.
 
 ## Scope And Baseline
 
@@ -238,6 +238,16 @@ isolated to the intended score stage. Raw S1 artifacts are preserved under:
 /tmp/cannbench-dsa-v2-score-s1-runs/
 ```
 
+The official post-S1 `Default` and `InstrTimeline` recollection used CannBench's
+`--aic-metrics` option without source edits. `Default` measured score at
+147.936 us, radix Top-K at 132.544 us, fused Sparse Attention at 368.502 us,
+and Combine at 36.266 us. `InstrTimeline` reproduced the same boundary within
+normal run variance. The complete local artifacts are preserved under:
+
+```text
+/tmp/cannbench-dsa-v2-decode-current-metrics/
+```
+
 ### S2: Score Producer/Consumer Pipelining
 
 If postprocess remains on the critical path, prototype flag-0/flag-1 ping-pong
@@ -294,7 +304,7 @@ are preserved under:
 /tmp/cannbench-dsa-v2-prefill-optimized-runs/
 ```
 
-### A0: Sparse Attention QK Tile 64 -> 128
+### A0: Sparse Attention QK Tile 64 -> 128 (Retained)
 
 Changing `kHead64QkTile` to 128 reduces QK iterations per selected tile from
 9 to 5 and removes 32 key-pack VF calls per AIV task. The source-level L1
@@ -313,6 +323,29 @@ total                 196,608 bytes
 Compiler metadata, not this worksheet, decides whether the variant is viable.
 Reject it on spills, reduced useful occupancy, resource errors, or less than a
 5% fused-kernel gain.
+
+The production `-O3` `dav-3510` build completed without resource or spill
+diagnostics in the changed fused kernel. Full V3.2 decode accuracy passed for
+all 128 heads and both query rows in both batches, including injected negative,
+out-of-range, and causal-future indices. Output and LSE both reported zero
+mismatches at `atol=rtol=0.05`.
+
+Two clean-process CannBench BasicInfo runs reported:
+
+| Boundary | S1 baseline (us) | QK=128 run 1 (us) | QK=128 run 2 (us) | Gain vs baseline |
+| --- | ---: | ---: | ---: | ---: |
+| Sparse Attention fused | 368.502 | 326.919 | 327.363 | 11.2% |
+| Sparse Attention + Combine | 404.768 | 363.529 | 362.868 | 10.3% |
+| Full decode workflow | 685.248 | 643.484 | 642.075 | 6.3% |
+
+The unchanged Indexer measured 279.955 and 279.207 us, confirming that the
+gain is isolated to Sparse Attention. The QK=128 variant therefore passes the
+5% fused-kernel gate and is retained. Raw artifacts are preserved under:
+
+```text
+/tmp/cannbench-dsa-v2-sparse-a0-runs/
+/tmp/cannbench-dsa-v2-sparse-a0-f94694b/
+```
 
 ### A1: Sparse Attention Value Tile 128 -> 256
 

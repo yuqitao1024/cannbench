@@ -58,6 +58,16 @@ def _head64_plan_source() -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _v2_head64_plan_source() -> str:
+    path = (
+        Path(__file__).parents[1]
+        / "v2/aten_dsa_sparse_attention_v2/csrc/simt"
+        / "sparse_attention_head64_plan.h"
+    )
+    assert path.is_file(), f"missing V2 Head64 plan header: {path}"
+    return path.read_text(encoding="utf-8")
+
+
 def _function_body(source: str, start_marker: str, end_marker: str) -> str:
     return source.split(start_marker, 1)[1].split(end_marker, 1)[0]
 
@@ -453,6 +463,12 @@ def test_sparse_attention_head64_plan_keeps_dynamic_task_mapping():
     assert "task_id /= plan.head_group_count" in device
     assert "task_id % plan.query_tokens" in device
     assert "task_id / plan.query_tokens" in device
+
+
+def test_sparse_attention_v2_head64_uses_128_token_qk_tile():
+    plan = _v2_head64_plan_source()
+
+    assert "constexpr int32_t kHead64QkTile = 128;" in plan
 
 
 def test_sparse_attention_head64_plan_has_partial_and_direct_output_modes():

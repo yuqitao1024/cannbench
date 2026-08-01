@@ -161,6 +161,15 @@ def test_prefill_benchmark_summary_uses_median_and_preserves_samples():
     }
 
 
+def test_full_accuracy_runner_selects_v2_explicitly():
+    source = Path(__file__).with_name("v32_full_accuracy.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'choices=("v1", "v2")' in source
+    assert "from aten_dsa_sparse_attention_v2 import ops" in source
+
+
 def test_prefill_benchmark_uses_realistic_materialization_and_timed_contract():
     source = (
         Path(__file__).with_name("v32_prefill_benchmark.py")

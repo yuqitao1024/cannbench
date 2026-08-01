@@ -265,6 +265,7 @@ def _chunked_reference_metrics(
 def run_case(
     *,
     phase: str,
+    implementation_version: str,
     seed: int,
     atol: float,
     rtol: float,
@@ -273,7 +274,11 @@ def run_case(
 ):
     import torch
     import torch_npu  # noqa: F401
-    from aten_dsa_sparse_attention import ops
+
+    if implementation_version == "v2":
+        from aten_dsa_sparse_attention_v2 import ops
+    else:
+        from aten_dsa_sparse_attention import ops
 
     dataset, case_id = _CASES[phase]
     case = get_sparse_attention_case(dataset, case_id)
@@ -390,6 +395,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--phase", choices=("decode", "prefill", "both"), default="both"
     )
+    parser.add_argument(
+        "--implementation-version", choices=("v1", "v2"), default="v1"
+    )
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--atol", type=float, default=0.05)
     parser.add_argument("--rtol", type=float, default=0.05)
@@ -404,6 +412,7 @@ def main(argv: list[str] | None = None) -> int:
     results = [
         run_case(
             phase=phase,
+            implementation_version=args.implementation_version,
             seed=args.seed,
             atol=args.atol,
             rtol=args.rtol,
