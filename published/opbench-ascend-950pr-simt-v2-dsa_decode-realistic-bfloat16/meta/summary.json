@@ -1,0 +1,33 @@
+{
+  "result_count": 2,
+  "records": [
+    {
+      "op": "lightning_indexer",
+      "dataset": "realistic_decode",
+      "case_id": "deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048",
+      "dtype": "bfloat16",
+      "seed": 0,
+      "status": "ok",
+      "prepared_input": "prepared/lightning_indexer/realistic_decode/deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048-bfloat16-seed0.json",
+      "result_path": "perf/lightning_indexer-realistic_decode-deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048-bfloat16-seed0.json"
+    },
+    {
+      "op": "sparse_attention",
+      "dataset": "realistic_decode",
+      "case_id": "deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048",
+      "dtype": "bfloat16",
+      "seed": 0,
+      "status": "ok",
+      "prepared_input": "prepared/sparse_attention/realistic_decode/deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048-bfloat16-seed0.json",
+      "result_path": "perf/sparse_attention-realistic_decode-deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048-bfloat16-seed0.json"
+    }
+  ],
+  "metadata": {
+    "backend": "ascend",
+    "run_name": "opbench-ascend-950pr-simt-v2-dsa_decode-realistic-bfloat16",
+    "implementation": "simt",
+    "total_cases": 2,
+    "success_count": 2,
+    "failure_count": 0
+  }
+}
