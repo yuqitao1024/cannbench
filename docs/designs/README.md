@@ -28,6 +28,7 @@ checked against the current codebase on 2026-07-30.
 - [Ascend SIMT DSA operators](ascend-simt-dsa-operators-design.md)
 - [DSA inference fusion](dsa-inference-fusion-spec.md)
 - [DSA HD256/HD576 CV fusion](dsa-hd256-hd576-cv-fusion-design.md)
+- [DSA V2 decode profile-guided optimization](dsa-v2-decode-profile-guided-optimization-design.md)
 - [DSA V3.2 performance timing boundary](dsa-v32-performance-timing-boundary-design.md)
 - [DSA V3.2 three-path semantics](dsa-v32-three-path-semantics.md)
 - [DSA V4/V4Pro alignment backlog](dsa-v4-v4pro-alignment-backlog.md)

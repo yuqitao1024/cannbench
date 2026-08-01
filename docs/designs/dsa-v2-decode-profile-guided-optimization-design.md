@@ -1,0 +1,306 @@
+# DSA V2 Decode Profile-Guided Optimization Design
+
+## Status
+
+Approved for staged implementation on 2026-08-01. The first experiment is the
+Lightning Indexer score-postprocess launch-geometry matrix. Later stages remain
+gated by correctness and measured device results.
+
+## Scope And Baseline
+
+This design covers the BF16 DeepSeek V3.2 decode workflow case:
+
+```text
+B = 2
+Q = 2
+C = 32768
+Indexer: H = 64, D = 128, K = 2048
+Attention: query_heads = 128, qk_head_dim = 576, value_head_dim = 512
+selected_tokens = 2048
+```
+
+The retained baseline is repository commit `f79f99c`, with V2 operator source
+from `af10aba`. It was measured on Ascend 950PR (`dav-3510`) with CANN 9.2.0,
+production `-O3`, and the same CannBench case, dtype, seed, stream boundary,
+and selected-kernel rules for every implementation.
+
+The `Default` profile collected on 2026-08-01 reports:
+
+| Component | Kernel or group | Duration (us) | Workflow share |
+| --- | --- | ---: | ---: |
+| Indexer | context-sharded score | 292.722 | 35.3% |
+| Indexer | unordered radix Top-K | 131.422 | 15.9% |
+| Sparse Attention | Head64 fused | 367.710 | 44.4% |
+| Sparse Attention | combine | 36.226 | 4.4% |
+| Workflow | selected-kernel sum | 828.080 | 100.0% |
+
+The matching vLLM-Ascend `Default` profile is 97.674 us for Lightning Indexer
+and 74.161 us for Sparse Attention, or 171.835 us for the component sum. Both
+paths use BF16 tensors. FP8 KV compression does not explain this comparison.
+
+Raw SIMT V2 BasicInfo, Default, and InstrTimeline data is preserved in:
+
+```text
+/mnt/c/Users/yuqitao/Downloads/
+  cannbench-dsa-v2-decode-profiles-f79f99c.tar.gz
+```
+
+## Profile Findings
+
+### Indexer Score
+
+The score launch uses 32 mixed tasks. Each task owns one Query atom and one of
+16 context shards and executes 64 context tiles. Every AIV therefore invokes
+the postprocess VF 64 times.
+
+The VF is launched with 1024 threads, but its loop maps only the first 32
+threads to the 32 context positions. Each active thread serially converts,
+applies ReLU, multiplies, and accumulates all 64 heads. InstrTimeline records
+exactly 64 `VF_SIMT` regions per AIV lane, averaging about 4.11 us each and
+about 263 us in aggregate. AIC and AIV spans remain near 280-292 us because the
+single-buffered score-tile handshake makes AIC progress depend on postprocess
+completion.
+
+The score kernel reads about 17.45 MiB-equivalent profiler KB, close to the
+17.16 MiB-equivalent profiler KB read by vLLM-Ascend Lightning Indexer. The
+observed gap is therefore more consistent with VF granularity, reduction
+schedule, and producer/consumer serialization than with additional GM bytes.
+
+### Unordered Radix Top-K
+
+The V2 Top-K launch is one pure-Vector block per output row. Four blocks perform
+two BF16 radix passes, threshold compaction, and deterministic threshold-tie
+completion. InstrTimeline exposes each block as one long `VF_SIMT` region. The
+stage is 31.0% of Indexer time and passes both gates from the original design:
+it exceeds 100 us and 20% of Indexer time.
+
+### Sparse Attention
+
+The automatic decode plan uses 32 logical Head64 P4 tasks. Each task owns 512
+selected tokens, split into eight 64-token tiles. Per AIV lane, the fused
+kernel executes approximately 148 SIMT VF calls:
+
+```text
+3 initialization/query calls
++ 8 * (9 QK key-pack calls + 1 softmax call)
++ 8 * (4 value-pack calls + 4 output-update calls)
++ 1 output-write call
+```
+
+InstrTimeline records about 305 us of `VF_SIMT` work inside a roughly 351 us
+Vector span. It also records repeated AIV/AIC device-flag waits and individual
+cross-pipeline events as long as 128-244 us. The vLLM-Ascend sparse-attention
+Vector trace spans about 91 us and has about 62 us of union busy time. The
+formal vLLM trace is Vector-only because replaying its Cube pipeline fails on
+this toolchain, so timeline structure is comparable but InstrTimeline latency
+is not a full-kernel comparison.
+
+## Contracts
+
+All stages must preserve:
+
+- V1 and V2 package/version isolation;
+- operator-local dispatch with no concrete operator branches in public layers;
+- BF16 inputs and score workspace, FP32 accumulation, and `int32` indices;
+- unordered Top-K score-set semantics, uniqueness, valid-range masking, and
+  deterministic repeated results;
+- Sparse Attention output and LSE tolerances for the canonical and boundary
+  cases;
+- the production stream boundary and current selected-kernel timing contract;
+- the target `C API + Tensor API + SIMT API` boundary for new code. Existing
+  transitional Basic API code may be measured or minimally adjusted, but new
+  optimization logic must not expand that dependency.
+
+## Approach Decision
+
+Three starting points were considered.
+
+### A. Optimize Score Postprocess First (Selected)
+
+Start with a compile-time thread-count matrix that leaves indexing, arithmetic
+order, memory layout, tile size, and synchronization unchanged. It directly
+tests whether launching 1024 threads for 32 useful context positions contributes
+material overhead. It is the smallest reversible experiment and has no expected
+numerical effect.
+
+If geometry alone is insufficient, compare a C/SIMD vector implementation and
+a head-parallel SIMT reduction. Those variants are separate experiments because
+the head-parallel reduction changes FP32 addition order and requires stronger
+accuracy validation.
+
+### B. Optimize Sparse Attention First
+
+Larger QK or Value tiles could remove many VF calls and flag handshakes, but
+they alter L1/L0/UB pressure and a complex mixed-pipeline protocol. Sparse
+Attention has the largest theoretical workflow upside, but it is a higher-risk
+first change and needs compiler resource metadata before implementation.
+
+### C. Continue Top-K First
+
+A distributed context-shard histogram can parallelize the 131 us radix stage,
+but it adds several launches and GM histogram traffic. Even eliminating Top-K
+entirely improves this workflow by at most 15.9%. It remains a measured fallback
+after the score experiment, not the first implementation.
+
+## Optimization Backlog And Gates
+
+Items are ordered by current evidence. An item is not automatically implemented
+because it appears here; each gate prevents carrying a negative optimization
+into V2.
+
+### S0: Score VF Launch-Geometry Matrix
+
+Build otherwise identical variants with 32, 64, 128, 256, and 1024 VF threads.
+Keep one context position per thread and the serial 64-head loop unchanged.
+Collect repeated direct-operator latency and the CannBench decode workflow.
+
+Retain a new geometry only if:
+
+- all V2 accuracy cases pass for at least five repeated launches;
+- score median improves by at least 5%;
+- Indexer and workflow medians do not regress; and
+- a second clean-process run confirms the direction.
+
+### S1: Score Postprocess Implementation Matrix
+
+If S0 leaves score above 200 us, compare:
+
+1. the retained SIMT context-major loop;
+2. a C/SIMD vector loop over 32 context positions for each head; and
+3. a head-parallel SIMT partial-reduction path using UB scratch and block-local
+   synchronization.
+
+The SIMD path should preserve the existing serial head order where the API
+allows it. The parallel path may change FP32 addition order and must pass
+canonical, masked-tail, all-equal, near-threshold, negative-score, and repeated
+stability cases. Do not accept score tolerance alone: the selected Top-K score
+multiset must still match the trusted reference.
+
+### S2: Score Producer/Consumer Pipelining
+
+If postprocess remains on the critical path, prototype flag-0/flag-1 ping-pong
+buffers so AIC tile `n+1` can overlap AIV postprocess for tile `n`. Before
+implementation, prove the physical LCM/UB allocation and flag lifetime on
+`dav-3510`; the earlier 8 KiB per-sub-AIV shared-score limit remains binding.
+
+Proceed only if Default or InstrTimeline shows at least 15% exposed non-overlap
+after S0/S1. The protocol must stay kernel-local and must not introduce
+inter-core coordination between logical tasks.
+
+### A0: Sparse Attention QK Tile 64 -> 128
+
+Changing `kHead64QkTile` to 128 reduces QK iterations per selected tile from
+9 to 5 and removes 32 key-pack VF calls per AIV task. The source-level L1
+worksheet changes from approximately 180,224 bytes to 196,608 bytes:
+
+```text
+query                  73,728
+double-buffered keys   32,768
+scores                 16,384
+probabilities           8,192
+double-buffered values 32,768
+PV                     32,768
+total                 196,608 bytes
+```
+
+Compiler metadata, not this worksheet, decides whether the variant is viable.
+Reject it on spills, reduced useful occupancy, resource errors, or less than a
+5% fused-kernel gain.
+
+### A1: Sparse Attention Value Tile 128 -> 256
+
+Changing `kHead64ValueTile` to 256 reduces Value iterations from 4 to 2 and
+removes about 32 value-pack/output-update VF calls per AIV task. With QK still
+64, the source-level L1 worksheet is approximately 245,760 bytes. This is close
+to the expected capacity and must be compiled and inspected before device use.
+
+Do not combine QK=128 and Value=256 in the first experiment: their source-level
+total is about 262,144 bytes before alignment, compiler temporaries, or runtime
+reservation and therefore has no defensible safety margin.
+
+### A2: Sparse Attention Partition Matrix
+
+Measure automatic P1, P2, and P4 variants with identical semantics and include
+Combine in the boundary. Fewer partitions reduce partial-output and Combine
+work but reduce parallel task count and increase selected-token work per task.
+Retain P4 unless a repeated full-component median proves otherwise.
+
+### A3: Sparse Attention VF And Flag Coarsening
+
+After selecting QK/Value tiles and partitions, reduce the number of separate
+VF regions and AIV/AIC handshakes. Candidate changes include folding adjacent
+initialization calls, keeping per-task state live across selected tiles, and
+requesting the next gather slot earlier. Every flag must have one documented
+producer, consumer, buffer lifetime, and reuse point.
+
+Do not move cross-core waits into an opaque monolithic VF merely to reduce the
+visible event count. Accept only a reduction in repeated BasicInfo/Default
+latency with unchanged correctness.
+
+### A4: Combine And Output Materialization
+
+Profile whether partition outputs can be reduced with less GM traffic or
+whether a direct-output mode is profitable at a lower partition count. Preserve
+the output/LSE contract and include any replacement helper kernel in the timing
+boundary. The current 36 us Combine stage caps the standalone gain.
+
+### T0: Distributed Context-Shard Histogram Microbenchmark
+
+Implement only the isolated launch-chain microbenchmark described in the V2
+unordered-radix design. Include histogram production, digit reducers, offsets,
+and compaction. Proceed to production integration only if the complete chain is
+below 105 us, which is a 20% improvement over the current 131.422 us stage.
+
+### T1: Single-Block Radix Refinements
+
+If T0 misses its gate, profile the current block for atomic histogram pressure,
+barrier count, threshold-equal scan cost, and four-block imbalance. Consider a
+warp-private histogram merge and a bounded equal-threshold compaction only when
+the corresponding canonical or tie-heavy microbenchmark identifies that work
+as dominant.
+
+### W0: Workflow-Level Cleanup
+
+Keep dependency materialization and helper launches visible in raw profiles.
+The Cast helper is currently outside the selected Sparse Attention boundary;
+do not claim its removal as a component gain unless the published timing
+contract is intentionally updated. Consider score-to-histogram fusion only
+after S0-S2 and T0 establish that avoiding the BF16 score workspace is worth
+the added ownership and synchronization complexity.
+
+### C0: API Boundary Convergence
+
+Performance changes must not add Basic API dependencies. Once a winning score
+or attention schedule is stable, replace retained `LocalTensor`, Basic flag,
+and `PipeBarrier` usage with C API, Tensor API, SIMT API, or the allowed
+kernel-local Mutex exception. Treat this as a separately validated cleanup so
+API migration cannot hide a performance regression.
+
+## Validation Matrix
+
+Each retained change runs:
+
+1. operator-local source and dispatch tests;
+2. V2 canonical, masked-tail, tied-threshold, and repeated-stability accuracy;
+3. V1 regression for the same decode case;
+4. remote production `-O3` build targeting `dav-3510`;
+5. synchronized direct-operator repetitions in a clean process;
+6. CannBench `dsa_decode` BasicInfo workflow collection;
+7. Default or InstrTimeline recollection only when needed to test the stated
+   bottleneck hypothesis.
+
+Report median and spread for repeated latency. Preserve raw run directories,
+package revision, compiler/runtime versions, selected and excluded kernels,
+and every negative variant that reaches the device.
+
+## Completion Criteria
+
+This optimization series is complete when either:
+
+- the workflow is within 2x of the BF16 vLLM-Ascend component sum under the
+  same boundary; or
+- every remaining backlog item misses its acceptance gate and the preserved
+  profiles identify no untested bottleneck with at least 5% workflow upside.
+
+No individual item is complete until real-device correctness, repeated
+performance, a same-stack baseline rerun, and raw artifacts are available.
