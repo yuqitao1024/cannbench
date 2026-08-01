@@ -176,6 +176,59 @@ Proceed only when its repeated median predicts at least a 20% Top-K-stage gain
 after including every added launch. Otherwise move optimization effort to the
 new dominant Indexer score stage or Sparse Attention V2.
 
+## Phase 1 Device Results
+
+Phase 1 was built and profiled at commit `af10aba` on 2026-08-01. The target
+stack was CANN 9.2.0, a 2026-07-29 Bisheng build targeting `dav-3510`, Python
+3.13.12, PyTorch 2.11.0, and torch_npu 2.11.0.dev20260414. The case was BF16
+`B=2`, `Q=2`, `C=32768`, `H=64`, `D=128`, `K=2048`, seed 7.
+
+Both versions were collected through `cannbench bench` with the same endpoint,
+case, dtype, and `BasicInfo` profiling boundary:
+
+| Stage | V1 (us) | V2 (us) |
+| --- | ---: | ---: |
+| Indexer score and selection | 1985.886 | - |
+| Indexer score only | - | 292.614 |
+| Indexer unordered radix Top-K | - | 151.121 |
+| Indexer total | 1985.886 | 443.735 |
+| Sparse Attention total | 405.006 | 403.869 |
+| DSA decode workflow | 2390.892 | 847.604 |
+
+The V2 Indexer is 4.48x faster than V1 and the complete workflow is 2.82x
+faster. The radix stage is 34.1% of V2 Indexer time and 17.8% of workflow time.
+Sparse Attention is now the largest workflow component at 47.6%, followed by
+the Indexer score stage at 34.5%.
+
+The V2 accuracy runner passed canonical random input, masked context tails, and
+an all-equal threshold case for five repeated launches each. Every case matched
+the reference score multiset and produced a stable unique index set.
+
+Raw controller-side artifacts are under:
+
+```text
+/tmp/cannbench-lightning-indexer-v2-runs/
+```
+
+The corresponding isolated remote source and profiler artifacts are under:
+
+```text
+/tmp/cannbench-lightning-indexer-v2-j8b4gQ/
+```
+
+### Phase 2 Decision
+
+Phase 1 passes the first distributed-histogram gate because radix Top-K is both
+greater than 100 us and greater than 20% of Indexer time. This justifies the
+distributed launch-chain microbenchmark, not the complete Phase 2
+implementation. The full path proceeds only if that microbenchmark, including
+all reducer and compaction launches, is below 120.9 us and therefore improves
+the Top-K stage by at least 20%.
+
+Sparse Attention V2 should be investigated in parallel with that decision: even
+eliminating the current Top-K stage entirely could improve the complete workflow
+by at most 17.8%, while Sparse Attention is already the largest component.
+
 ## Validation
 
 Source and dispatch tests verify V2 namespaces, version mapping, the absence
