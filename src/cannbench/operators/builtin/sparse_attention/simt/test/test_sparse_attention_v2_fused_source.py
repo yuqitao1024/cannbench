@@ -52,3 +52,52 @@ def test_v2_fused_waits_for_output_update_before_pv_release():
     )
 
     assert update < done < release
+
+
+def test_v2_fused_canonical_decode_reuses_kv_row_offsets():
+    source = _v2_fused_source()
+
+    assert "kHead64FusedUbKvRowOffsetsOffset" in source
+    assert "kHead64FusedUbKvRowOffsetsBytes = 32 * sizeof(int32_t)" in source
+    assert "__ubuf__ int32_t* kv_row_offsets" in source
+    assert "kHead64InvalidKvRowOffset" in source
+    assert "head64_fused_key_pack_prepare_vf" in source
+    assert "head64_fused_key_pack_fast_vf" in source
+    assert "head64_fused_value_pack_fast_vf" in source
+
+
+def test_v2_fused_fast_pack_is_isolated_to_exact_canonical_decode():
+    source = _v2_fused_source()
+    predicate = _function_definition(
+        source, "head64_fused_is_canonical_v32_decode("
+    )
+    aiv = _function_definition(source, "sparse_attention_head64_fused_aiv(")
+
+    for contract in (
+        "plan.batch_size == 2",
+        "plan.query_heads == 128",
+        "plan.query_tokens == 2",
+        "plan.context_tokens == 32768",
+        "plan.selected_tokens == 2048",
+        "plan.qk_head_dim == 576",
+        "plan.value_head_dim == 512",
+        "plan.selected_partitions == 4",
+        "plan.output_mode == kHead64OutputPartialFloat",
+    ):
+        assert contract in predicate
+    assert "head64_fused_is_canonical_v32_decode(plan, causal)" in aiv
+    assert "head64_fused_key_pack_vf" in aiv
+    assert "head64_fused_key_pack_prepare_vf" in aiv
+    assert "head64_fused_key_pack_fast_vf" in aiv
+
+
+def test_v2_fused_first_key_pack_prepares_offsets_for_all_value_tiles():
+    source = _v2_fused_source()
+    aiv = _function_definition(source, "sparse_attention_head64_fused_aiv(")
+    prepare = aiv.index("asc_vf_call<head64_fused_key_pack_prepare_vf>")
+    later_key = aiv.index("asc_vf_call<head64_fused_key_pack_fast_vf>", prepare)
+    first_value = aiv.index("head64_fused_gather_value_fast_slot(", later_key)
+    next_value = aiv.index("head64_fused_gather_value_fast_slot(", first_value + 1)
+
+    assert "k_tile_index == 0" in aiv[:prepare]
+    assert prepare < later_key < first_value < next_value
