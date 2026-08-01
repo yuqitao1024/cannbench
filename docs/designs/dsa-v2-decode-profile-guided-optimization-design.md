@@ -424,6 +424,105 @@ This result rules out pairwise PV buffering as a useful A3 continuation on the
 current schedule; future work should not retry it without a different producer
 or buffer-lifetime mechanism.
 
+The earlier interpretation of `896` active threads as a dav-3510 execution
+limit is withdrawn. One Vector Core supports at most 2048 threads, or 64
+32-thread warps. The fused VF currently launches 1024 logical threads, or 32
+warps, but explicitly discards threads 896 through 1023 and makes the first
+four warps cover the missing four rows. That workaround was introduced while
+the PV update path still published `kAivToAicReady` before the update VF had
+completed. The resulting UB reuse race could make the trailing warps observe
+an overwritten PV tile and was not a valid worker-liveness probe. Commit
+`8e119a3` subsequently inserted the required `PIPE_V -> PIPE_MTE3` completion
+event before publishing the reuse flag, but the `896 / 28` workaround remained.
+
+The post-A0 production source was recompiled on the Ascend 950PR host with the
+same `-O3`, `dav-3510`, and dependency inputs plus `--cce-res-usage`. Its source
+SHA-256 was
+`29c9ca4bf7632b9b8f265b2b4b15ed0ed83413606d1eefc72c0a3779b834d92d`,
+matching the local source exactly. Bisheng reported:
+
+| VF | Registers per thread | Stack size |
+| --- | ---: | ---: |
+| Softmax init | 10 | 0 B |
+| Output init | 7 | 0 B |
+| Query pack | 21 | 0 B |
+| Output update | 19 | 0 B |
+| Key pack | 29 | 0 B |
+| Value pack | 31 | 0 B |
+| Softmax | 32 | 0 B |
+| Output write | 31 | 16 B |
+
+The local compiler log is `/tmp/cannbench-sparse-a0-cce-res.log`; the remote
+resource-only library is
+`/tmp/cannbench-dsa-v2-sparse-a0-f94694b/sparse-a0-cce-res.so`.
+
+#### A3.1: Restore Full 1024-Thread Execution
+
+Restore `1024` active threads and `32` active warps without changing
+`launch_bounds`, tile sizes, buffers, or synchronization. Each AIV then maps
+one warp directly to each of its 32 local heads or selected rows. Remove the
+four-warp second-row workaround and keep the `PIPE_V -> PIPE_MTE3` wait before
+every PV reuse publication.
+
+This is a correction of a stale workaround, not a 2048-thread experiment. It
+must first pass full V3.2 decode output and LSE accuracy, invalid-index and tail
+cases, and repeated launches. Retain it only when two clean-process BasicInfo
+runs show at least a 5% fused-kernel improvement and the full workflow does not
+regress.
+
+#### A3.2: Occupancy-Gated 2048-Thread Pack VFs
+
+Ascend 950 assigns at most 16 registers per thread when `launch_bounds` is in
+the `1025-2048` tier. A current 1024-tier report below 16 registers is only a
+candidate screen: every 2048 variant must be recompiled with its final
+`launch_bounds` and retained only when Bisheng reports fewer than 16 registers
+and zero Stack bytes.
+
+Do not switch every fused VF to 2048. Softmax keeps its one-warp-per-head
+reduction and remains at 1024. The current initialization VFs satisfy the
+resource screen but represent too little latency to justify an isolated
+experiment. The first material 2048 target is canonical V3.2 decode Key/Value
+packing, after reducing register pressure and repeated index work.
+
+For each 64-selected-token tile, each AIV owns 32 selected rows. Its first Key
+Pack call computes and stores one signed 64-bit KV row offset per local row,
+using `-1` for an invalid context index, and packs the first QK dimension tile.
+The following Key Pack calls and all Value Pack calls consume those offsets.
+This removes repeated index loads, range checks, batch/query/partition address
+construction, and long-lived 64-bit intermediates without adding another VF
+call. The per-AIV UB cost is 256 bytes plus alignment.
+
+The fast canonical pack signatures receive preadjusted source and destination
+pointers, the row-offset buffer, and the dimension start. Exact V3.2 decode
+constants such as context length, selected length, row stride, QK tile, and
+Value tile are compile-time values. Generic decode, prefill, tails, and other
+shapes keep the existing fallback signatures and semantics.
+
+Once both fast Pack VFs satisfy the final 2048 resource gate, map the 64 warps
+as:
+
+```text
+local selected row = warp / 2
+dimension half     = warp % 2
+first dimension    = dimension half * 32 + lane
+dimension stride   = 64
+```
+
+The two warps for a row write disjoint dimension intervals and require no
+cross-warp reduction. Evaluate Output Update separately after pointer
+preadjustment and fixed 128-dimension specialization reduce its current 19
+registers below the same gate. Output Write already has a 16-byte Stack at the
+1024 tier; specialize its canonical output mode and stop passing complete plan
+and task objects by value before considering a wider launch.
+
+Do not use manual unrolling as a register-reduction technique without a
+resource report: the occupancy benchmark showed that manual expansion can
+increase Stack use. Each register-reduction change must record the final
+1024-tier and 2048-tier Bisheng report, full correctness, repeated BasicInfo
+latency, and InstrTimeline attribution. A 2048 candidate is rejected on any
+Stack allocation, 16 or more registers, less than a 5% fused-kernel gain, or a
+workflow regression.
+
 Do not move cross-core waits into an opaque monolithic VF merely to reduce the
 visible event count. Accept only a reduction in repeated BasicInfo/Default
 latency with unchanged correctness.
