@@ -39,10 +39,11 @@ def _subprocess_pythonpath() -> str:
 def _ascend_msopprof_options(
     profile_dir: Path,
     kernel_selection,
+    aic_metrics: str = "BasicInfo",
 ) -> list[str]:
     return [
         f"--output={profile_dir}",
-        "--aic-metrics=BasicInfo",
+        f"--aic-metrics={aic_metrics}",
         f"--launch-count={kernel_selection.launch_count or 10}",
     ]
 
@@ -261,7 +262,11 @@ class AscendBackend(TorchOperatorBackend):
             write_prepared_operator_input(prepared_path, prepared)
             command = [
                 "msopprof",
-                *_ascend_msopprof_options(profile_dir, kernel_selection),
+                *_ascend_msopprof_options(
+                    profile_dir,
+                    kernel_selection,
+                    request.aic_metrics,
+                ),
                 sys.executable,
                 "-m",
                 "cannbench",

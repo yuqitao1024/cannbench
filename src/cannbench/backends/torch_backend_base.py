@@ -52,6 +52,7 @@ class TorchOperatorBackend(OperatorBackend):
             implementation=request.implementation,
             seed=binding.seed,
             implementation_version=request.implementation_version,
+            aic_metrics=request.aic_metrics,
         )
 
     def _resolve_input_bindings(self, torch, request, *, device):

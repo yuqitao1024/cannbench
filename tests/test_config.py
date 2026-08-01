@@ -216,6 +216,56 @@ def test_operator_request_defaults_seed():
     assert request.seed == 0
 
 
+def test_operator_request_defaults_aic_metrics():
+    request = OperatorBenchmarkRequest(
+        backend="ascend",
+        op="softmax",
+        dtype="float16",
+        dataset="smoke",
+        case_id="tiny_logits",
+    )
+
+    assert request.aic_metrics == "BasicInfo"
+
+
+def test_operator_request_accepts_custom_aic_metrics():
+    request = OperatorBenchmarkRequest(
+        backend="ascend",
+        op="softmax",
+        dtype="float16",
+        dataset="smoke",
+        case_id="tiny_logits",
+        aic_metrics=" InstrTimeline ",
+    )
+
+    assert request.aic_metrics == "InstrTimeline"
+
+
+@pytest.mark.parametrize("aic_metrics", ["", "   "])
+def test_operator_request_rejects_empty_aic_metrics(aic_metrics: str):
+    with pytest.raises(ValueError, match="aic_metrics must not be empty"):
+        OperatorBenchmarkRequest(
+            backend="ascend",
+            op="softmax",
+            dtype="float16",
+            dataset="smoke",
+            case_id="tiny_logits",
+            aic_metrics=aic_metrics,
+        )
+
+
+def test_operator_request_rejects_nondefault_aic_metrics_for_nvidia():
+    with pytest.raises(ValueError, match="only supported for the ascend backend"):
+        OperatorBenchmarkRequest(
+            backend="nvidia",
+            op="softmax",
+            dtype="float16",
+            dataset="smoke",
+            case_id="tiny_logits",
+            aic_metrics="Default",
+        )
+
+
 def test_operator_request_rejects_unknown_dataset():
     with pytest.raises(ValueError, match="Unknown softmax dataset"):
         OperatorBenchmarkRequest(
@@ -248,4 +298,3 @@ def test_operator_request_rejects_empty_case_id(case_id: str):
             dataset="smoke",
             case_id=case_id,
         )
-

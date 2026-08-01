@@ -162,6 +162,7 @@ def collect_remote_artifacts(
     implementation: str | None = None,
     implementation_version: str | None = None,
     preinstalled_simt: bool = False,
+    aic_metrics: str = "BasicInfo",
     run_id: str | None = None,
     endpoint: RemoteEndpoint | None = None,
     endpoint_path: Path | None = None,
@@ -257,7 +258,7 @@ def collect_remote_artifacts(
             profiled_operator = (
                 f"msopprof "
                 f"--output={shlex.quote(remote_profile)} "
-                f"--aic-metrics=BasicInfo "
+                f"--aic-metrics={shlex.quote(aic_metrics)} "
                 f"--launch-count={launch_count} "
                 f"{base_operator}"
             )

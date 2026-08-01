@@ -196,6 +196,51 @@ def test_build_parser_exposes_bench_subcommand():
     assert args.implementation_version == "v2"
     assert args.endpoint == Path("configs/ascend.json")
     assert args.op == "softmax"
+    assert args.aic_metrics == "BasicInfo"
+
+
+def test_build_parser_accepts_custom_aic_metrics():
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "bench",
+            "--backend",
+            "ascend",
+            "--aic-metrics",
+            "InstrTimeline",
+            "--op",
+            "softmax",
+            "--dataset",
+            "smoke",
+            "--case-id",
+            "tiny_logits",
+        ]
+    )
+
+    assert args.aic_metrics == "InstrTimeline"
+    assert _build_request_from_args(args).aic_metrics == "InstrTimeline"
+
+
+def test_main_rejects_explicit_aic_metrics_for_nvidia(capsys):
+    with pytest.raises(SystemExit) as excinfo:
+        main(
+            [
+                "bench",
+                "--backend",
+                "nvidia",
+                "--aic-metrics",
+                "BasicInfo",
+                "--op",
+                "softmax",
+                "--dataset",
+                "smoke",
+                "--case-id",
+                "tiny_logits",
+            ]
+        )
+
+    assert excinfo.value.code == 2
+    assert "--aic-metrics is only supported for the ascend backend" in capsys.readouterr().err
 
 
 def test_build_parser_accepts_external_dsa_implementations():
@@ -763,9 +808,16 @@ def test_main_remote_bench_uses_remote_executor(tmp_path, monkeypatch):
     )
 
     class FakeExecutor:
-        def __init__(self, collect_remote_artifacts, actual_endpoint, endpoint_path=None):
+        def __init__(
+            self,
+            collect_remote_artifacts,
+            actual_endpoint,
+            endpoint_path=None,
+            aic_metrics="BasicInfo",
+        ):
             captured["endpoint"] = actual_endpoint
             captured["endpoint_path"] = endpoint_path
+            captured["aic_metrics"] = aic_metrics
 
         def execute_case(
             self,
@@ -840,6 +892,7 @@ def test_main_remote_bench_uses_remote_executor(tmp_path, monkeypatch):
     assert captured["endpoint"] == endpoint
     assert captured["run_id"] == "executor-remote"
     assert captured["implementation_version"] is None
+    assert captured["aic_metrics"] == "BasicInfo"
 
 
 def test_main_runs_single_bench_with_profile_layout_and_meta(tmp_path, monkeypatch):

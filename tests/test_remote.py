@@ -198,6 +198,7 @@ def test_collect_remote_artifacts_runs_ascend_profile_and_downloads_profile(tmp_
         run_id="softmax-run",
         capture_output=False,
         profile_device_time=True,
+        aic_metrics="InstrTimeline",
         runner=fake_runner,
     )
 
@@ -215,7 +216,7 @@ def test_collect_remote_artifacts_runs_ascend_profile_and_downloads_profile(tmp_
         [
             "ssh",
             "user@ascend-host",
-            "cd /opt/cannbench && source /usr/local/Ascend/cann/set_env.sh && ASCEND_VISIBLE_DEVICES=0 msopprof --output=/opt/cannbench/.cannbench-runs/softmax-run/profile --aic-metrics=BasicInfo --launch-count=10 python3 -m cannbench internal-run --backend ascend --prepared-input .cannbench-runs/softmax-run/prepared.json --output-dir .cannbench-runs/softmax-run/perf --run-name benchmark",
+            "cd /opt/cannbench && source /usr/local/Ascend/cann/set_env.sh && ASCEND_VISIBLE_DEVICES=0 msopprof --output=/opt/cannbench/.cannbench-runs/softmax-run/profile --aic-metrics=InstrTimeline --launch-count=10 python3 -m cannbench internal-run --backend ascend --prepared-input .cannbench-runs/softmax-run/prepared.json --output-dir .cannbench-runs/softmax-run/perf --run-name benchmark",
         ],
         [
             "scp",

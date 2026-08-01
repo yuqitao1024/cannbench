@@ -61,6 +61,24 @@ Dataset validation rules:
 
 This allows operator-private splits such as workflow component datasets without changing the public CLI parser.
 
+### Ascend profiler metrics
+
+Ascend `bench` runs use the `BasicInfo` msopprof metric set by default. Select a
+different metric set with `--aic-metrics`:
+
+```bash
+cannbench bench \
+  --backend ascend \
+  --aic-metrics InstrTimeline \
+  --op softmax \
+  --case-id t5_attention
+```
+
+The value is passed through to msopprof, so metric sets supported by the
+installed Ascend profiler do not require a CannBench code change. This option
+is supported only with `--backend ascend`; explicitly passing it for NVIDIA is
+an error.
+
 ## Implementations
 
 NVIDIA PyTorch baseline. Do not pass `--implementation`; the NVIDIA backend defaults to the PyTorch CUDA baseline:

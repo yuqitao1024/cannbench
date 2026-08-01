@@ -22,6 +22,7 @@ class OperatorBenchmarkRequest:
     implementation: str | None = None
     seed: int = 0
     implementation_version: str | None = None
+    aic_metrics: str = "BasicInfo"
     input_bindings: dict[str, OperatorInputBinding] = field(default_factory=dict)
     case_payload: dict[str, object] = field(init=False)
     dimensions: tuple[int, ...] | None = field(init=False, default=None)
@@ -50,6 +51,12 @@ class OperatorBenchmarkRequest:
             if not version:
                 raise ValueError("implementation_version must not be empty")
             object.__setattr__(self, "implementation_version", version)
+        aic_metrics = self.aic_metrics.strip()
+        if not aic_metrics:
+            raise ValueError("aic_metrics must not be empty")
+        if self.backend != "ascend" and aic_metrics != "BasicInfo":
+            raise ValueError("aic_metrics is only supported for the ascend backend")
+        object.__setattr__(self, "aic_metrics", aic_metrics)
 
         case = get_operator_case(self.op, self.dataset, self.case_id)
         object.__setattr__(self, "case_payload", case.payload)

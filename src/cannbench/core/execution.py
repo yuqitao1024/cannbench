@@ -63,10 +63,17 @@ class LocalBenchExecutor(BenchCaseExecutor):
 
 
 class RemoteBenchExecutor(BenchCaseExecutor):
-    def __init__(self, collect_remote_artifacts, endpoint, endpoint_path: Path | None = None) -> None:
+    def __init__(
+        self,
+        collect_remote_artifacts,
+        endpoint,
+        endpoint_path: Path | None = None,
+        aic_metrics: str = "BasicInfo",
+    ) -> None:
         self._collect_remote_artifacts = collect_remote_artifacts
         self._endpoint = endpoint
         self._endpoint_path = endpoint_path
+        self._aic_metrics = aic_metrics
         self._preinstalled_simt = False
 
     def mark_simt_preinstalled(self) -> None:
@@ -96,6 +103,7 @@ class RemoteBenchExecutor(BenchCaseExecutor):
                 implementation=implementation,
                 implementation_version=implementation_version,
                 preinstalled_simt=self._preinstalled_simt,
+                aic_metrics=self._aic_metrics,
             )
             return BenchCaseExecutionResult(
                 artifacts=remote_result.artifacts,

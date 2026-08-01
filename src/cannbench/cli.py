@@ -147,6 +147,7 @@ def _build_request_from_prepared(
             getattr(args, "implementation", None),
             getattr(args, "implementation_version", None),
         ),
+        aic_metrics=getattr(args, "aic_metrics", "BasicInfo"),
     )
 
 
@@ -169,6 +170,7 @@ def _build_request_from_args(args: argparse.Namespace) -> OperatorBenchmarkReque
             getattr(args, "implementation", None),
             getattr(args, "implementation_version", None),
         ),
+        aic_metrics=getattr(args, "aic_metrics", "BasicInfo"),
     )
 
 
@@ -178,6 +180,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     bench = subparsers.add_parser("bench")
     _benchmark_args(bench)
+    bench.set_defaults(aic_metrics_provided=False)
+    bench.add_argument(
+        "--aic-metrics",
+        default="BasicInfo",
+        action=_StoreWithPresence,
+    )
     bench.add_argument("--endpoint", type=Path)
     bench.add_argument("--capture-output", action="store_true", default=False)
 
@@ -244,6 +252,9 @@ def _validate_benchmark_selection(
     case_id = getattr(args, "case_id", None)
     dataset = getattr(args, "dataset", None)
     op = getattr(args, "op", None)
+
+    if getattr(args, "aic_metrics_provided", False) and args.backend != "ascend":
+        raise ValueError("--aic-metrics is only supported for the ascend backend")
 
     if prepared_input is not None and prepared_dir is not None:
         raise ValueError("--prepared-input and --prepared-dir are mutually exclusive")
@@ -902,6 +913,7 @@ def _run_remote_bench_with_plans(
         collect_remote_artifacts,
         endpoint,
         endpoint_path=args.endpoint,
+        aic_metrics=args.aic_metrics,
     )
     summary_rows: list[BatchResultRecord] = []
     benchmark_records: list[dict[str, object]] = []

@@ -2130,6 +2130,7 @@ def test_ascend_profile_operator_device_time_uses_msopprof_launch_controls(monke
         dataset="smoke",
         case_id="tiny_logits",
         seed=7,
+        aic_metrics="Default",
     )
 
     result = AscendBackend().profile_operator_device_time(request)
@@ -2137,7 +2138,7 @@ def test_ascend_profile_operator_device_time_uses_msopprof_launch_controls(monke
     command = captured["profile_command"]
     assert command[0] == "msopprof"
     assert "op" not in command[:2]
-    assert "--aic-metrics=BasicInfo" in command
+    assert "--aic-metrics=Default" in command
     assert "--warm-up=3" not in command
     assert "--launch-count=10" in command
     assert "--warmup" not in command
