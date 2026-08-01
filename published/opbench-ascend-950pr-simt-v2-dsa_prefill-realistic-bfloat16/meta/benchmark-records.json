@@ -1,0 +1,36 @@
+{
+  "records": [
+    {
+      "schema_version": 1,
+      "run_id": "opbench-ascend-950pr-simt-v2-dsa_prefill-realistic-bfloat16/dsa_prefill-realistic-deepseek_v32_flashmla_prefill_q4096_ctx32768_top2048-bfloat16-seed0",
+      "operator": "dsa_prefill",
+      "dataset": "realistic",
+      "case_id": "deepseek_v32_flashmla_prefill_q4096_ctx32768_top2048",
+      "family": "prefill_workflow",
+      "shape": [
+        4096,
+        128,
+        576
+      ],
+      "dtype": "bfloat16",
+      "backend": "ascend",
+      "device_class": "950PR",
+      "implementation": "simt",
+      "implementation_version": "v2",
+      "source_kind": "official_operator_test",
+      "source_project": "DeepSeek-V3.2+FlashMLA",
+      "source_model": "DeepSeek-V3.2",
+      "source_file": "docs/datasets/dsa-real-sources.md#deepseek-v32-flashmla-prefill",
+      "source_op": "dsa_prefill",
+      "metrics": {
+        "latency_ms": 497.747630859
+      },
+      "accuracy": {
+        "passed": true,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0
+      },
+      "diff_ref": null
+    }
+  ]
+}
