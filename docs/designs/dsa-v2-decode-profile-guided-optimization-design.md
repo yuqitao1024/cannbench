@@ -2,9 +2,11 @@
 
 ## Status
 
-Approved for staged implementation on 2026-08-01. The first experiment is the
-Lightning Indexer score-postprocess launch-geometry matrix. Later stages remain
-gated by correctness and measured device results.
+Approved for staged implementation on 2026-08-01. The launch-geometry-only
+experiment was rejected after device measurement. The 1024-thread,
+head-parallel Lightning Indexer decode score reduction is retained after
+correctness and repeated performance validation. Prefill propagation is the
+next staged score experiment; later stages remain gated by device results.
 
 ## Scope And Baseline
 
@@ -148,7 +150,7 @@ Items are ordered by current evidence. An item is not automatically implemented
 because it appears here; each gate prevents carrying a negative optimization
 into V2.
 
-### S0: Score VF Launch-Geometry Matrix
+### S0: Score VF Launch-Geometry Matrix (Rejected)
 
 Build otherwise identical variants with 32, 64, 128, 256, and 1024 VF threads.
 Keep one context position per thread and the serial 64-head loop unchanged.
@@ -161,20 +163,80 @@ Retain a new geometry only if:
 - Indexer and workflow medians do not regress; and
 - a second clean-process run confirms the direction.
 
-### S1: Score Postprocess Implementation Matrix
+The matrix was run on the isolated `e781b64` release with production `-O3` and
+CannBench BasicInfo. Every candidate passed five repeated canonical,
+masked-tail, and tied-threshold device accuracy launches. Each workflow
+collection exposes the score kernel twice, once in the Indexer component and
+once while profiling the dependent Sparse Attention component:
 
-If S0 leaves score above 200 us, compare:
+| VF threads | Score observations (us) | Score median (us) | Workflow (us) |
+| ---: | ---: | ---: | ---: |
+| 1024 baseline | 292.353, 291.947 | 292.150 | 828.131 |
+| 32 | 287.592, 287.962 | 287.777 | 825.124 |
+| 64 | 288.882, 286.516 | 287.699 | 821.123 |
+| 128 | 286.551, 287.938 | 287.244 | 822.570 |
+| 256 | 288.314, 285.424 | 286.869 | 821.561 |
 
-1. the retained SIMT context-major loop;
-2. a C/SIMD vector loop over 32 context positions for each head; and
-3. a head-parallel SIMT partial-reduction path using UB scratch and block-local
-   synchronization.
+The best score result is only 1.8% below baseline and the best workflow result
+is 0.8% below baseline. This misses the 5% score gate. The experiment was
+stopped without changing production geometry because it only removes inactive
+threads; it does not parallelize the serial 64-head reduction. Raw artifacts
+are preserved under:
 
-The SIMD path should preserve the existing serial head order where the API
-allows it. The parallel path may change FP32 addition order and must pass
-canonical, masked-tail, all-equal, near-threshold, negative-score, and repeated
-stability cases. Do not accept score tolerance alone: the selected Top-K score
-multiset must still match the trusted reference.
+```text
+/tmp/cannbench-dsa-v2-score-s0-baseline/
+/tmp/cannbench-dsa-v2-score-s0-runs/
+```
+
+### S1: 1024-Thread Head-Parallel Score Reduction (Retained)
+
+Keep the 1024-thread VF and map all threads to useful work:
+
+```text
+32 warps per VF * 32 lanes = 1024 threads
+warp index                   = context position in the 32-position tile
+lane index                   = head index 0..31
+heads processed by each lane = lane, lane + 32
+reduction                    = five asc_shfl_down steps within the warp
+writer                       = lane 0 for that context position
+```
+
+This uses every thread, needs no UB scratch, and adds no block-wide or
+inter-core synchronization. Keep the existing per-head Float-to-BF16, ReLU,
+weight multiply, and BF16-to-Float conversion points. Only the FP32 addition
+order changes from a serial 64-value sum to a warp tree.
+
+The path must pass canonical, masked-tail, all-equal, near-threshold,
+negative-score, and repeated-stability cases. Do not accept score tolerance
+alone: the selected Top-K score multiset must still match the trusted
+reference. Retain it only if the score median improves by at least 10%, the
+full Indexer and workflow do not regress, and a clean-process repeat confirms
+the gain. If the tree order changes threshold membership, test a two-stage
+warp reduction that preserves deterministic groups before considering a C/SIMD
+fallback.
+
+The first production-`-O3` device build passed five repeats of the canonical,
+masked-tail, and tied-threshold cases. It measured score at 147.664 and
+148.670 us and the workflow at 681.981 us. The fixed two-head lane body was then
+written explicitly because Bisheng did not honor the requested unroll pragma.
+The final source compiles without that warning and additionally passes five
+repeats of signed near-threshold and negative-score cases.
+
+The clean-process final repeat reports:
+
+| Boundary | Baseline (us) | Head-parallel (us) | Improvement |
+| --- | ---: | ---: | ---: |
+| Score median | 292.150 | 147.763 | 49.4% |
+| Indexer | 424.768 | 279.847 | 34.1% |
+| Workflow | 828.131 | 685.502 | 17.2% |
+
+The final score observations are 148.182 and 147.343 us. Radix Top-K remains
+about 131.5 us and Sparse Attention remains about 405.7 us, so the gain is
+isolated to the intended score stage. Raw S1 artifacts are preserved under:
+
+```text
+/tmp/cannbench-dsa-v2-score-s1-runs/
+```
 
 ### S2: Score Producer/Consumer Pipelining
 
@@ -186,6 +248,26 @@ implementation, prove the physical LCM/UB allocation and flag lifetime on
 Proceed only if Default or InstrTimeline shows at least 15% exposed non-overlap
 after S0/S1. The protocol must stay kernel-local and must not introduce
 inter-core coordination between logical tasks.
+
+### P0: Propagate Head-Parallel Reduction To Prefill
+
+Both V2 BF16 prefill score paths have the same `H=64`, 32-context tile, and
+1024-thread launch followed by a serial 64-head loop in only the first 32
+threads:
+
+- `lightning_indexer_prefill_q2_family_64x128` reduces the score and then runs
+  an in-VF block-wide Top-K merge;
+- `lightning_indexer_prefill_full_score_family_64x128` writes BF16 scores for a
+  later radix Top-K launch.
+
+After the decode reduction is retained, apply the same 32-warp mapping to each
+prefill source as separate experiments. The q2 tail path must keep every warp
+alive until `asc_syncthreads`; warps beyond `current_context` skip score work
+but cannot return early. The full-score path may use uniform per-warp masking.
+Run the existing sampled-reference and repeated-stability prefill tests, then
+measure the complete V3.2 prefill workflow. Retain each path independently only
+if its selected-kernel boundary improves by at least 10% without changing the
+Top-K score set.
 
 ### A0: Sparse Attention QK Tile 64 -> 128
 

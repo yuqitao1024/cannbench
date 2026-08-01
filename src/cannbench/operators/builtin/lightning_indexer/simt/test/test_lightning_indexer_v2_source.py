@@ -14,6 +14,7 @@ DECODE_RADIX_SOURCE = (
 CONTEXT_SHARDED_SOURCE = (
     V2_ROOT / "csrc" / "simt" / "lightning_indexer_context_sharded_family_64x128.asc"
 )
+V32_DECODE_ACCURACY = Path(__file__).with_name("v32_decode_v2_accuracy.py")
 
 
 def _function_body(source: str, signature: str) -> str:
@@ -105,3 +106,22 @@ def test_v2_context_sharded_kernel_stops_after_score_production():
         "asc_sync_inter",
     ):
         assert forbidden not in source
+
+
+def test_v2_context_sharded_postprocess_uses_all_threads_for_head_reduction():
+    source = CONTEXT_SHARDED_SOURCE.read_text(encoding="utf-8")
+
+    assert "constexpr int32_t kWarpSize = 32;" in source
+    assert "constexpr int32_t kWarpsPerBlock = kThreadsPerBlock / kWarpSize;" in source
+    assert "static_assert(kWarpsPerBlock == kContextTileSize);" in source
+    assert "threadIdx.x / kWarpSize" in source
+    assert "threadIdx.x % kWarpSize" in source
+    assert "lane_index + kWarpSize" in source
+    assert "asc_shfl_down" in source
+
+
+def test_v2_decode_accuracy_covers_reduction_order_boundaries():
+    source = V32_DECODE_ACCURACY.read_text(encoding="utf-8")
+
+    assert '"near_threshold"' in source
+    assert '"negative_scores"' in source

@@ -29,6 +29,27 @@ def _build_tied_threshold_case(torch):
     return query, keys, weights, valid
 
 
+def _build_reduction_order_case(torch, *, seed: int, negative_weights: bool):
+    torch.manual_seed(seed)
+    device = torch.device("npu")
+    query = torch.randn(2, 2, 64, 128, device=device, dtype=torch.bfloat16)
+    keys = torch.randn(2, 32768, 128, device=device, dtype=torch.bfloat16)
+    if negative_weights:
+        weights = -torch.rand(
+            2, 2, 64, device=device, dtype=torch.bfloat16
+        )
+    else:
+        weights = torch.randn(
+            2, 2, 64, device=device, dtype=torch.bfloat16
+        ) * 0.015625
+    valid = torch.tensor(
+        [[32768, 32767], [32766, 32765]],
+        device=device,
+        dtype=torch.int32,
+    )
+    return query, keys, weights, valid
+
+
 def _reference_scores(torch, query, keys, weights, valid):
     scores = torch.einsum("bqhd,bcd->bqhc", query, keys)
     reduced = (torch.relu(scores) * weights.unsqueeze(-1)).sum(dim=2)
@@ -75,6 +96,12 @@ def run_accuracy(*, seed: int, repeats: int):
             torch, seed=seed + 1, masked_tail=True
         ),
         "tied_threshold": _build_tied_threshold_case(torch),
+        "near_threshold": _build_reduction_order_case(
+            torch, seed=seed + 2, negative_weights=False
+        ),
+        "negative_scores": _build_reduction_order_case(
+            torch, seed=seed + 3, negative_weights=True
+        ),
     }
     results = {}
     for case_name, (query, keys, weights, valid) in cases.items():
