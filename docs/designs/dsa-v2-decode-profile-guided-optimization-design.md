@@ -938,17 +938,58 @@ The fused boundary regressed by about 113% and the workflow by about 67% while
 Indexer, Combine, and the 1650 MHz device frequency remained stable. The
 evidence isolates the regression to the grouped fast Value Pack, but BasicInfo
 does not distinguish a slow 64-bit GM instruction from the changed per-lane
-access and NZ-store schedule. Because the candidate was correct and
-resource-clean but decisively slower, the planned 32-bit grouping was not run:
-it would test another grouped schedule rather than address the observed loss.
-The kernel and source-contract test were reverted. Do not retry adjacent-value
-load grouping without generated-instruction evidence that identifies a
-different transaction or store mapping.
+access and NZ-store schedule. The kernel and source-contract test were reverted.
 
-Reinstalling the retained `c3f53b6...` source immediately restored the fused
-kernel to 258.070 us, Sparse Attention plus Combine to 269.721 us, and the
-complete workflow to 434.990 us. This same-node A/B restore confirms the
-candidate attribution and leaves the target environment on the retained path.
+As a final discriminating control, the requested 32-bit form was also tested.
+Each lane loaded dimensions `[2 * lane, 2 * lane + 1]` and
+`[2 * lane + 64, 2 * lane + 65]`, producing two warp-coalesced 128-byte rounds
+while retaining the existing NZ destinations. The candidate source SHA-256 was
+`50bae4751c0ab18dbe219d19b0c9e33e0bca18f27bdbf30da5bd1bd15a9512f1`.
+Its production `-O3`, `dav-3510` build passed; the resource report showed 14
+registers per thread and zero Stack bytes, versus 13 registers and zero Stack
+bytes for the retained traversal.
+
+Five fresh accuracy processes again passed every output and LSE row, including
+negative, out-of-range, and causal-future indices, at `atol=rtol=0.05`. Each
+run reported zero mismatches; output and LSE maximum absolute errors were
+0.009765625 and 0.009282112 respectively. Two clean-process `BasicInfo` runs
+reported:
+
+| Boundary | Retained run 1 | Retained run 2 | 32-bit run 1 | 32-bit run 2 |
+| --- | ---: | ---: | ---: | ---: |
+| Indexer | 165.484 us | 165.071 us | 165.131 us | 164.872 us |
+| Sparse Attention fused | 258.277 us | 258.722 us | 353.980 us | 353.490 us |
+| Combine | 11.996 us | 11.797 us | 11.962 us | 11.781 us |
+| DSA workflow | 435.757 us | 435.590 us | 531.073 us | 530.143 us |
+
+The 32-bit form therefore regressed the fused kernel by 36.6%-37.1% and the
+workflow by 21.7%-21.9%, with stable Indexer, Combine, and 1650 MHz device
+frequency. This rejects adjacent-value grouped loads at both tested widths.
+The extra register alone is not sufficient to explain a roughly 37% fused
+regression; generated-instruction or detailed memory-pipeline evidence would
+be required before revisiting this load/store mapping. The 32-bit kernel and
+its source-contract test were reverted.
+
+The first 32-bit restore check was invalidated before comparison: reinstalling
+the retained editable package was insufficient because CannBench's SIMT loader
+prepends the active release's operator-local `simt/v2` directory to `sys.path`,
+even when `CANNBENCH_SKIP_SIMT_INSTALL=1`. Launching CannBench from the
+candidate release therefore loaded the candidate extension again. The profile
+made this visible: its dumped `.aicore_binary` SHA-256 remained the candidate
+hash `29b2e09f1cdb1c322ca44fc9abfb47ea6f8fb9cf642b0b45949aafc869fac81d`.
+This run is deployment diagnostics and is excluded from performance evidence.
+
+Launching the same CannBench command from the retained release selected the
+intended scalar extension. The dumped `.aicore_binary` SHA-256 returned to the
+historical baseline hash
+`e1224bb528dc902cd68374c2729ba47528725a4a034f96e4fa4e86315e0784de`;
+fused measured 258.255 us, Combine 11.868 us, and the workflow 435.321 us.
+This confirms both the source attribution and the restored target state.
+
+For the earlier 64-bit candidate, reinstalling the retained `c3f53b6...`
+source restored the fused kernel to 258.070 us, Sparse Attention plus Combine
+to 269.721 us, and the complete workflow to 434.990 us. That same-node A/B
+restore independently confirms its candidate attribution.
 
 Artifacts are preserved under:
 
@@ -957,10 +998,19 @@ Artifacts are preserved under:
 /root/cannbench-dsa-v2-value-pack-a5-u64-vDk0gg/
 /root/cannbench-dsa-v2-value-pack-a5-u64-vDk0gg-results.tar.gz
 /root/cannbench-dsa-v2-value-pack-a5-baseline-restore/
+/tmp/cannbench-dsa-v2-value-pack-a5-u32-controller-bEueTB/
+/root/cannbench-dsa-v2-value-pack-a5-u32-bEueTB/
+/root/cannbench-dsa-v2-value-pack-a5-u32-bEueTB-results.tar.gz
+/root/cannbench-dsa-v2-value-pack-a5-u32-baseline-restore2/
+/root/cannbench-dsa-v2-value-pack-a5-u32-baseline-restore2.tar.gz
 ```
 
-The result archive SHA-256 is
-`68bdffc53b65099cc5ba17d07038dac2c8eed8d0a5f03f7fe4653d96344cfe16`.
+The 64-bit result archive SHA-256 is
+`68bdffc53b65099cc5ba17d07038dac2c8eed8d0a5f03f7fe4653d96344cfe16`;
+the 32-bit result archive SHA-256 is
+`13e1e0c4ada438fe5a3b801763fbbf5ac8598bf0b2a2f5a3b0075a85d1b7d416`,
+and the 32-bit baseline-restore archive SHA-256 is
+`22fc8b3f4727990d24153a88fd4dddde3160df359bc555fa25f009f3b533893e`.
 
 ### W0: Workflow-Level Cleanup
 
