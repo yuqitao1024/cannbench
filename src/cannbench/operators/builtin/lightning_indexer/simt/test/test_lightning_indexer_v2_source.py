@@ -130,6 +130,46 @@ def test_v2_context_sharded_postprocess_uses_all_threads_for_head_reduction():
     assert "asc_shfl_down" in source
 
 
+def test_v2_context_sharded_score_pipeline_uses_two_owned_bf16_slots():
+    source = CONTEXT_SHARDED_SOURCE.read_text(encoding="utf-8")
+    aic = _function_body(
+        source, "lightning_indexer_context_sharded_aic("
+    )
+    aiv = _function_body(
+        source, "lightning_indexer_context_sharded_aiv("
+    )
+
+    for contract in (
+        "constexpr uint16_t kScoreReadyFlag0 = 0;",
+        "constexpr uint16_t kScoreReadyFlag1 = 1;",
+        "constexpr uint16_t kScoreFreeFlag0 = 2;",
+        "constexpr uint16_t kScoreFreeFlag1 = 3;",
+        "constexpr uint32_t kSecondQueryL0OffsetBytes =",
+        "static_assert(2 * kSharedScoreSlotBytes == 8 * 1024);",
+        "AscendC::TPosition::VECCALC",
+        "Fixpipe<bfloat16_t, float",
+        "quantPre = QuantMode_t::F322BF16",
+    ):
+        assert contract in source
+
+    assert "if (tile_index >= 2)" in aic
+    assert "score_slot_wait_free(slot);" in aic
+    assert "score_slot_publish_ready(slot);" in aic
+    assert "score_slot_wait_ready(slot);" in aiv
+    assert "score_slot_publish_free(slot);" in aiv
+    assert aiv.index("score_slot_wait_ready(slot);") < aiv.index(
+        "score_slot_publish_free(slot);"
+    )
+    assert "score_slot_publish_free(0);" not in aiv
+    assert "score_slot_publish_free(1);" not in aiv
+    assert "fixpipe_params.mSize = kHeadCount;" in aic
+    assert "fixpipe_params.dualDstCtl = 0;" in aic
+    assert "if (atom_query_rows == kQueryAtomRows)" in aic
+    assert "second_query_l0_scores_tensor" in aic
+    assert "fixpipe_params.subBlockId = true;" in aic
+    assert aic.count("AscendC::Fixpipe<bfloat16_t, float") == 2
+
+
 def test_v2_decode_accuracy_covers_reduction_order_boundaries():
     source = V32_DECODE_ACCURACY.read_text(encoding="utf-8")
 

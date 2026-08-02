@@ -263,33 +263,52 @@ Proceed only if Default or InstrTimeline shows at least 15% exposed non-overlap
 after S0/S1. The protocol must stay kernel-local and must not introduce
 inter-core coordination between logical tasks.
 
-The two-slot BF16 prototype was evaluated and rejected. A fresh retained
+The initial two-slot BF16 prototype was rejected prematurely. A fresh retained
 baseline measured score at 147.069 us, radix Top-K at 132.370 us, Indexer at
 279.439 us, Sparse Attention plus Combine at 294.868 us, and the complete
-workflow at 574.307 us.
+workflow at 574.307 us. The failed prototype did expose required Fixpipe
+contracts: the call signature is `Fixpipe<bfloat16_t, float>` and FP32-to-BF16
+conversion needs `quantPre=F322BF16`.
 
-The first prototype failed compilation because the Fixpipe destination and
-source template arguments were reversed. After correcting the signature to
-`Fixpipe<bfloat16_t, float>`, device accuracy failed on the canonical unordered
-Top-K score multiset and a repeated-call diagnostic timed out in stream
-synchronization. CANN 9.2 headers then exposed two additional requirements:
-FP32-to-BF16 Fixpipe needs `quantPre=F322BF16`, and every block-sync release
-must have a matching producer wait in the same launch.
+The follow-up investigation on 2026-08-02 isolated two independent defects:
 
-A final controlled variant set the required conversion mode and suppressed the
-two terminal slot releases that had no future reuse. It built successfully for
-`dav-3510`, but a fresh-process canonical call with no reference computation
-still failed to synchronize within a 120-second hard limit. The deployed source
-SHA-256 was
-`7cbd0684b07c5e3dfb5d5563344a541f3c0005bd6caf6cc4aaf5dc9cbc40b8f3`;
-the release archive SHA-256 was
-`0196489b11c5108c60b281065adfd23d53a617b2646b89652e170132923d76b2`.
-No performance result is claimed.
+1. The hanging candidate reused flag IDs 0 and 1 in both directions for ready
+   and free handshakes. Ready now uses flags 0 and 1, while free uses flags 2
+   and 3. AIC initially owns both slots and waits for free only before a slot is
+   reused (`tile_index >= 2`). AIV waits for ready and publishes free only when
+   another reuse exists; terminal releases are suppressed.
+2. The full Q=2 path failed with runtime error `507015`, device error code 169,
+   because BF16 Fixpipe used `mSize=128` and `dualDstCtl=1`. This was an invalid
+   Fixpipe parameter, not a synchronization timeout. The retained path disables
+   dual destination and issues two 64-row Fixpipe calls with `subBlockId=false`
+   and `subBlockId=true`; the second call starts at the second-query L0 offset.
 
-Reject this flag-0/flag-1 mixed AIC/AIV ping-pong design. Do not retry it
-without a documented `dav-3510` synchronization primitive whose two-slot
-producer/consumer semantics are proven by a standalone mixed-kernel repro.
-The retained implementation remains the correct single-slot protocol.
+The synchronization protocol was expanded on device before restoring the full
+operator: one tile wrote 32 expected outputs, two tiles wrote 64, four tiles
+passed the first slot reuse, 64 tiles passed five repeats, and Q=2 with 64 tiles
+passed three repeats for both query outputs. The production source then built
+with CANN 9.2.0 for `dav-3510` at `-O3`.
+
+Full V3.2 decode accuracy passed three repeats each for canonical, masked-tail,
+tied-threshold, near-threshold, and negative-score cases. Validation compared
+the unordered Top-K score multiset and required a stable selected index set.
+
+Production `BasicInfo` on Ascend 950PR measured:
+
+| Boundary | Published baseline | Two-slot BF16 | Improvement |
+| --- | ---: | ---: | ---: |
+| Score kernel | 148.363 us | 82.889 us | 44.1% |
+| Radix Top-K | 132.726 us | 131.713 us | 0.8% |
+| Lightning Indexer | 0.281089 ms | 0.214602 ms | 23.7% |
+| Sparse Attention + Combine | 0.270388 ms | 0.269829 ms | 0.2% |
+| DSA workflow | 0.551477 ms | 0.484431 ms | 12.2% |
+
+The workflow result exceeds the 3% retention gate, so the two-owned-slot
+producer/consumer pipeline is retained. The local raw CannBench artifact is:
+
+```text
+/tmp/cannbench-dsa-v2-s2-owned-slots-results/s2-owned-slots-basicinfo/
+```
 
 ### P0: Propagate Head-Parallel Reduction To Prefill
 
