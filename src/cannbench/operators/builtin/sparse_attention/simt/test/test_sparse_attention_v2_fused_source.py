@@ -123,7 +123,7 @@ def test_v2_fused_canonical_value_pack_stages_row_major_tiles_then_transposes():
     assert "kHead64FusedUbValueStagingOffset" in source
     assert (
         "kHead64FusedUbValueStagingBytes =\n"
-        "    32 * kHead64ValueTile * sizeof(bfloat16_t)"
+        "    32 * kHead64FusedMaxValueTile * sizeof(bfloat16_t)"
     ) in source
     assert "__ubuf__ bfloat16_t* staged_values" in fast_vf
     assert "tile_index * 16U * 16U + row_in_tile * 16U + dim_in_tile" in fast_vf
@@ -131,11 +131,55 @@ def test_v2_fused_canonical_value_pack_stages_row_major_tiles_then_transposes():
     assert "asc_vf_call<head64_fused_value_pack_fast_vf>" in fast_slot
     assert fast_slot.count("asc_transpose(") == 1
     assert "for (uint32_t row_block = 0; row_block < 2; ++row_block)" in fast_slot
-    assert "for (uint32_t dim_block = 0; dim_block < 8; ++dim_block)" in fast_slot
+    assert "for (uint32_t dim_block = 0; dim_block < 16; ++dim_block)" in fast_slot
     assert "reinterpret_cast<__ubuf__ uint16_t*>" in fast_slot
     assert fast_slot.count("asc_sync_notify(PIPE_V, PIPE_MTE3, EVENT_ID0);") == 2
     assert fast_slot.count("asc_sync_wait(PIPE_V, PIPE_MTE3, EVENT_ID0);") == 2
 
+
+def test_v2_fused_canonical_value256_reuses_phase_local_l1():
+    source = _v2_fused_source()
+    aiv = _function_definition(source, "sparse_attention_head64_fused_aiv(")
+    aic = _function_definition(source, "sparse_attention_head64_fused_aic(")
+    fast_pack = _function_definition(source, "head64_fused_value_pack_fast_vf(")
+    fast_slot = _function_definition(source, "head64_fused_gather_value_fast_slot(")
+
+    assert "kHead64FusedGenericValueTile = kHead64ValueTile" in source
+    assert "kHead64FusedCanonicalValueTile = 256" in source
+    assert "kHead64FusedMaxValueTile = kHead64FusedCanonicalValueTile" in source
+
+    for function in (aiv, aic):
+        assert "head64_fused_is_canonical_v32_decode(plan, causal)" in function
+        assert (
+            "use_canonical_decode_pack\n"
+            "      ? kHead64FusedCanonicalValueTile\n"
+            "      : kHead64FusedGenericValueTile"
+        ) in function
+        assert "value_start += value_tile" in function
+        assert "plan.value_head_dim - value_start < value_tile" in function
+
+    assert "dim < kHead64FusedCanonicalValueTile" in fast_pack
+    assert "row_block * 16U + dim_block" in fast_pack
+    assert "dim_block < 16" in fast_slot
+    assert "kHead64FusedCanonicalValueTile" in fast_slot
+
+    assert "kHead64FusedL1PersistentQueryOffset = 0" in source
+    assert "kHead64FusedL1PersistentQueryBytes" in source
+    assert "kHead64FusedL1QkQueryOffset = kHead64FusedL1PersistentQueryOffset" in source
+    assert "kHead64FusedL1QkKeysOffset" in source
+    assert "kHead64FusedL1QkScoresOffset" in source
+    assert "kHead64FusedL1QkBytes" in source
+    assert (
+        "kHead64FusedL1PvProbabilitiesOffset =\n"
+        "    kHead64FusedL1PersistentQueryBytes"
+    ) in source
+    assert "kHead64FusedL1PvValuesOffset" in source
+    assert "kHead64FusedL1PvPvOffset" in source
+    assert "kHead64FusedL1PvBytes" in source
+    assert "kHead64FusedL1Bytes = kHead64FusedL1PvBytes" in source
+    assert "kHead64FusedL1KeysOffset" not in source
+    assert aiv.count("kHead64FusedL1QkKeysOffset") == 1
+    assert aic.count("kHead64FusedL1QkKeysOffset") == 1
 
 def test_v2_canonical_p4_combine_reuses_partition_weights_across_dimensions():
     source = _v2_head64_source()

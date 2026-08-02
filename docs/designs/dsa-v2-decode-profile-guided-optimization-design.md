@@ -1191,6 +1191,200 @@ profiles, and profiler dumps are preserved under:
 The local and remote result-archive SHA-256 is
 `0f880c765e1957d92216cc2e4b288e83bf94eee410ab9d4bb455e20bb16e760a`.
 
+### A8: Post-A6 Phase-Local L1 Tiling
+
+A6 changed the Sparse Attention instruction mix enough that the pre-A6
+InstrTimeline can no longer select the next optimization. Before another source
+change, collect separate CannBench `Default` and `InstrTimeline` workflows from
+the retained A6 package. Attribute the 40 QK pack/MMAD rounds, 32 Value
+pack/PV/update rounds, Softmax work, and exposed cross-pipeline waits. Select
+the first larger-tile candidate from that new critical path rather than from
+the old 111.647 us Value Pack total.
+
+The post-A6 collection completed on Ascend 950PR with CANN 9.2.0,
+`msopprof 26.2.0`, production `-O3`, `dav-3510`, and a stable 1650 MHz device
+frequency. The deployed fused source SHA-256 was
+`e7876297e29fd6c0ff3131077255132af6795901a71226d8a74763e56eafc3f5`,
+which matches retained A6. CannBench ran `Default` and `InstrTimeline` in
+separate clean processes through `bench --aic-metrics`; no direct profiler
+command or custom profiler option was used. `Default` reported:
+
+| Boundary | Post-A6 Default |
+| --- | ---: |
+| Indexer Score | 82.743 us |
+| Indexer Top-K | 82.031 us |
+| Sparse Attention fused | 177.387 us |
+| Combine | 12.246 us |
+| Selected workflow kernels | 354.407 us |
+
+The Sparse Attention profile also captured the dependency-materialization
+Indexer launches and a 4.223 us Cast helper. They remain visible in the raw
+rows but are not double-counted in the selected workflow boundary.
+`InstrTimeline` reproduced fused Sparse Attention at 177.373 us and Combine at
+11.793 us, so the detailed run retained the same kernel-time boundary.
+
+The post-A6 binary symbols and stable call markers identify eight selected
+tiles on each of the 12 recorded AIV lanes. Per lane, PC `0x120053e00ee4`
+starts the first Key Pack of each tile, `0x120053e01098` starts Softmax,
+`0x120053e01180` starts the first Value Pack, and `0x120053e00be4` is the
+final output write after the eighth tile. These markers give the following
+critical-path segmentation without summing work across concurrently executing
+lanes:
+
+| Eight-tile segment | Mean per lane | Minimum | Maximum |
+| --- | ---: | ---: | ---: |
+| First Key Pack to Softmax | 69.685 us | 65.125 us | 73.019 us |
+| Softmax to first Value Pack | 18.721 us | 17.837 us | 19.146 us |
+| First Value Pack to next tile/output | 64.447 us | 61.670 us | 67.769 us |
+| All eight tile bodies | 152.853 us | 145.686 us | 159.218 us |
+
+A6 reduced the Value Pack SIMT calls themselves to about 20 us per lane: the
+eight first-pack calls at PC `0x120053e01180` average about 5 us in total, and
+the 24 pipelined calls at PC `0x120053e01524` average about 15 us. The 64
+16-by-16 transposes and total PV arithmetic still scale with the 512 output
+dimensions, so Value256 cannot claim half of the 64.447 us Value phase as
+removable work. QK256 likewise keeps the total 576-dimension MMAD and packing
+work; its upside comes from removing two round-level copy, issue, and handshake
+sequences per selected tile rather than removing 40% of QK arithmetic.
+
+The profiler warned that some dynamic instrumentation was lost because the
+kernel exceeded 108 sub-blocks. Individual long `VTRANSPOSE`, wait, and MMAD
+durations therefore cannot be summed reliably. The exact eight-per-lane phase
+markers above are retained for candidate selection, while source round counts
+and complete-workflow timing remain the acceptance evidence.
+
+QK256 is selected as the first A8 experiment. Its measured QK-to-Softmax
+critical segment is consistently larger than the post-A6 Value-to-next-tile
+segment, and its 164,352-byte source-visible UB estimate leaves more capacity
+margin than Value256's 188,928 bytes. The full 69.685 us QK segment is only a
+loose absolute ceiling because data movement and MMAD work remain; the actual
+candidate must save at least 3.544 us from the 354.407 us selected workflow to
+meet the 1% retention gate. If QK256 misses that gate, its result must not be
+used to infer Value256 behavior.
+
+Complete positive, interrupted, and duplicate-install-failure artifacts are
+preserved under:
+
+```text
+/tmp/cannbench-dsa-v2-a8-profile-controller-7geyqF/
+/root/cannbench-dsa-v2-a8-profile-7geyqF/ # Ascend 950PR host
+```
+
+The local and remote post-A6 profile archive SHA-256 is
+`73c413015d6a1e1be1af9a1cbfc053453794580b04546756ef2e4ef5a7fa5f74`.
+
+The current fused L1 layout reserves all QK and PV buffers simultaneously:
+
+```text
+Query 73,728 + Key slots 32,768 + Scores 16,384
++ Probabilities 8,192 + Value slots 32,768 + PV 32,768
+= 196,608 bytes
+```
+
+QK and PV are sequential within each selected-token tile, but Query is packed
+only once per logical task and is reused by all eight selected-token tiles.
+Only Key and Score storage becomes dead after each QK phase. Probability stays
+live through PV, and Query must remain live until the whole task completes.
+A8 therefore reuses only the temporary L1 region after the persistent
+73,728-byte Query. This is buffer lifetime reuse, not removal of the existing
+QK-to-Softmax-to-PV synchronization protocol.
+
+Two tile candidates are evaluated independently:
+
+- Value256 retains QK128 and both Value gather slots. It reduces four Value
+  rounds to two. With phase-local L1 ownership, the QK and PV maxima are
+  122,880 and 212,992 bytes rather than the cumulative 262,144-byte layout.
+  Its source-visible UB estimate rises from 156,160 to 188,928 bytes. The
+  platform exposes 256 KiB of combined hardware resource, with a minimum
+  32 KiB DCache allocation and 8 KiB reserved by the system, so this remains
+  below the 216 KiB UB limit.
+- QK256 retains Value128 and both Key gather slots. It reduces five QK rounds
+  to three. Its QK and PV L1 estimates are 155,648 and 147,456 bytes after
+  preserving Query, and its source-visible UB estimate is 164,352 bytes. It is
+  the lower-capacity-risk alternative, but it is selected first only if the
+  post-A6 profile shows more removable QK work.
+
+Both candidates remain canonical V3.2 BF16 decode specializations. Generic
+decode, prefill, tails, V1, P4, the 1024-thread/32-warp launch, two gather-slot
+ownership, A6 transpose layout, and final visibility fences keep their current
+semantics. Key Pack does not receive an A6-style transpose: its current
+half-warp UB destination is already contiguous, unlike the old Value Pack NZ
+scatter.
+
+Each candidate is a separate build and device experiment. Retention requires
+zero Stack in changed VFs, acceptable register use, five independent full
+accuracy processes with zero output/LSE mismatches at `atol=rtol=0.05`, and
+two clean-process `BasicInfo` workflows that each improve the complete workflow
+by at least 1%. If neither tile has enough measured upside or fits the resource
+gate, return to the isolated distributed Context-shard histogram microbenchmark
+with a reset complete-chain target below 75-78 us; the old 105 us T0 gate is
+obsolete after T1 reduced Top-K to about 82 us.
+
+The first QK256 implementation exposed a flaw in the initial lifetime model
+before performance measurement. Its production and `--cce-res-usage` builds
+succeeded; Key Pack prepare used 14 registers, Key Pack fast used 13, and both
+reported zero Stack bytes. The first full accuracy process produced an all-zero
+output, 247,842 output mismatches, and 512 `-inf` LSE mismatches. The candidate
+had placed PV Probability at L1 offset zero, overwriting Query after the first
+selected-token tile even though seven later tiles still consumed it. QK256 was
+reverted without workflow timing. This is not evidence against a corrected
+QK256 schedule.
+
+The first Value256 build caught two stale Key-slot offset names at compile
+time. After that mechanical fix, the same incorrect L1 lifetime model reached
+the device and produced 15,056 output mismatches plus 512 LSE mismatches. A
+discriminating build reduced source-visible UB from 188,928 to 131,584 bytes
+without changing the Value schedule; it reproduced exactly the same mismatch
+counts and maximum errors. Together with the 216 KiB UB limit, this rules out
+UB capacity as the cause. The persistent Query overwrite was the root cause.
+
+The retained Value256 implementation keeps Query at L1 offset zero for the
+entire logical task. QK Key/Score and PV Probability/Value/output buffers reuse
+only the region after Query. Canonical Value Pack stages 32 row-major 16-by-16
+tiles, issues 32 transposes, and processes Value dimensions in two 256-wide
+rounds. Generic decode and prefill remain on Value128. The retained source
+SHA-256 is
+`8f154a2006fde85554bb66cd07070a6caf0b26366b467ed7009ee2c88b7e84fb`,
+and the production fused binary SHA-256 is
+`f5887c7aae8b29a7017497c018c219b6382db8cd38bbae7dee652146750af8d5`.
+
+The production and resource builds completed with CANN 9.2.0, `dav-3510`, and
+`-O3`. Value Pack fast remained at 13 registers and zero Stack bytes; Key Pack
+prepare/fast remained at 14/14 registers and zero Stack bytes. Five independent
+full V3.2 decode accuracy processes passed at `atol=rtol=0.05`. Every process
+reported zero output and LSE mismatches, including invalid, out-of-range, and
+causal-future indices. Maximum absolute errors remained 0.009765625 for output
+and 0.009282112 for LSE.
+
+Two clean-process CannBench `BasicInfo` workflows selected only the canonical
+V3.2 case and ran at 1650 MHz:
+
+| Boundary | A6 run 1 | A6 run 2 | Value256 run 1 | Value256 run 2 |
+| --- | ---: | ---: | ---: | ---: |
+| Indexer | 165.386 us | 165.204 us | 165.187 us | 165.186 us |
+| Sparse Attention fused | 177.510 us | 178.439 us | 169.088 us | 167.833 us |
+| Combine | 11.989 us | 12.232 us | 11.626 us | 12.067 us |
+| DSA workflow | 354.955 us | 356.116 us | 345.901 us | 345.086 us |
+
+The fused boundary improved by 4.74% and 5.94%; the complete workflow improved
+by 2.55% and 3.10%. Indexer and Combine remained stable, and both workflow runs
+exceeded the 1% retention gate. An earlier diagnostic command accidentally
+expanded all three realistic decode workflows; its complete V3.2 prefix
+measured 344.875 us but is excluded from the two formal retention runs.
+
+Positive and negative Value256 artifacts are preserved under:
+
+```text
+/tmp/cannbench-dsa-v2-a8-value256d-controller-2oQO33/
+/root/cannbench-dsa-v2-a8-value256d-2oQO33/ # Ascend 950PR host
+```
+
+The local and remote Value256 evidence archive SHA-256 is
+`8e109ce25411215fa031d4912013f2fa508d085e85e14f7001dcf1943fac1251`.
+The QK256 negative-result archive is under
+`/tmp/cannbench-dsa-v2-a8-qk256-controller-pKmiNQ/` with SHA-256
+`320b8f025bac5796c0d65f9e838baf118bab45c188ba4a599fa77b4c98939d7f`.
+
 ### W0: Workflow-Level Cleanup
 
 Keep dependency materialization and helper launches visible in raw profiles.
