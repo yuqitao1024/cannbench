@@ -52,6 +52,32 @@ def test_decode_radix_selector_uses_two_bf16_histogram_passes():
     assert "greater_count + equal_rank" in source
 
 
+def test_decode_radix_selector_compacts_with_one_packed_thread_scan():
+    source = DECODE_RADIX_SOURCE.read_text(encoding="utf-8")
+    selector = _function_body(source, "select_row_topk_unordered(")
+
+    for contract in (
+        "constexpr uint32_t kCountFieldBits = 16U;",
+        "constexpr uint32_t kCountFieldMask =",
+        "packed_thread_counts",
+        "thread_greater_count",
+        "thread_equal_count",
+        "thread_greater_offset",
+        "thread_equal_offset",
+        "total_greater_count",
+    ):
+        assert contract in source
+
+    assert "for (int32_t chunk_start" not in selector
+    assert "asc_atomic_add(state + kStateSelectedCount" not in selector
+    assert selector.count(
+        "for (int32_t offset = 1; offset < kThreadsPerBlock; offset <<= 1)"
+    ) == 1
+    assert selector.count(
+        "output[row_offset + output_slot] = context_index;"
+    ) == 2
+
+
 def test_decode_radix_selector_launches_one_logical_block_per_row():
     source = DECODE_RADIX_SOURCE.read_text(encoding="utf-8")
 

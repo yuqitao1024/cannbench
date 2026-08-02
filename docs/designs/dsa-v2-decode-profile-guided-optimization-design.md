@@ -814,11 +814,53 @@ below 105 us, which is a 20% improvement over the current 131.422 us stage.
 
 ### T1: Single-Block Radix Refinements
 
-If T0 misses its gate, profile the current block for atomic histogram pressure,
-barrier count, threshold-equal scan cost, and four-block imbalance. Consider a
-warp-private histogram merge and a bounded equal-threshold compaction only when
-the corresponding canonical or tie-heavy microbenchmark identifies that work
-as dominant.
+T1 was retained after target-device validation. The two BF16 radix histogram
+passes and one-block-per-row launch remain unchanged. The old compaction first
+used a contended atomic for every score above the selected threshold, then
+visited the context in 1024-element chunks and performed a complete block scan
+for each chunk needed to collect threshold-equal values. This repeated scan and
+synchronization work after the radix threshold was already known.
+
+The retained compaction gives every one of the 1024 threads its existing 32
+strided context elements. Each thread counts values greater than and equal to
+the threshold, packs both counts into non-overlapping 16-bit fields, and joins
+one ten-step ping-pong inclusive scan. The resulting thread-major exclusive
+offsets let each thread write its greater values and its bounded share of equal
+values without output-slot atomics. Both complete counts are at most 32768, so
+the packed scan cannot carry between fields. Output remains an unordered set of
+2048 unique valid indices.
+
+The production `-O3` build targeted Ascend 950PR (`dav-3510`) with CANN 9.2.0.
+Five repeats of canonical, masked-tail, tied-threshold, near-threshold, and
+negative-score cases all preserved the trusted unordered score multiset and a
+stable selected index set. Two clean-process CannBench `BasicInfo` runs gave:
+
+| Boundary | Published baseline | T1 run 1 | T1 run 2 | Improvement |
+| --- | ---: | ---: | ---: | ---: |
+| Score | 82.889 us | 83.585 us | 83.279 us | unchanged |
+| Radix Top-K | 131.713 us | 81.899 us | 81.792 us | 37.8%-37.9% |
+| Lightning Indexer | 0.214602 ms | 0.165484 ms | 0.165071 ms | 22.9%-23.1% |
+| Sparse Attention + Combine | 0.269829 ms | 0.270273 ms | 0.270519 ms | unchanged |
+| DSA workflow | 0.484431 ms | 0.435757 ms | 0.435590 ms | 10.0%-10.1% |
+
+The gain is isolated to Top-K, is stable across both workflow runs, and exceeds
+the 3% workflow retention gate. Context-shard distributed histogram T0 remains
+deferred because T1 removed most of the current Top-K gap without adding its
+extra launches or GM workspace.
+
+Artifacts are preserved under:
+
+```text
+/tmp/cannbench-dsa-v2-topk-t1-results/             # controller raw runs
+/tmp/cannbench-dsa-v2-topk-t1-results.tar.gz       # controller archive
+/root/cannbench-dsa-v2-topk-t1-results/            # Ascend host raw runs
+/root/cannbench-dsa-v2-topk-t1-results.tar.gz       # Ascend host archive
+```
+
+The archive SHA-256 is
+`f15f47517d28b7adc56f59303870ea8860ffc845572f418d7b8c119a012f6e09`;
+the deployed source SHA-256 is
+`3cc8d6f56265f636cc40f27192145e28e9cb30f99c95425449e36de4d4517f26`.
 
 ### W0: Workflow-Level Cleanup
 
