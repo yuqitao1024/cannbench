@@ -913,6 +913,55 @@ Use the current 435.757/435.590 us workflow pair as the pre-A5 reference. Keep
 all raw build, resource, accuracy, and profiler artifacts, including negative
 candidates.
 
+The 64-bit candidate was rejected after target-device measurement. Its source
+SHA-256 was
+`bd43b7f981a31473fa4d6bd171c12c8994d01cb3dc3cb7cb9bbe10e7cf30f36d`.
+The production `-O3`, `dav-3510` build completed, and the diagnostic build
+reported 11 registers per thread and zero Stack bytes for the fast Value Pack
+VF, versus 13 registers and zero Stack bytes for the retained scalar traversal.
+Resource pressure therefore did not explain the result.
+
+Five complete V3.2 decode accuracy processes passed every output and LSE row,
+including negative, out-of-range, and causal-future indices. Every run had zero
+mismatches at `atol=rtol=0.05`; the first run's maximum absolute errors were
+0.009765625 for output and 0.009282112 for LSE. Two clean-process CannBench
+`BasicInfo` workflows then reported:
+
+| Boundary | Retained run 1 | Retained run 2 | 64-bit run 1 | 64-bit run 2 |
+| --- | ---: | ---: | ---: | ---: |
+| Indexer | 165.484 us | 165.071 us | 164.992 us | 165.076 us |
+| Sparse Attention fused | 258.277 us | 258.722 us | 552.043 us | 552.101 us |
+| Combine | 11.996 us | 11.797 us | 12.049 us | 11.946 us |
+| DSA workflow | 435.757 us | 435.590 us | 729.084 us | 729.123 us |
+
+The fused boundary regressed by about 113% and the workflow by about 67% while
+Indexer, Combine, and the 1650 MHz device frequency remained stable. The
+evidence isolates the regression to the grouped fast Value Pack, but BasicInfo
+does not distinguish a slow 64-bit GM instruction from the changed per-lane
+access and NZ-store schedule. Because the candidate was correct and
+resource-clean but decisively slower, the planned 32-bit grouping was not run:
+it would test another grouped schedule rather than address the observed loss.
+The kernel and source-contract test were reverted. Do not retry adjacent-value
+load grouping without generated-instruction evidence that identifies a
+different transaction or store mapping.
+
+Reinstalling the retained `c3f53b6...` source immediately restored the fused
+kernel to 258.070 us, Sparse Attention plus Combine to 269.721 us, and the
+complete workflow to 434.990 us. This same-node A/B restore confirms the
+candidate attribution and leaves the target environment on the retained path.
+
+Artifacts are preserved under:
+
+```text
+/tmp/cannbench-dsa-v2-value-pack-a5-u64-controller-vDk0gg/
+/root/cannbench-dsa-v2-value-pack-a5-u64-vDk0gg/
+/root/cannbench-dsa-v2-value-pack-a5-u64-vDk0gg-results.tar.gz
+/root/cannbench-dsa-v2-value-pack-a5-baseline-restore/
+```
+
+The result archive SHA-256 is
+`68bdffc53b65099cc5ba17d07038dac2c8eed8d0a5f03f7fe4653d96344cfe16`.
+
 ### W0: Workflow-Level Cleanup
 
 Keep dependency materialization and helper launches visible in raw profiles.
