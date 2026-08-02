@@ -7,11 +7,12 @@ experiment was rejected after device measurement. The 1024-thread,
 head-parallel Lightning Indexer decode and V3.2 full-score prefill reductions,
 the Sparse Attention QK=128 tile, restoration of all 32 fused-kernel warps, and
 canonical decode `int32` KV row-offset reuse, P4 Combine weight reuse, and the
-two-slot BF16 score producer/consumer pipeline are retained after correctness
-and performance validation. Pairwise PV coarsening and 2048-thread Key/Value
-Pack widening were rejected after device measurement. The current published V2
-decode workflow checkpoint is 484.431 us at commit `bd30b18`. Later stages
-remain gated by device results.
+two-slot BF16 score producer/consumer pipeline, and single-scan deterministic
+Top-K compaction are retained after correctness and performance validation.
+Pairwise PV coarsening and 2048-thread Key/Value Pack widening were rejected
+after device measurement. The current published V2 decode workflow checkpoint
+is 435.757 us from source commit `a57d15c`. Later stages remain gated by device
+results.
 
 ## Scope And Baseline
 
@@ -844,7 +845,8 @@ stable selected index set. Two clean-process CannBench `BasicInfo` runs gave:
 | DSA workflow | 0.484431 ms | 0.435757 ms | 0.435590 ms | 10.0%-10.1% |
 
 The gain is isolated to Top-K, is stable across both workflow runs, and exceeds
-the 3% workflow retention gate. Context-shard distributed histogram T0 remains
+the 3% workflow retention gate. The first valid run, 0.435756979 ms, is the
+published workflow record. Context-shard distributed histogram T0 remains
 deferred because T1 removed most of the current Top-K gap without adding its
 extra launches or GM workspace.
 
