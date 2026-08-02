@@ -295,7 +295,7 @@ the unordered Top-K score multiset and required a stable selected index set.
 
 Production `BasicInfo` on Ascend 950PR measured:
 
-| Boundary | Published baseline | Two-slot BF16 | Improvement |
+| Boundary | Pre-S2 published baseline | Two-slot BF16 | Improvement |
 | --- | ---: | ---: | ---: |
 | Score kernel | 148.363 us | 82.889 us | 44.1% |
 | Radix Top-K | 132.726 us | 131.713 us | 0.8% |
