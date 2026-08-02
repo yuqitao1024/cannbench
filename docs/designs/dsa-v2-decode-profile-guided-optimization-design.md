@@ -1109,6 +1109,88 @@ resource builds, five accuracy outputs, and both complete profiles are under:
 The local and remote result-archive SHA-256 is
 `d77e242782a7d50d2964c295dd7c525352e55a6ae044c4ea34927e2e0bb6b18c`.
 
+### A7: Canonical Value-Pack Synchronization Contraction
+
+A7 isolates one synchronization question in the retained A6 path. The fast
+Value Pack currently performs a V-to-MTE3 notify/wait immediately after the
+SIMT VF, issues sixteen `asc_transpose` operations, and then performs another
+V-to-MTE3 notify/wait before the Tensor API UB-to-L1 copy. The first pair
+targets MTE3 even though the next consumer is another Vector-side operation.
+
+The candidate removes only that first pair. It relies on issue ordering between
+the Vector-side `asc_vf_call<head64_fused_value_pack_fast_vf>` producer and the
+following Vector-side `asc_transpose` consumers. The second pair remains
+immediately after all transposes and before `Copy(copy_ub_to_l1, ...)`, because
+that boundary makes the packed UB result visible to the MTE3/Tensor API
+consumer. This is a synchronization contraction, not a pipeline redesign.
+
+P4, the 1024-thread/32-warp launch, ValueTile 128, both L1 gather slots, the
+row-major staging layout, all sixteen transposes, and the ZN UB-to-L1 copy stay
+unchanged. The specialization remains canonical-decode-only; generic decode,
+prefill, tails, and V1 retain their existing paths. No API dependency is added.
+
+The correctness risk is that `asc_vf_call` completion is not implicitly ordered
+with subsequent `asc_transpose` reads despite both being issued on the Vector
+side. Such a visibility failure may be timing-dependent, so one successful
+launch is insufficient evidence. The candidate must pass five independent
+full V3.2 decode accuracy processes with zero output and LSE mismatches at
+`atol=rtol=0.05`, including invalid and causal-future indices. The production
+`-O3`, `dav-3510` build must retain zero Stack and acceptable fast-VF register
+use.
+
+Performance retention requires two clean-process CannBench `BasicInfo` runs.
+Each complete workflow must improve by at least 3% over the corresponding A6
+workflow result of 354.955 and 356.116 us, with stable Indexer and Combine
+latencies and attributable candidate binaries. If either workflow misses that
+gate, or any correctness/resource gate fails, restore the first synchronization
+pair and its source-contract assertion. Preserve the negative result and all
+raw artifacts so this synchronization boundary is not retested without new
+evidence.
+
+A7 was rejected after target-device validation. The candidate source SHA-256
+was `8f178aeb7d705ccb3fad9b7929f6cb56c31386b1c3892bb9943d5d2fc54273eb`.
+Its CANN 9.2.0 production `-O3`, `dav-3510` build passed, and the
+`--cce-res-usage` build reported 13 registers per thread and zero Stack bytes
+for `head64_fused_value_pack_fast_vf`, identical to retained A6.
+
+Five independent full V3.2 decode accuracy processes passed at
+`atol=rtol=0.05`. Every process reported zero output and LSE mismatches,
+including negative, out-of-range, and causal-future indices. Maximum absolute
+errors remained 0.009765625 for output and 0.009282112 for LSE.
+
+Two clean-process CannBench `BasicInfo` workflows at 1650 MHz reported:
+
+| Boundary | A6 run 1 | A6 run 2 | A7 run 1 | A7 run 2 |
+| --- | ---: | ---: | ---: | ---: |
+| Indexer | 165.386 us | 165.204 us | 165.520 us | 165.347 us |
+| Sparse Attention fused | 177.510 us | 178.439 us | 176.542 us | 176.553 us |
+| Combine | 11.989 us | 12.232 us | 12.257 us | 11.860 us |
+| DSA workflow | 354.955 us | 356.116 us | 354.319 us | 353.760 us |
+
+The fused boundary improved by only 0.55% and 1.06%, while the complete
+workflow improved by only 0.18% and 0.66%. Indexer and Combine stayed within
+normal variation. After measurement, the retention threshold was relaxed from
+3% to a stable 1% complete-workflow gain; A7 still failed because neither run
+reached 1%. Both candidate profiles dumped the same fused
+`.aicore_binary` SHA-256,
+`c6661bb4977dcea9f2ba290d6d92c68b937ee1759967a56e0f862cb0fb0f35e3`,
+which differs from A6 and confirms candidate provenance. The data supports
+Vector-side producer/transpose ordering for this tested path, but the removed
+V-to-MTE3 round trip is not a material latency source. The first synchronization
+pair and its source-contract assertion were restored.
+
+Raw source, build logs, resource output, five accuracy results, two complete
+profiles, and profiler dumps are preserved under:
+
+```text
+/tmp/cannbench-dsa-v2-a7-sync-controller-TpvnnB/
+/root/cannbench-dsa-v2-a7-sync-TpvnnB/
+/root/cannbench-dsa-v2-a7-sync-TpvnnB-results.tar.gz
+```
+
+The local and remote result-archive SHA-256 is
+`0f880c765e1957d92216cc2e4b288e83bf94eee410ab9d4bb455e20bb16e760a`.
+
 ### W0: Workflow-Level Cleanup
 
 Keep dependency materialization and helper launches visible in raw profiles.
