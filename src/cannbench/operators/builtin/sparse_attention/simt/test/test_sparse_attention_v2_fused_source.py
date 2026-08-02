@@ -113,6 +113,30 @@ def test_v2_fused_first_key_pack_prepares_offsets_for_all_value_tiles():
     assert prepare < later_key < first_value < next_value
 
 
+def test_v2_fused_canonical_value_pack_stages_row_major_tiles_then_transposes():
+    source = _v2_fused_source()
+    fast_vf = _function_definition(source, "head64_fused_value_pack_fast_vf(")
+    fast_slot = _function_definition(
+        source, "head64_fused_gather_value_fast_slot("
+    )
+
+    assert "kHead64FusedUbValueStagingOffset" in source
+    assert (
+        "kHead64FusedUbValueStagingBytes =\n"
+        "    32 * kHead64ValueTile * sizeof(bfloat16_t)"
+    ) in source
+    assert "__ubuf__ bfloat16_t* staged_values" in fast_vf
+    assert "tile_index * 16U * 16U + row_in_tile * 16U + dim_in_tile" in fast_vf
+    assert "packed_offset" not in fast_vf
+    assert "asc_vf_call<head64_fused_value_pack_fast_vf>" in fast_slot
+    assert fast_slot.count("asc_transpose(") == 1
+    assert "for (uint32_t row_block = 0; row_block < 2; ++row_block)" in fast_slot
+    assert "for (uint32_t dim_block = 0; dim_block < 8; ++dim_block)" in fast_slot
+    assert "reinterpret_cast<__ubuf__ uint16_t*>" in fast_slot
+    assert fast_slot.count("asc_sync_notify(PIPE_V, PIPE_MTE3, EVENT_ID0);") == 2
+    assert fast_slot.count("asc_sync_wait(PIPE_V, PIPE_MTE3, EVENT_ID0);") == 2
+
+
 def test_v2_canonical_p4_combine_reuses_partition_weights_across_dimensions():
     source = _v2_head64_source()
     predicate = _function_definition(

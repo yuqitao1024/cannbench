@@ -1012,6 +1012,103 @@ the 32-bit result archive SHA-256 is
 and the 32-bit baseline-restore archive SHA-256 is
 `22fc8b3f4727990d24153a88fd4dddde3160df359bc555fa25f009f3b533893e`.
 
+### A6: Canonical Value-Pack Tile Transpose
+
+The A5 controls reject wider adjacent GM loads but do not reject changing the
+UB destination layout. Both grouped candidates kept the direct SIMT scatter
+from coalesced GM dimensions into ZN, where adjacent lanes write with a
+16-element stride inside each 16-by-16 block. A6 isolates that store-layout
+hypothesis: gather BF16 values into row-major 16-by-16 UB tiles, then use the
+public C API `asc_transpose` instruction to generate the existing ZN buffer.
+
+The staging layout is tile-major, not a single row-major 32-by-128 matrix:
+
+```text
+tile = (row / 16) * 8 + dim / 16
+staging[tile * 256 + (row % 16) * 16 + dim % 16]
+```
+
+This distinction is required because `asc_transpose` accepts contiguous
+16-by-16 source and destination blocks and has no source-stride argument. The
+fast SIMT VF retains one warp per selected row and scalar BF16 GM loads. Within
+each half warp, the UB stores for a dimension block are contiguous. After the
+VF completes, 2 row blocks times 8 dimension blocks issue 16 transposes:
+
+```text
+src = staging + tile * 256
+dst = packed + (row / 16) * 16 * 128 + (dim / 16) * 256
+```
+
+The transpose maps source `(row_in, dim_in)` to destination
+`dim_in * 16 + row_in`, exactly matching the retained ZN offset. The existing
+Tensor API ZN-to-ZN UB-to-L1 copy and both L1 gather slots remain unchanged.
+One 8,192-byte staging region is appended to the fused UB workspace, increasing
+the statically visible workspace from 147,968 to 156,160 bytes.
+
+CANN 9.2.0 Tensor API UB-to-L1 routing was inspected before implementation. It
+supports only ND-to-ND, DN-to-DN, NZ-to-NZ, and ZN-to-ZN routes, so a direct
+Tensor API ND-to-ZN conversion is not available. Direct per-row GM-to-L1 copies
+are also not selected: the rows are gathered by arbitrary indices, and issuing
+32 small strided copies per Value Pack would replace one measured problem with
+copy-launch and synchronization overhead. A6 uses only the already included
+public `c_api/asc_simd.h`, Tensor API, and SIMT API surface; it adds no Basic API
+dependency.
+
+The first correctness implementation uses explicit synchronization between the
+SIMT producer, vector transposes, and the existing MTE3 copy. Synchronization
+may only be reduced after a separate real-device correctness experiment proves
+the producer/consumer ordering. The specialization remains behind
+`head64_fused_is_canonical_v32_decode`; generic decode, prefill, tails, and V1
+keep their existing paths.
+
+Retain A6 only when the same A5 gates hold: the production `-O3`, `dav-3510`
+build reports zero Stack and acceptable register use; five full canonical V3.2
+decode accuracy processes pass at `atol=rtol=0.05`; and two clean-process
+CannBench `BasicInfo` runs improve the fused kernel by at least 5% and the
+complete workflow by at least 3%. Preserve build, resource, accuracy, profile,
+and rejected-candidate artifacts even when the source is reverted.
+
+A6 passed every retention gate on Ascend 950PR with CANN 9.2.0. The production
+source SHA-256 was
+`e7876297e29fd6c0ff3131077255132af6795901a71226d8a74763e56eafc3f5`.
+The `--cce-res-usage` diagnostic build reported 13 registers per thread and
+zero Stack bytes for `head64_fused_value_pack_fast_vf`, matching the retained
+scalar path's 13 registers and zero Stack. Five independent full V3.2 decode
+accuracy processes passed with zero output and LSE mismatches at
+`atol=rtol=0.05`. Every process reported maximum absolute errors of
+0.009765625 for output and 0.009282112 for LSE, including negative,
+out-of-range, and causal-future indices.
+
+Two clean-process CannBench `BasicInfo` runs at a stable 1650 MHz reported:
+
+| Boundary | Retained run 1 | Retained run 2 | A6 run 1 | A6 run 2 |
+| --- | ---: | ---: | ---: | ---: |
+| Indexer | 165.484 us | 165.071 us | 165.386 us | 165.204 us |
+| Sparse Attention fused | 258.277 us | 258.722 us | 177.510 us | 178.439 us |
+| Combine | 11.996 us | 11.797 us | 11.989 us | 12.232 us |
+| DSA workflow | 435.757 us | 435.590 us | 354.955 us | 356.116 us |
+
+The fused kernel improved by 31.27% and 31.03%; the complete workflow improved
+by 18.54% and 18.25%. Indexer stayed within 0.3 us of the retained runs, and
+Combine stayed within 0.5 us, isolating the gain to Sparse Attention. Both
+profiles dumped the same fused `.aicore_binary` SHA-256,
+`a62f73f25521d9b4788874c171e838fe70335395cc5dd97bf7b55faaa7ea05d6`,
+which differs from the retained scalar binary and proves candidate provenance.
+The Cast helper measured 3.466 and 3.724 us but remains outside the published
+Sparse Attention boundary under the existing contract.
+
+The implementation and all evidence are retained. Raw source, production and
+resource builds, five accuracy outputs, and both complete profiles are under:
+
+```text
+/tmp/cannbench-dsa-v2-value-pack-a6-controller-i6q7rF/
+/root/cannbench-dsa-v2-value-pack-a6-i6q7rF/
+/root/cannbench-dsa-v2-value-pack-a6-i6q7rF-results.tar.gz
+```
+
+The local and remote result-archive SHA-256 is
+`d77e242782a7d50d2964c295dd7c525352e55a6ae044c4ea34927e2e0bb6b18c`.
+
 ### W0: Workflow-Level Cleanup
 
 Keep dependency materialization and helper launches visible in raw profiles.
