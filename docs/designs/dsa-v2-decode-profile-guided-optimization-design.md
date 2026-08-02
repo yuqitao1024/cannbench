@@ -864,6 +864,55 @@ The archive SHA-256 is
 the deployed source SHA-256 is
 `3cc8d6f56265f636cc40f27192145e28e9cb30f99c95425449e36de4d4517f26`.
 
+### A5: Canonical Value-Pack Load Grouping
+
+After T1, the canonical workflow is 435.757 and 435.590 us in two clean
+processes. Sparse Attention plus Combine remains 270.273-270.519 us, including
+258.277-258.722 us in the fused kernel and 11.797-11.996 us in Combine. The
+retained fused source still has SHA-256
+`c3f53b6ef675f1ec24b9b65be3039023f9c7c21622cdee1acadd91dce00ec8ab`,
+which is the exact source used by the existing InstrTimeline attribution. That
+trace assigns about 111.647 us per recorded AIV lane to the 32 canonical Value
+Pack regions, making their gather-and-pack instruction path the next measured
+optimization target.
+
+Keep P4, 1024 threads, 32 active warps, QK tile 128, Value tile 128, both L1
+gather slots, and the existing producer/consumer protocol unchanged. Modify
+only `head64_fused_value_pack_fast_vf`, which is already guarded by the exact
+V3.2 BF16 decode predicate. Generic decode, prefill, tails, invalid indices,
+and noncanonical shapes continue to use the existing fallback VF.
+
+The first candidate assigns four adjacent BF16 dimensions to each lane. The
+canonical row stride is 576 BF16 values, or 1152 bytes; every Value tile starts
+at a multiple of 128 BF16 values, or 256 bytes; and lane groups start every
+four BF16 values, or eight bytes. The GM address is therefore 64-bit aligned.
+Each lane performs one 64-bit load, extracts the four BF16 bit patterns, and
+writes them to the four existing NZ destinations. This preserves exact BF16
+bits and the complete one-writer-per-element mapping while reducing four GM
+load instructions and repeated address calculations to one grouped load.
+
+If the 64-bit candidate does not compile, allocates Stack, or fails accuracy,
+evaluate two aligned 32-bit loads per lane. If it is correct but misses the
+performance gate, do not stack unrelated scheduling changes on it. A manually
+expanded four-scalar-load form is only a diagnostic control because previous
+resource experiments show that source unrolling can increase register or
+Stack use.
+
+Retain a candidate only when:
+
+- the production `-O3`, `dav-3510` build has zero Stack bytes in the final
+  Value Pack VF and no material register-pressure regression;
+- full canonical V3.2 decode output and LSE accuracy passes five repeated
+  launches, including invalid and causal-future indices;
+- two clean-process CannBench `BasicInfo` runs improve the fused kernel by at
+  least 5% and the complete workflow by at least 3%; and
+- the gain remains isolated to Sparse Attention while Indexer latency stays
+  within normal run-to-run variation.
+
+Use the current 435.757/435.590 us workflow pair as the pre-A5 reference. Keep
+all raw build, resource, accuracy, and profiler artifacts, including negative
+candidates.
+
 ### W0: Workflow-Level Cleanup
 
 Keep dependency materialization and helper launches visible in raw profiles.
