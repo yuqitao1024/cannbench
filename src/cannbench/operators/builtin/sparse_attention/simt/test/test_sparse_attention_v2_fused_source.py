@@ -11,6 +11,16 @@ def _v2_fused_source() -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _v2_head64_source() -> str:
+    path = (
+        Path(__file__).parents[1]
+        / "v2/aten_dsa_sparse_attention_v2/csrc/simt"
+        / "sparse_attention_head64_hd576.asc"
+    )
+    assert path.is_file(), f"missing V2 Head64 device source: {path}"
+    return path.read_text(encoding="utf-8")
+
+
 def _function_definition(source: str, start_marker: str) -> str:
     start = source.index(start_marker)
     while True:
@@ -101,3 +111,34 @@ def test_v2_fused_first_key_pack_prepares_offsets_for_all_value_tiles():
 
     assert "k_tile_index == 0" in aiv[:prepare]
     assert prepare < later_key < first_value < next_value
+
+
+def test_v2_canonical_p4_combine_reuses_partition_weights_across_dimensions():
+    source = _v2_head64_source()
+    predicate = _function_definition(
+        source, "head64_combine_is_canonical_v32_decode("
+    )
+    fast_vf = _function_definition(source, "head64_combine_p4_vf(")
+    kernel = _function_definition(source, "sparse_attention_head64_combine_kernel(")
+    normalized_predicate = " ".join(predicate.split())
+
+    for contract in (
+        "plan.batch_size == 2",
+        "plan.query_heads == 128",
+        "plan.query_tokens == 2",
+        "plan.selected_tokens == 2048",
+        "plan.value_head_dim == 512",
+        "plan.selected_partitions == 4",
+        "plan.output_mode == "
+        "aten_dsa_sparse_attention_v2::kHead64OutputPartialFloat",
+    ):
+        assert contract in normalized_predicate
+
+    dimension_loop = fast_vf.index(
+        "for (int32_t dim", fast_vf.index("partition_weight3")
+    )
+    for weight in range(4):
+        assert fast_vf.index(f"partition_weight{weight}") < dimension_loop
+    assert "__expf" not in fast_vf[dimension_loop:]
+    assert "asc_vf_call<head64_combine_p4_vf>" in kernel
+    assert "asc_vf_call<head64_combine_vf>" in kernel

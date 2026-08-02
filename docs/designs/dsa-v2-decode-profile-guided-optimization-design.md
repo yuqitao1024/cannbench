@@ -263,6 +263,34 @@ Proceed only if Default or InstrTimeline shows at least 15% exposed non-overlap
 after S0/S1. The protocol must stay kernel-local and must not introduce
 inter-core coordination between logical tasks.
 
+The two-slot BF16 prototype was evaluated and rejected. A fresh retained
+baseline measured score at 147.069 us, radix Top-K at 132.370 us, Indexer at
+279.439 us, Sparse Attention plus Combine at 294.868 us, and the complete
+workflow at 574.307 us.
+
+The first prototype failed compilation because the Fixpipe destination and
+source template arguments were reversed. After correcting the signature to
+`Fixpipe<bfloat16_t, float>`, device accuracy failed on the canonical unordered
+Top-K score multiset and a repeated-call diagnostic timed out in stream
+synchronization. CANN 9.2 headers then exposed two additional requirements:
+FP32-to-BF16 Fixpipe needs `quantPre=F322BF16`, and every block-sync release
+must have a matching producer wait in the same launch.
+
+A final controlled variant set the required conversion mode and suppressed the
+two terminal slot releases that had no future reuse. It built successfully for
+`dav-3510`, but a fresh-process canonical call with no reference computation
+still failed to synchronize within a 120-second hard limit. The deployed source
+SHA-256 was
+`7cbd0684b07c5e3dfb5d5563344a541f3c0005bd6caf6cc4aaf5dc9cbc40b8f3`;
+the release archive SHA-256 was
+`0196489b11c5108c60b281065adfd23d53a617b2646b89652e170132923d76b2`.
+No performance result is claimed.
+
+Reject this flag-0/flag-1 mixed AIC/AIV ping-pong design. Do not retry it
+without a documented `dav-3510` synchronization primitive whose two-slot
+producer/consumer semantics are proven by a standalone mixed-kernel repro.
+The retained implementation remains the correct single-slot protocol.
+
 ### P0: Propagate Head-Parallel Reduction To Prefill
 
 Both V2 BF16 prefill score paths have the same `H=64`, 32-context tile, and
@@ -368,6 +396,25 @@ Measure automatic P1, P2, and P4 variants with identical semantics and include
 Combine in the boundary. Fewer partitions reduce partial-output and Combine
 work but reduce parallel task count and increase selected-token work per task.
 Retain P4 unless a repeated full-component median proves otherwise.
+
+The P1/P2/P4 device-accuracy matrix used a CPU oracle after the original NPU
+reference chain repeatedly hit error `507034`. All three variants passed the
+canonical valid-index case with zero mismatches across 262,144 output elements
+and 512 LSE elements at `atol=rtol=0.05`.
+
+On the valid-index Sparse Attention input, P1 measured 1,215.315 us
+(380.076 us QK and 835.239 us PV), while P2 measured 631.005 us
+(193.681 us QK, 416.917 us PV, and 20.407 us Combine). The matching P4
+baseline was subsequently re-collected at 499.167 to 501.284 us, including a
+462.988 to 465.188 us fused kernel and a 36.096 to 36.179 us Combine. P1 and
+P2 are therefore slower than P4, so automatic P4 remains selected.
+
+Do not compare the valid-index matrix directly with the historical 294.868 us
+workflow-bound Sparse Attention result. The workflow binds Indexer-produced
+indices, whereas a direct Sparse Attention case materializes its own indices;
+the fused workload and absolute latency are not equivalent. Also discard the
+first P4 recollection that omitted `CANNBENCH_SKIP_SIMT_INSTALL=1`, because it
+rebuilt and overwrote the package libraries during measurement.
 
 ### A3: Sparse Attention VF And Flag Coarsening
 
@@ -690,6 +737,48 @@ Profile whether partition outputs can be reduced with less GM traffic or
 whether a direct-output mode is profitable at a lower partition count. Preserve
 the output/LSE contract and include any replacement helper kernel in the timing
 boundary. The current 36 us Combine stage caps the standalone gain.
+
+The first A4 prototype specializes the canonical P4 Combine path. Each lane
+loads the four partial LSE values and computes the four normalized weights once,
+then reuses those weights across all 512 output dimensions. Noncanonical paths
+keep the existing runtime-partition fallback. The final source needed the
+namespace-qualified constant
+`aten_dsa_sparse_attention_v2::kHead64OutputPartialFloat`; six focused source
+tests pass.
+
+The fixed production package archive SHA-256 is
+`29596d93a54a799906eaa6c4ed41fe097a48c360cd8f8128f80c3c9e4ffe7700`.
+The baseline and candidate fused libraries both have SHA-256
+`7959687fc406d7a584a94bedded98551dd0557483e583bdb984389685c22f010`;
+only the Combine library differs (`607642ca...` baseline and `a20089f...`
+candidate). A fresh canonical P4 CPU-oracle accuracy run passed with zero
+mismatches for all 262,144 output and 512 LSE elements at `atol=rtol=0.05`.
+
+Two alternating clean-process CannBench BasicInfo pairs on the same valid-index
+input reported:
+
+| Boundary | Baseline 1 (us) | A4 run 1 (us) | Baseline 2 (us) | A4 run 2 (us) | Median change |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Sparse Attention fused | 465.188 | 466.133 | 462.988 | 464.847 | +0.3% |
+| Combine | 36.096 | 12.012 | 36.179 | 12.289 | -66.4% |
+| Fused + Combine | 501.284 | 478.145 | 499.167 | 477.136 | -4.5% |
+
+A4 therefore has a stable component-level gain above 3%, isolated to Combine.
+The full workflow retention gate is still pending. The unchanged Lightning
+Indexer path hit `507014` during profiler warmup, and the exact prepared input
+also failed to complete a profiler-free `cannbench internal-run` within 180
+seconds. Sparse Attention and A4 continued to pass immediately afterward, so
+that timeout is outside the changed A4 boundary and must not be recorded as an
+A4 regression. Do not publish or claim an end-to-end gain until the unchanged
+Indexer path is healthy and two complete workflow pairs reproduce the result.
+
+Artifacts are preserved under:
+
+```text
+/tmp/cannbench-dsa-v2-a4-sparse-retest-runs/       # controller
+/tmp/cannbench-dsa-v2-a4-p4weights-fix-results/   # Ascend host accuracy
+/tmp/cannbench-dsa-v2-a4-p4weights-fix-tbRFz2/    # Ascend host package
+```
 
 ### T0: Distributed Context-Shard Histogram Microbenchmark
 
