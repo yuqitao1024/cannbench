@@ -6,11 +6,12 @@ Approved for staged implementation on 2026-08-01. The launch-geometry-only
 experiment was rejected after device measurement. The 1024-thread,
 head-parallel Lightning Indexer decode and V3.2 full-score prefill reductions,
 the Sparse Attention QK=128 tile, restoration of all 32 fused-kernel warps, and
-canonical decode `int32` KV row-offset reuse are retained after correctness and
-repeated performance validation. Pairwise PV coarsening and 2048-thread
-Key/Value Pack widening were rejected after device measurement. The current
-published V2 decode workflow checkpoint is 572.848 us at commit `6c821c2`.
-Later stages remain gated by device results.
+canonical decode `int32` KV row-offset reuse, P4 Combine weight reuse, and the
+two-slot BF16 score producer/consumer pipeline are retained after correctness
+and performance validation. Pairwise PV coarsening and 2048-thread Key/Value
+Pack widening were rejected after device measurement. The current published V2
+decode workflow checkpoint is 484.431 us at commit `bd30b18`. Later stages
+remain gated by device results.
 
 ## Scope And Baseline
 
@@ -782,14 +783,19 @@ input reported:
 | Combine | 36.096 | 12.012 | 36.179 | 12.289 | -66.4% |
 | Fused + Combine | 501.284 | 478.145 | 499.167 | 477.136 | -4.5% |
 
-A4 therefore has a stable component-level gain above 3%, isolated to Combine.
-The full workflow retention gate is still pending. The unchanged Lightning
-Indexer path hit `507014` during profiler warmup, and the exact prepared input
-also failed to complete a profiler-free `cannbench internal-run` within 180
-seconds. Sparse Attention and A4 continued to pass immediately afterward, so
-that timeout is outside the changed A4 boundary and must not be recorded as an
-A4 regression. Do not publish or claim an end-to-end gain until the unchanged
-Indexer path is healthy and two complete workflow pairs reproduce the result.
+A4 therefore had a stable component-level gain above 3%, isolated to Combine.
+The first complete workflow collection was blocked when the unchanged Lightning
+Indexer path hit `507014` during profiler warmup and also failed to complete a
+profiler-free `cannbench internal-run` within 180 seconds. Sparse Attention and
+A4 continued to pass immediately afterward, so the failure was not attributed
+to the changed A4 boundary.
+
+After the Ascend node restarted, the unchanged Indexer completed at 281.089 us
+and Sparse Attention plus the specialized Combine completed at 270.388 us,
+including 258.475 us fused and 11.913 us Combine. The resulting V3.2 decode
+workflow was 551.477 us, 3.7% below the pre-A4 published 572.848 us checkpoint.
+The result passed the workflow retention gate, was retained in `d78b2a6`, and
+was published in `8602a74`.
 
 Artifacts are preserved under:
 
