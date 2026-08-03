@@ -8,11 +8,20 @@ head-parallel Lightning Indexer decode and V3.2 full-score prefill reductions,
 the Sparse Attention QK=128 tile, restoration of all 32 fused-kernel warps, and
 canonical decode `int32` KV row-offset reuse, P4 Combine weight reuse, and the
 two-slot BF16 score producer/consumer pipeline, and single-scan deterministic
-Top-K compaction are retained after correctness and performance validation.
-Pairwise PV coarsening and 2048-thread Key/Value Pack widening were rejected
-after device measurement. The current published V2 decode workflow checkpoint
-is 435.757 us from source commit `a57d15c`. Later stages remain gated by device
-results.
+Top-K compaction, transposed Value packing, and canonical Value256 tiling are
+retained after correctness and performance validation. Pairwise PV coarsening,
+2048-thread Key/Value Pack widening, adjacent-value grouped loads, and Value
+Pack synchronization contraction were rejected after device measurement. The
+current published V2 decode workflow checkpoint is 345.086 us from source
+commit `77f2399`, published by `3814e00`. The matching published vLLM-Ascend
+workflow is 169.797 us, so SIMT currently has 2.032x its latency and 0.492x its
+performance.
+
+The 2x point is an intermediate checkpoint, not the completion target. The
+target is at least 0.90x vLLM-Ascend performance under the same selected-kernel
+boundary. At the current 169.797 us reference this requires SIMT latency at or
+below 188.663 us, another 156.423 us or 45.3% below the current checkpoint.
+Later stages remain gated by correctness and repeated device results.
 
 ## Scope And Baseline
 
@@ -1385,14 +1394,46 @@ The QK256 negative-result archive is under
 `/tmp/cannbench-dsa-v2-a8-qk256-controller-pKmiNQ/` with SHA-256
 `320b8f025bac5796c0d65f9e838baf118bab45c188ba4a599fa77b4c98939d7f`.
 
+The next implementation priority is a corrected QK256 schedule. The first
+QK256 candidate never reached performance measurement; its failure came from
+the now-understood Query lifetime violation, not from QK256 arithmetic,
+resource use, or measured performance. Reimplement it on the retained
+phase-local layout while preserving Query across all eight selected-token
+tiles. It remains the highest-upside unmeasured local change because the
+post-A6 QK-to-Softmax segment was 69.685 us, QK rounds fall from five to three,
+and the compiled Key Pack VFs used only 13-14 registers with zero Stack.
+
+QK256 is an incremental checkpoint toward the 0.90x target, not a reason to
+stop after crossing 2x. If corrected QK256 does not provide stable workflow
+gain, proceed to the isolated Context-shard distributed histogram chain with
+the post-T1 75-78 us gate. Exhausting these local tiling candidates without
+approaching the target requires reopening fusion and ownership boundaries,
+rather than declaring the optimization series complete.
+
 ### W0: Workflow-Level Cleanup
 
 Keep dependency materialization and helper launches visible in raw profiles.
-The Cast helper is currently outside the selected Sparse Attention boundary;
-do not claim its removal as a component gain unless the published timing
-contract is intentionally updated. Consider score-to-histogram fusion only
-after S0-S2 and T0 establish that avoiding the BF16 score workspace is worth
-the added ownership and synchronization complexity.
+The 3.7-4.2 us `Cast_*` helper visible immediately before the selected Sparse
+Attention kernel is benchmark input preparation, not an Indexer-to-Attention
+conversion or an Attention output conversion. The canonical Indexer already
+returns `int32` indices. The canonical Head64 path receives BF16 Query/shared
+KV, allocates BF16 raw output, and returns it directly because its dtype already
+matches Query.
+
+The helper appears because the canonical shared-KV tensor has 37,748,736
+elements, below the current 67,108,864-element direct-device threshold. The
+deterministic materializer therefore supplies an `array('f')` FP32 host buffer
+to `torch.tensor(..., device=npu, dtype=bfloat16)`, and the NPU runtime performs
+the FP32-to-BF16 conversion. `msopprof` observes process-wide setup launches,
+even though the operator callable is prepared outside the selected-kernel
+timing boundary. Real decode normally consumes already-resident BF16 Query and
+KV tensors, so this Cast is not expected once per decode token. Keep it visible
+in raw evidence, but do not add it to or claim its removal from the published
+workflow boundary without an intentional contract change.
+
+Consider score-to-histogram fusion only after S0-S2 and T0 establish that
+avoiding the BF16 score workspace is worth the added ownership and
+synchronization complexity.
 
 ### C0: API Boundary Convergence
 
@@ -1421,12 +1462,13 @@ and every negative variant that reaches the device.
 
 ## Completion Criteria
 
-This optimization series is complete when either:
-
-- the workflow is within 2x of the BF16 vLLM-Ascend component sum under the
-  same boundary; or
-- every remaining backlog item misses its acceptance gate and the preserved
-  profiles identify no untested bottleneck with at least 5% workflow upside.
+This optimization series is complete when the workflow reaches at least 0.90x
+of BF16 vLLM-Ascend performance under the same boundary. Equivalently, SIMT
+latency must be no greater than `vLLM latency / 0.90`; with the current
+169.797 us reference, the limit is 188.663 us. Reaching 2x, or exhausting the
+current local backlog, does not satisfy completion. If the backlog is
+exhausted first, use the preserved profiles to define the next architectural
+or fusion stage.
 
 No individual item is complete until real-device correctness, repeated
 performance, a same-stack baseline rerun, and raw artifacts are available.
