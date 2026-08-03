@@ -298,9 +298,25 @@ def test_ascend_softmax_v3_fast_path_uses_large_row_recompute_for_logits_scale_d
     assert "row_softmax_fast_large_row_recompute_impl" in source
     assert "row_softmax_fast_large_row_recompute_kernel" in source
     assert "launch_row_fast_large_recompute_forward_kernel" in source
+    assert "row_softmax_fast_large_row_inplace_pipeline_impl" in source
+    assert "row_softmax_fast_large_row_inplace_pipeline_kernel" in source
+    assert "launch_row_fast_large_inplace_pipeline_forward_kernel" in source
     assert "row_softmax_fast_large_row_forward_vf" in source
     assert "asc_copy_gm2ub_align_sync" in source
     assert "asc_copy_ub2gm_align_sync" in source
+    pipeline_start = source.index("row_softmax_fast_large_row_inplace_pipeline_impl")
+    pipeline_end = source.index(
+        "row_softmax_fast_large_row_inplace_pipeline_kernel", pipeline_start
+    )
+    pipeline_source = source[pipeline_start:pipeline_end]
+    assert "row_tile_ub[2][kTileElements]" in pipeline_source
+    assert "asc_copy_gm2ub_align(" in pipeline_source
+    assert "asc_copy_ub2gm_align(" in pipeline_source
+    assert "asc_copy_gm2ub_align_sync" not in pipeline_source
+    assert "asc_copy_ub2gm_align_sync" not in pipeline_source
+    assert "row_tile_ub[slot],\n        row_tile_ub[slot]," in pipeline_source
+    assert "asc_sync_notify(PIPE_MTE2, PIPE_V, next_event_id)" in pipeline_source
+    assert "asc_sync_notify(PIPE_V, PIPE_MTE3, event_id)" in pipeline_source
     assert "const accscalar_t row_max = fast_block_reduce_warp<accscalar_t, Max>" in source
     assert "const accscalar_t inv_sum = fast_block_reduce_warp_inverse<accscalar_t, Add>" in source
     assert "dim3(kThreadsPerBlock)," in source
