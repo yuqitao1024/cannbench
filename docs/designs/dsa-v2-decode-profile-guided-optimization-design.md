@@ -16,17 +16,16 @@ histogram Top-K chain is retained on top of QK256 after reducing the complete
 Top-K boundary from about 82 us to 56.8-57.3 us. Pairwise PV coarsening,
 2048-thread Key/Value Pack widening, adjacent-value grouped loads, and Value
 Pack synchronization contraction were rejected after device measurement. The
-current published V2 decode workflow checkpoint is 308.854 us from the retained
-distributed-histogram path. Its two selected-workflow measurements are 309.288
-and 308.854 us. Against the matching published vLLM-Ascend workflow at
-169.797 us, SIMT has 1.819-1.822x its latency and 0.549-0.550x its performance.
+current published V2 decode workflow checkpoint is 279.771 us after the
+retained selected128 schedule. Its two selected-workflow measurements are
+279.791 and 279.771 us. Against the matching published vLLM-Ascend workflow at
+169.797 us, SIMT has 1.648x its latency and 0.607x its performance.
 
 The 2x point is an intermediate checkpoint, not the completion target. The
 target is at least 0.90x vLLM-Ascend performance under the same selected-kernel
 boundary. At the current 169.797 us reference this requires SIMT latency at or
-below 188.663 us, another 120.191 us or 38.9% below the best measured
-distributed-histogram run. Later stages remain gated by correctness and
-repeated device results.
+below 188.663 us, another 91.108 us or 32.6% below the retained selected128
+run. Later stages remain gated by correctness and repeated device results.
 
 ## Scope And Baseline
 
@@ -1698,6 +1697,119 @@ Candidate evidence is preserved under:
 
 The local and remote candidate evidence archive SHA-256 is
 `84fda6ac152275146546458390c4206e555e5f0a8e5c0b6c47ee3def90e2bf82`.
+
+### A10: Canonical Selected256 With 128-Row Streaming
+
+After A9, Sparse Attention plus Combine is 139.364 us, or 49.8% of the
+279.771 us workflow. The corresponding retained vLLM-Ascend Default boundary
+is about 74.161 us, leaving more absolute attention-side gap than the 42.733 us
+Indexer gap. A10 therefore remains inside Sparse Attention. It is an isolated
+canonical experiment, not a generic tile change.
+
+The first action is a fresh CannBench `Default` and `InstrTimeline` collection
+from the retained A9 package. A9 changed selected-tile count, memory ownership,
+and register use, so the pre-A9 trace cannot prove the current critical path.
+Both metric groups must be collected through `bench --aic-metrics` in separate
+clean processes. BasicInfo remains the retention metric; detailed-profile
+latency is attribution evidence only. Source implementation may be prepared
+while the node is unavailable, but no performance conclusion is allowed until
+the A9 trace and candidate BasicInfo runs exist.
+
+Three schedules were considered:
+
+1. Retain the 128-row tile. This avoids risk but leaves four Softmax updates
+   and four outer-tile setup/synchronization rounds per P4 partition.
+2. Make all 256 rows resident at once. This is rejected by capacity before
+   implementation: one QK Key operand needs 131,072 bytes in L0B, and Query +
+   one Key + Score needs 270,336 bytes in L1.
+3. Use a 256-row outer tile with two 128-row compute subtiles. This is selected.
+   It retains the current Key/Value movement and MMAD work while reducing four
+   outer Softmax/update rounds to two.
+
+P8 is not part of A10. P4 already launches 32 logical tasks on the 32-core
+canonical schedule. P8 creates a second task wave, duplicates Query and partial
+output state, and expands Combine without adding physical concurrency.
+Score/high-histogram fusion also remains lower priority because its current
+launch-level ceiling is only about 5-6 us.
+
+For canonical decode, define:
+
+```text
+outer selected tile       = 256
+compute selected subtile  = 128
+AIV rows per subblock      = 64
+QK gather slots            = 1
+PV gather slots            = 1
+QK tile                    = 256
+Value tile                 = 256
+```
+
+Generic decode and prefill keep selected64, two QK slots, two PV slots,
+QK128, and Value128. The host plan remains selected64/P4; only the exact
+canonical predicate selects the A10 schedule.
+
+Each AIV subblock owns 128 rows of the 256-row outer tile. It processes those
+rows as two 64-row subtile halves and retains 128 `int32` KV row offsets for
+later PV reuse. During QK, both AIV subblocks fill one 128-row L1 Key subtile.
+AIC performs the three existing K rounds with `n <= 128`, writes the resulting
+64-by-128 score slice into its position in the full 64-by-256 L1 Score tensor,
+and repeats for the second selected subtile. Only after both score slices are
+complete does AIC copy the full outer tile to UB and request one Softmax call.
+
+During PV, Probability remains one full 64-by-256 L1 tensor. For each 256-wide
+Value tile, AIC loads a 64-by-128 Probability slice and its matching 128-by-256
+Value subtile, then accumulates two MMADs into the same L0C result. The first
+selected subtile initializes L0C and the second accumulates. AIC publishes one
+PV result, and AIV performs one output update, only after both selected
+subtiles complete. The next single-slot gather may be requested after the
+current L1 operand has been copied to L0B. A10 adds no flag IDs or new
+inter-core protocol.
+
+The source-visible capacity worksheet is:
+
+```text
+QK L1 = Query 73,728 + Key subtile 65,536 + full Score 65,536
+       = 204,800 bytes
+PV L1 = Query 73,728 + full Probability 32,768
+       + Value subtile 65,536 + PV 65,536
+       = 237,568 bytes
+L1 maximum = 237,568 bytes
+
+QK UB = persistent 66,432 + Query 36,864 + Key half 32,768
+        + full Score half 32,768
+      = 168,832 bytes
+PV UB = persistent 66,432 + full Probability half 16,384
+        + Value half 32,768 + transpose staging 32,768 + PV 32,768
+      = 181,120 bytes
+UB maximum = 181,120 bytes
+
+L0B maximum = 65,536 bytes
+L0C maximum = 65,536 bytes
+```
+
+These are source estimates, not compiler proof. Production and
+`--cce-res-usage` builds on CANN 9.2.0 `dav-3510` must confirm fit and zero
+Stack in every changed VF. The main performance risk is loss of the current
+two-slot QK overlap: selected-subtile streaming removes outer setup but makes
+the canonical QK slot reusable only after L1-to-L0B copy. That tradeoff is why
+A10 remains a reversible experiment rather than a presumed improvement.
+
+Source-contract tests must first fail on the retained A9 source and then lock:
+
+- canonical outer256/subtile128 versus generic selected64;
+- 64 rows per AIV subblock per compute subtile and 128 cached row offsets;
+- one canonical QK/PV slot with generic two-slot fallback;
+- score-slice placement and one Softmax per outer tile;
+- two PV MMAD subtiles with initialize-then-accumulate semantics;
+- the L1, UB, L0B, and L0C ownership maxima above.
+
+Device correctness requires five independent canonical processes with seeds 7
+through 11 at `atol=rtol=0.05`, zero output/LSE mismatches, invalid and causal
+index coverage, and an explicit generic P2 selected64 run. Retention requires
+two clean-process CannBench `BasicInfo` workflows that each measure no more
+than 276.973 us, a 1% improvement over the 279.771 us retained baseline. If
+either run misses the gate, or if a component regression erases the intended
+gain, restore A9 source and tests and record the negative result here.
 
 ### W0: Workflow-Level Cleanup
 
