@@ -359,6 +359,20 @@ def test_ascend_softmax_v3_fp16_50k_rows_pipeline_ub_stats_before_write():
     assert "row_inv_sum[row] = inv_sum;" in source
 
 
+def test_ascend_softmax_v3_fp16_huge_rows_use_generic_tiled_online_stats():
+    source = _read_v3_simt_source("row_fast.asc")
+
+    assert "use_large_row_ub_tiled_stats_row_softmax_fast" in source
+    assert "return kFp16Path && dim_size > 51200;" in source
+    assert "row_softmax_fast_large_ub_tiled_stats_vf" in source
+    assert "row_softmax_fast_large_ub_tiled_stats_pipeline_kernel<51200>" in source
+    assert "__ubuf__ float running_stats_ub[2];" in source
+    assert "previous_sum * __expf(previous_max - combined_max)" in source
+    assert "tile_sum * __expf(tile_max - combined_max)" in source
+    assert "next_tile_elements * sizeof(__fp16)" in source
+    assert "row_inv_sum[row] = 1.0f / combined_sum;" in source
+
+
 def test_ascend_softmax_v3_uses_mixed_simd_simt_vf_launch_model():
     source = _read_v3_simt_sources(
         "row_persistent_fallback.asc",
