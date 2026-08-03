@@ -149,17 +149,28 @@ def test_ascend_softmax_v3_persistent_kernel_uses_shape_aware_launch_bounds():
     assert "row_softmax_persistent_forward_kernel" in kernel_template
 
 
-def test_ascend_softmax_v3_isolates_512_and_1024_persistent_kernels():
+def test_ascend_softmax_v3_isolates_256_512_and_1024_persistent_kernels():
     source = _read_v3_simt_source("row_persistent_fallback.asc")
+    persistent_256 = _read_v3_simt_source("persistent_256.asc")
     persistent_512 = _read_v3_simt_source("persistent_512.asc")
     persistent_1024 = _read_v3_simt_source("persistent_1024.asc")
 
+    assert "void dispatch_row_persistent_forward_kernel_256_fp16(" in source
+    assert "void dispatch_row_persistent_forward_kernel_256_fp32(" in source
     assert "void dispatch_row_persistent_forward_kernel_512_fp16(" in source
     assert "void dispatch_row_persistent_forward_kernel_512_fp32(" in source
     assert "void dispatch_row_persistent_forward_kernel_1024_fp16(" in source
     assert "void dispatch_row_persistent_forward_kernel_1024_fp32(" in source
     assert 'TORCH_CHECK(false, "unsupported 512-thread persistent dtype combination");' in source
     assert 'TORCH_CHECK(false, "unsupported 1024-thread persistent dtype combination");' in source
+    assert 'TORCH_CHECK(false, "unsupported 129-256 persistent dtype combination");' in source
+    assert '#include "c_api/asc_simd.h"' in persistent_256
+    assert "__launch_bounds__(1024)" in persistent_256
+    assert "kMaxElements = 256" in persistent_256
+    assert "row_offset = row_in_tile * dim_size" in persistent_256
+    assert "row_softmax_persistent_256_pipeline_kernel" in persistent_256
+    assert "asc_copy_gm2ub_align" in persistent_256
+    assert "asc_copy_ub2gm_align" in persistent_256
     assert '#include "c_api/asc_simd.h"' in persistent_512
     assert "__launch_bounds__(512)" in persistent_512
     assert "dispatch_row_persistent_forward_kernel_with_512_threads" in persistent_512
@@ -178,7 +189,34 @@ def test_ascend_softmax_v3_isolates_512_and_1024_persistent_kernels():
     assert "asc_sync_notify(PIPE_V, PIPE_MTE2, EVENT_ID1);" in persistent_1024
 
 
-def test_ascend_softmax_v3_non_1024_persistent_fallback_uses_generic_1024_thread_kernel():
+def test_ascend_softmax_v3_256_and_1024_persistent_paths_prefetch_next_tile():
+    persistent_256 = _read_v3_simt_source("persistent_256.asc")
+    persistent_1024 = _read_v3_simt_source("persistent_1024.asc")
+
+    for source, vf_name in (
+        (persistent_256, "asc_vf_call<row_softmax_persistent_256_vf<"),
+        (persistent_1024, "asc_vf_call<row_softmax_persistent_hybrid_vf<"),
+    ):
+        next_tile = source.index("if (tile_idx + 1 < tile_count)")
+        prefetch = source.index("asc_copy_gm2ub_align(", next_tile)
+        current_vf = source.index(vf_name, next_tile)
+        assert prefetch < current_vf
+        assert "input_tile_ub[2]" in source
+        assert "output_tile_ub[2]" in source
+        assert "asc_sync_wait(PIPE_V, PIPE_MTE2, next_event_id)" in source
+        assert "asc_sync_notify(PIPE_MTE2, PIPE_V, next_event_id)" in source
+        assert "asc_sync_wait(PIPE_MTE3, PIPE_V, event_id)" in source
+
+
+def test_ascend_softmax_v3_dispatches_129_through_256_to_ub_pipeline():
+    source = _read_v3_simt_source("row_persistent_fallback.asc")
+
+    assert "dim_size >= 129 && dim_size <= 256" in source
+    assert "dispatch_row_persistent_forward_kernel_256_fp16(" in source
+    assert "dispatch_row_persistent_forward_kernel_256_fp32(" in source
+
+
+def test_ascend_softmax_v3_remaining_persistent_fallback_uses_generic_1024_thread_kernel():
     source = _read_v3_simt_source("row_persistent_fallback.asc")
 
     assert "if (dim_size == 1024) {" in source
