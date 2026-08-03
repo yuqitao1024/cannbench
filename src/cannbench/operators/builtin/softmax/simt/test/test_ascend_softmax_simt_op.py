@@ -344,6 +344,21 @@ def test_ascend_softmax_v3_fast_path_uses_large_row_gmem_workspace_for_very_larg
     assert "row_inv_sum.mutable_data_ptr<float>()" in spatial_source
 
 
+def test_ascend_softmax_v3_fp16_50k_rows_pipeline_ub_stats_before_write():
+    source = _read_v3_simt_source("row_fast.asc")
+
+    assert "use_large_row_ub_stats_row_softmax_fast" in source
+    assert "dim_size > 32768 && dim_size <= 51200" in source
+    assert "row_softmax_fast_large_ub_stats_vf" in source
+    assert "row_softmax_fast_large_ub_stats_pipeline_kernel<51200>" in source
+    assert "kStatsPhysicalGridXLimit = 64" in source
+    assert "<<<stats_grid_x, 0, acl_stream>>>" in source
+    assert "__ubuf__ __fp16 row_tile_ub[2][kTileElements];" in source
+    assert "asc_copy_gm2ub_align(" in source
+    assert "row_max[row] = max_input;" in source
+    assert "row_inv_sum[row] = inv_sum;" in source
+
+
 def test_ascend_softmax_v3_uses_mixed_simd_simt_vf_launch_model():
     source = _read_v3_simt_sources(
         "row_persistent_fallback.asc",

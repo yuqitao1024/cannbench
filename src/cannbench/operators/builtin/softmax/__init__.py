@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from cannbench.core.profile import ProfileKernelSelection
 from cannbench.operators.materialize import materialized_values_to_buffer
 from .materialize import materialize_softmax_inputs
 from .cases import get_softmax_case, get_softmax_dataset
-from cannbench.operators.plugin import OperatorPlugin
+from cannbench.operators.plugin import OperatorPlugin, ProfileKernelSelectionContext
 from cannbench.operators.spec import OperatorSpec
 
 
@@ -42,6 +43,19 @@ def _build_simt_callable(ctx):
     )
 
 
+def _build_profile_kernel_selection(ctx: ProfileKernelSelectionContext):
+    if (
+        ctx.backend == "ascend"
+        and ctx.implementation == "simt"
+        and ctx.implementation_version == "v3"
+    ):
+        return ProfileKernelSelection(
+            kernel_name_patterns=("softmax", "aten_softmax_v3"),
+            aggregate_across_files=True,
+        )
+    return ProfileKernelSelection(kernel_name_patterns=("softmax",))
+
+
 PLUGIN = OperatorPlugin(
     spec=OperatorSpec(
         name="softmax",
@@ -56,4 +70,5 @@ PLUGIN = OperatorPlugin(
     sort_order=0,
     build_simt_callable=_build_simt_callable,
     simt_module_name=_simt_module_name,
+    build_profile_kernel_selection=_build_profile_kernel_selection,
 )
