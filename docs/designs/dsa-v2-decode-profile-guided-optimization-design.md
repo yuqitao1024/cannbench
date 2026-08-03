@@ -16,19 +16,19 @@ histogram Top-K chain is retained on top of QK256 after reducing the complete
 Top-K boundary from about 82 us to 56.8-57.3 us. Pairwise PV coarsening,
 2048-thread Key/Value Pack widening, adjacent-value grouped loads, and Value
 Pack synchronization contraction were rejected after device measurement. The
-current published V2 decode workflow checkpoint is 271.191 us after the
-retained selected256/stream128 schedule. Its two selected-workflow
-measurements are 270.696 and 271.191 us. Against the matching published
-vLLM-Ascend workflow at 169.797 us, SIMT has 1.597x its latency and 0.626x its
-performance.
+parallel low-byte reducer and shard-offset schedule is retained after cutting
+that kernel from 28.904 us to 14.423-14.444 us. The current published V2 decode
+workflow checkpoint remains A10 at 271.191 us; T2 has been validated at
+256.123 and 255.959 us but is not yet published. Against the matching published
+vLLM-Ascend workflow at 169.797 us, the latest retained SIMT candidate has
+1.508x its latency and 0.663x its performance.
 
 The 2x point is an intermediate checkpoint, not the completion target. The
 target is at least 0.90x vLLM-Ascend performance under the same selected-kernel
 boundary. At the current 169.797 us reference this requires SIMT latency at or
-below 188.663 us, another 82.528 us or 30.4% below the retained selected256
-run. The intermediate 0.70x point requires no more than 242.567 us, another
-28.624 us below the current published result. Later stages remain gated by
-correctness and repeated device results.
+below 188.663 us, another 67.296 us or 26.3% below T2 run 2. The intermediate
+0.70x point requires no more than 242.567 us, another 13.392 us below T2 run 2.
+Later stages remain gated by correctness and repeated device results.
 
 ## Scope And Baseline
 
@@ -1958,6 +1958,63 @@ Stack in the changed VF, correctness remains exact, and two clean CannBench
 `BasicInfo` workflows each measure no more than 268.479 us, a 1% reduction
 from the 271.191 us retained boundary. Otherwise restore the T0 reducer and
 record the negative result here.
+
+T2 passed its production build, resource, correctness, and repeated workflow
+gates on Ascend 950PR (`dav-3510`) with CANN 9.2.0, Bisheng 15.0.5, and a
+locked 1650 MHz frequency. The changed low-byte reducer used zero Stack bytes
+and 32 registers; the unmodified distributed Top-K VFs used zero Stack and
+16-26 registers. The production and `--cce-res-usage` builds both completed.
+
+Five repeats each of canonical, masked-tail, tied-threshold, near-threshold,
+and negative-score inputs preserved the exact unordered Top-K score multiset,
+unique valid indices, and a stable selected index set. The first accuracy
+attempt did not execute a kernel because CANN `set_env.sh` had not been sourced
+and `libhccl.so` could not load; the corrected clean process passed and is the
+only accuracy result in the evidence archive.
+
+Two clean CannBench `BasicInfo` workflow processes measured the selected
+dependency launches inside the Sparse Attention profile, matching the
+published workflow convention:
+
+| Boundary | T2 run 1 | T2 run 2 |
+| --- | ---: | ---: |
+| Score | 83.816002 us | 83.586998 us |
+| High-byte histogram | 5.667000 us | 5.695000 us |
+| High-byte reducer | 10.625000 us | 10.929000 us |
+| Low-byte histogram | 5.243000 us | 4.996000 us |
+| Low-byte reducer and offsets | 14.444000 us | 14.423000 us |
+| Compaction | 7.117000 us | 6.793000 us |
+| Dependency Indexer | 126.912002 us | 126.422998 us |
+| Sparse Attention fused | 117.246002 us | 117.370003 us |
+| Combine | 11.965000 us | 12.166000 us |
+| Selected workflow | 256.123004 us | 255.959001 us |
+| Excluded materialization Cast | 3.468000 us | 3.437000 us |
+
+Relative to A10 at 271.190999 us, the two workflow totals improve by 5.556%
+and 5.617%, both well beyond the 1% retention threshold. The low-byte reducer
+itself improves by about 50%, while the other selected components remain
+stable. Relative to the 169.796996 us vLLM-Ascend reference, the two runs are
+0.662951x and 0.663376x performance. T2 is retained, but it does not reach the
+0.70x checkpoint; run 2 remains 13.392 us above that boundary.
+
+Candidate provenance and evidence are:
+
+```text
+release archive SHA-256:
+  6a7e9394abb640a067a01c8c61655cd2efc604cef00d27616013778149e535d0
+distributed Top-K source SHA-256:
+  64ab06a2e39ee48da1e1df83872a37a4b44ea27ef4cb23a46f4c8fa5c0150d81
+production distributed Top-K ELF SHA-256:
+  fc2e3d3ed270e56d4f0aabc8cfb4efd50dfdf736a3597d66b6ea4f7948a9e033
+resource distributed Top-K ELF SHA-256:
+  a64abacef74d0b4702039718734c0bb536b0d031242a149a9b38efee2b8fa4b1
+evidence archive SHA-256:
+  616ff9efe055e1e2383e6188f7d924d505c225f8c25b02f9ec74fbb3729657d4
+
+/root/cannbench-dsa-v2-t2-parallel-low-64ab06a2/ # Ascend 950PR host
+/root/cannbench-dsa-v2-t2-parallel-low-64ab06a2-evidence.tar.gz
+/tmp/cannbench-dsa-v2-t2-controller-EV89Bo/ # local
+```
 
 ### W0: Workflow-Level Cleanup
 

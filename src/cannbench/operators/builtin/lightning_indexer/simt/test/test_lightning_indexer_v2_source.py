@@ -157,6 +157,43 @@ def test_decode_distributed_topk_owns_histograms_offsets_and_output_ranges():
         assert forbidden not in source
 
 
+def test_decode_distributed_low_reducer_parallelizes_shard_bucket_tails():
+    source = DISTRIBUTED_TOPK_SOURCE.read_text(encoding="utf-8")
+    reducer = _function_body(
+        source,
+        "lightning_indexer_decode_distributed_select_low_offsets_bfloat16_v2_vf(",
+    )
+    normalized_reducer = " ".join(reducer.split())
+
+    assert "context_shard_count != kCanonicalContextShardCount" in reducer
+
+    for contract in (
+        "constexpr int32_t kCanonicalBucketGroupsPerShard = 16;",
+        "constexpr int32_t kCanonicalBucketsPerGroup = 16;",
+        "kCanonicalContextShardCount * kCanonicalBucketGroupsPerShard == "
+        "kReducerThreads",
+        "kCanonicalBucketGroupsPerShard * kCanonicalBucketsPerGroup == "
+        "kRadixBins",
+    ):
+        assert contract in " ".join(source.split())
+
+    for contract in (
+        "partial_shard_index = thread_index / kCanonicalBucketGroupsPerShard",
+        "bucket_group = thread_index % kCanonicalBucketGroupsPerShard",
+        "group_bucket_begin = bucket_group * kCanonicalBucketsPerGroup",
+        "bucket < group_bucket_begin + kCanonicalBucketsPerGroup",
+        "combined_histogram[thread_index] = shard_greater_partial",
+        "if (bucket_group == 0)",
+        "partial_group < kCanonicalBucketGroupsPerShard",
+        "prior_shard < shard_index",
+        "if (shard_index + 1 == context_shard_count)",
+    ):
+        assert contract in normalized_reducer
+
+    assert "for (uint32_t bucket = selected_high + 1U;" not in reducer
+    assert "for (uint32_t bucket = selected_low + 1U;" not in reducer
+
+
 def test_decode_distributed_topk_builds_as_an_independent_device_library():
     setup_source = (V2_ROOT.parent / "setup.py").read_text(encoding="utf-8")
 
