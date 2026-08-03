@@ -1539,6 +1539,103 @@ stop near 2x latency. T0 subsequently passed the post-T1 75-78 us gate and is
 documented above. The remaining gap requires reopening fusion and ownership
 boundaries rather than declaring the local optimization series complete.
 
+### A9: Canonical Selected-Token Tile 128
+
+After T0, the selected workflow is 308.854 us and the next largest boundary is
+again Sparse Attention. A clean CannBench `InstrTimeline` collection of the
+retained source ran on Ascend 950PR at 1650 MHz with CANN 9.2.0,
+`msopprof 26.2.0`, production `-O3`, and `dav-3510`. CannBench supplied
+`--aic-metrics InstrTimeline`; no profiler command or option was constructed
+outside CannBench. The deployed fused source SHA-256 was
+`5a932044f91db7d85102865585ce81eb4f54f05b9e948c0e42b21277055759ef`.
+The dependency profile reported:
+
+| Boundary | Current InstrTimeline |
+| --- | ---: |
+| Indexer Score | 82.599 us |
+| Top-K high histogram | 4.848 us |
+| Top-K select high | 10.534 us |
+| Top-K low histogram | 5.609 us |
+| Top-K select low/offsets | 28.786 us |
+| Top-K compact | 7.266 us |
+| Sparse Attention fused | 157.492 us |
+| Combine | 11.693 us |
+| Selected workflow kernels | 308.827 us |
+
+The 3.802 us materialization Cast remains visible but excluded under W0. The
+selected sum agrees with the 308.854 us published `BasicInfo` result closely
+enough to use this trace for phase selection.
+
+The trace contains 12 recorded AIV lanes. PC `0x120054000f4c` marks the first
+Key Pack, `0x120054000fa0` the two following Key Pack calls,
+`0x120054001104` Softmax, `0x1200540011fc` the first Value Pack, and
+`0x120054000c24` final output write. Every lane has eight first-Key, eight
+first-Value, and one final-write markers. One of 96 Softmax markers is absent,
+consistent with the profiler warning that kernels exceeding 108 sub-blocks may
+lose dynamic instrumentation. The complete markers give these non-additive
+critical intervals:
+
+| Per-tile/segment interval | Samples | Mean | Minimum | Maximum |
+| --- | ---: | ---: | ---: | ---: |
+| First Key Pack to Softmax | 95 | 7.816 us | 6.921 us | 10.025 us |
+| Softmax to first Value Pack | 95 | 2.252 us | 0.230 us | 2.910 us |
+| First Value Pack to next tile/output | 96 | 7.114 us | 6.625 us | 8.024 us |
+| All eight tile bodies per lane | 12 | 137.410 us | 133.601 us | 140.578 us |
+
+A9 halves the canonical selected-token tile count from eight to four. It does
+not halve QK, Softmax, or PV arithmetic; its expected gain comes from removing
+four tile-level Softmax updates, score/probability copies, synchronization
+rounds, and repeated phase setup. The exact specialization remains
+`B=2, Q=2, context=32768, selected=2048, P4, Head64, QK256, Value256`.
+The host plan and generic decode/prefill continue to use selected tile 64.
+
+Each P4 task processes four 128-row selected tiles. Each of its two AIV
+subblocks owns 64 selected rows while retaining its existing 32-head ownership.
+QK keeps two L1 gather slots. Canonical PV uses one reusable L1 gather slot:
+AIC may request slot 0 again only after the previous Value tile has been copied
+from L1 to L0B. Generic paths retain the current two-slot protocol. No flag ID,
+P4 task mapping, output format, or inter-core protocol is added.
+
+The larger tile fits only with phase-local ownership. Query, running
+max/sum/scale, running output, and 64 row offsets are persistent. QK and PV
+share the remaining L1 region; their capacity is:
+
+```text
+QK L1 = Query 73,728 + 2 * Key 65,536 + Score 32,768 = 237,568 bytes
+PV L1 = Query 73,728 + Probability 16,384 + Value 65,536
+        + PV 65,536 = 221,184 bytes
+L1 maximum = 237,568 bytes
+```
+
+UB places persistent state first and phase scratch afterward. QK scratch owns
+Query/Key/Score lifetimes. PV reuses the same scratch, with Probability dead
+after its L1 copy and with one PV result coexisting with the next Value pack's
+Value and transpose-staging buffers. The estimated UB maximum is 164,480
+bytes, below the tested 216 KiB limit. QK Key and PV Value reuse one 65,536-byte
+L0B array; QK Score and PV result reuse one 65,536-byte L0C array. L0A already
+reuses Query and Probability. A direct constant-only change is invalid because
+it would reserve two canonical PV Value slots and cumulative phase scratch,
+pushing L1 to about 286,720 bytes and UB beyond 216 KiB.
+
+P8 is deferred because it duplicates Query and partial-output work and expands
+Combine. Score/high-histogram fusion has only about 5-6 us of launch-level
+upside, and further Top-K tuning is lower priority after T0. A9 is retained
+only if a production and resource build fit, changed VFs report zero Stack,
+five independent full-accuracy processes pass at `atol=rtol=0.05`, and two
+clean CannBench `BasicInfo` workflows each improve the complete 308.854 us
+baseline by at least 1%. Otherwise the source candidate is reverted and the
+negative result is recorded here.
+
+Raw baseline evidence is preserved under:
+
+```text
+/root/cannbench-dsa-v2-a10-current-profile/     # Ascend 950PR host
+/root/cannbench-dsa-v2-a10-current-profile.log # Ascend 950PR host
+```
+
+The copied Sparse Attention trace SHA-256 is
+`4066e8ceb04c76994a788d0f0f93121bfd7d7c0fb86cd7ec201618ad97be69f5`.
+
 ### W0: Workflow-Level Cleanup
 
 Keep dependency materialization and helper launches visible in raw profiles.
