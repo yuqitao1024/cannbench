@@ -9,19 +9,22 @@ the Sparse Attention QK=128 tile, restoration of all 32 fused-kernel warps, and
 canonical decode `int32` KV row-offset reuse, P4 Combine weight reuse, and the
 two-slot BF16 score producer/consumer pipeline, and single-scan deterministic
 Top-K compaction, transposed Value packing, and canonical Value256 tiling are
-retained after correctness and performance validation. Pairwise PV coarsening,
+retained after correctness and performance validation. Corrected canonical
+QK256 tiling is also retained on top of Value256 after preserving Query for
+all eight selected-token tiles. Pairwise PV coarsening,
 2048-thread Key/Value Pack widening, adjacent-value grouped loads, and Value
 Pack synchronization contraction were rejected after device measurement. The
-current published V2 decode workflow checkpoint is 345.086 us from source
-commit `77f2399`, published by `3814e00`. The matching published vLLM-Ascend
-workflow is 169.797 us, so SIMT currently has 2.032x its latency and 0.492x its
-performance.
+current published V2 decode workflow checkpoint is 335.631 us from retained
+QK256. The matching published vLLM-Ascend workflow is 169.797 us, so SIMT
+currently has 1.977x its latency and 0.506x its performance. The two QK256
+selected-workflow measurements are 334.621 and 335.631 us.
 
 The 2x point is an intermediate checkpoint, not the completion target. The
 target is at least 0.90x vLLM-Ascend performance under the same selected-kernel
 boundary. At the current 169.797 us reference this requires SIMT latency at or
-below 188.663 us, another 156.423 us or 45.3% below the current checkpoint.
-Later stages remain gated by correctness and repeated device results.
+below 188.663 us, another 146.968 us or 43.8% below the published QK256
+checkpoint. Later stages remain gated by correctness and repeated device
+results.
 
 ## Scope And Baseline
 
@@ -1394,21 +1397,70 @@ The QK256 negative-result archive is under
 `/tmp/cannbench-dsa-v2-a8-qk256-controller-pKmiNQ/` with SHA-256
 `320b8f025bac5796c0d65f9e838baf118bab45c188ba4a599fa77b4c98939d7f`.
 
-The next implementation priority is a corrected QK256 schedule. The first
-QK256 candidate never reached performance measurement; its failure came from
-the now-understood Query lifetime violation, not from QK256 arithmetic,
-resource use, or measured performance. Reimplement it on the retained
-phase-local layout while preserving Query across all eight selected-token
-tiles. It remains the highest-upside unmeasured local change because the
-post-A6 QK-to-Softmax segment was 69.685 us, QK rounds fall from five to three,
-and the compiled Key Pack VFs used only 13-14 registers with zero Stack.
+The corrected canonical QK256 schedule is retained on top of Value256. Generic
+decode and prefill remain QK128/Value128. Canonical decode executes QK rounds
+of 256, 256, and 64 dimensions, while Key Pack receives the tail-safe
+`current_k`. Query stays live at L1 offset zero for all eight selected-token
+tiles; PV Probability begins after the 73,728-byte persistent Query region.
+P4, 1024 threads, 32 active warps, two gather slots, the current synchronization
+protocol, and transposed Value packing are unchanged.
+
+The corrected layout has the following source-visible resource maxima:
+
+```text
+QK L1: 155,648 bytes
+PV L1: 212,992 bytes
+UB:    197,120 bytes
+```
+
+UB therefore retains 24,064 bytes of headroom under the tested 216 KiB limit.
+The production and resource builds used CANN 9.2.0, `dav-3510`, `-O3`, and
+1650 MHz on Ascend 950PR. Key Pack prepare used 14 registers, Key Pack fast
+used 13, and Value Pack fast used 13; all three reported zero Stack bytes. The
+candidate source SHA-256 is
+`5a932044f91db7d85102865585ce81eb4f54f05b9e948c0e42b21277055759ef`,
+and the production fused binary SHA-256 is
+`fce0e96ab9dcbf483a9750b656b590440abe9d49596907f81331c778077ff039`.
+
+Five independent full V3.2 decode accuracy processes with seeds 7 through 11
+passed at `atol=rtol=0.05`. Every process reported zero output and LSE
+mismatches while covering negative, out-of-range, valid-past, and
+causal-future indices. Output maximum absolute error ranged from 0.0078125 to
+0.009765625; LSE maximum absolute error ranged from 0.00924 to 0.00940.
+
+Two clean-process CannBench `BasicInfo` workflows selected only the canonical
+V3.2 case and ran at 1650 MHz:
+
+| Boundary | Value256 run 1 | Value256 run 2 | QK256 run 1 | QK256 run 2 |
+| --- | ---: | ---: | ---: | ---: |
+| Indexer | 165.187 us | 165.186 us | 165.274 us | 165.355 us |
+| Sparse Attention fused | 169.088 us | 167.833 us | 157.565 us | 158.414 us |
+| Combine | 11.626 us | 12.067 us | 11.782 us | 11.862 us |
+| DSA workflow | 345.901 us | 345.086 us | 334.621 us | 335.631 us |
+
+The fused boundary improved by 6.82% and 5.61%; the complete workflow improved
+by 3.26% and 2.74%. Both runs exceed the 1% retention gate, while Indexer and
+Combine remain stable. Generated benchmark records report 335.345 and
+335.932 us because they use the separately profiled Indexer launch. The design
+and published-data convention instead uses the dependency Indexer launches
+captured inside the Sparse Attention workflow profile, producing the selected
+334.621 and 335.631 us sums above.
+
+The complete QK256 evidence is preserved under:
+
+```text
+/tmp/cannbench-dsa-v2-a9-qk256-controller-5uBRXP/
+/root/cannbench-dsa-v2-a9-qk256-5uBRXP/ # Ascend 950PR host
+```
+
+The local and remote evidence archive SHA-256 is
+`15241f23981977cb306deb6d752aeb6cec180e61b4c031f9915d5e63b36f940b`.
 
 QK256 is an incremental checkpoint toward the 0.90x target, not a reason to
-stop after crossing 2x. If corrected QK256 does not provide stable workflow
-gain, proceed to the isolated Context-shard distributed histogram chain with
-the post-T1 75-78 us gate. Exhausting these local tiling candidates without
-approaching the target requires reopening fusion and ownership boundaries,
-rather than declaring the optimization series complete.
+stop near 2x latency. The next candidate should use the isolated Context-shard
+distributed histogram chain with the post-T1 75-78 us gate. Exhausting these
+local tiling candidates without approaching the target requires reopening
+fusion and ownership boundaries rather than declaring the series complete.
 
 ### W0: Workflow-Level Cleanup
 

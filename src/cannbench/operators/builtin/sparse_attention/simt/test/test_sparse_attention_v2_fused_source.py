@@ -181,6 +181,51 @@ def test_v2_fused_canonical_value256_reuses_phase_local_l1():
     assert aiv.count("kHead64FusedL1QkKeysOffset") == 1
     assert aic.count("kHead64FusedL1QkKeysOffset") == 1
 
+
+def test_v2_fused_canonical_qk256_preserves_query_and_value256():
+    source = _v2_fused_source()
+    aiv = _function_definition(source, "sparse_attention_head64_fused_aiv(")
+    aic = _function_definition(source, "sparse_attention_head64_fused_aic(")
+    prepare_pack = _function_definition(
+        source, "head64_fused_key_pack_prepare_vf("
+    )
+    fast_pack = _function_definition(source, "head64_fused_key_pack_fast_vf(")
+
+    assert "kHead64FusedGenericQkTile = kHead64QkTile" in source
+    assert "kHead64FusedCanonicalQkTile = 256" in source
+    assert "kHead64FusedMaxQkTile = kHead64FusedCanonicalQkTile" in source
+    assert "kHead64FusedCanonicalValueTile = 256" in source
+    assert "kHead64FusedL1PersistentQueryOffset = 0" in source
+    assert (
+        "kHead64FusedL1PvProbabilitiesOffset =\n"
+        "    kHead64FusedL1PersistentQueryBytes"
+    ) in source
+    assert "kHead64FusedL1Bytes = kHead64FusedL1PvBytes" in source
+    assert "kHead64FusedMaxQkTile * 32 * sizeof(bfloat16_t)" in source
+    assert "kHead64Tile * kHead64FusedMaxQkTile" in aic
+    assert "kHead64FusedMaxQkTile * kHead64SelectedTile" in aic
+
+    qk_tile_selection = (
+        "use_canonical_decode_pack\n"
+        "      ? kHead64FusedCanonicalQkTile\n"
+        "      : kHead64FusedGenericQkTile"
+    )
+    for function in (aiv, aic):
+        assert qk_tile_selection in function
+        assert "k_start += qk_tile" in function
+        assert "plan.qk_head_dim - k_start < qk_tile" in function
+        assert ": qk_tile" in function
+
+    assert "int32_t current_k" in prepare_pack
+    assert "dim < static_cast<uint32_t>(current_k)" in prepare_pack
+    assert "int32_t current_k" in fast_pack
+    assert "dim < static_cast<uint32_t>(current_k)" in fast_pack
+    prepare_call = aiv[aiv.index("asc_vf_call<head64_fused_key_pack_prepare_vf>") :]
+    fast_call = aiv[aiv.index("asc_vf_call<head64_fused_key_pack_fast_vf>") :]
+    assert "ub_keys_buf,\n              current_k);" in prepare_call
+    assert "k_start,\n              current_k);" in fast_call
+
+
 def test_v2_canonical_p4_combine_reuses_partition_weights_across_dimensions():
     source = _v2_head64_source()
     predicate = _function_definition(
