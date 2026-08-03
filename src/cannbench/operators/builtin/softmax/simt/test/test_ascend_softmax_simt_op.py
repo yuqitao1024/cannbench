@@ -317,9 +317,17 @@ def test_ascend_softmax_v3_fast_path_uses_large_row_recompute_for_logits_scale_d
     assert "row_tile_ub[slot],\n        row_tile_ub[slot]," in pipeline_source
     assert "asc_sync_notify(PIPE_MTE2, PIPE_V, next_event_id)" in pipeline_source
     assert "asc_sync_notify(PIPE_V, PIPE_MTE3, event_id)" in pipeline_source
+    next_row_start = pipeline_source.index("if (row_idx + 1 < row_count)")
+    prefetched_copy = pipeline_source.index("asc_copy_gm2ub_align(", next_row_start)
+    current_row_compute = pipeline_source.index(
+        "asc_vf_call<row_softmax_fast_large_row_forward_vf<", next_row_start
+    )
+    assert prefetched_copy < current_row_compute
     assert "const accscalar_t row_max = fast_block_reduce_warp<accscalar_t, Max>" in source
     assert "const accscalar_t inv_sum = fast_block_reduce_warp_inverse<accscalar_t, Add>" in source
     assert "dim3(kThreadsPerBlock)," in source
+    assert "kPipelinePhysicalGridXLimit = 64" in source
+    assert "<<<pipeline_grid_x, 0, acl_stream>>>" in source
     assert "32768>(" in source
     assert "16384>(" in source
 
