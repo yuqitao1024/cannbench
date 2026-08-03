@@ -18,10 +18,10 @@ Top-K boundary from about 82 us to 56.8-57.3 us. Pairwise PV coarsening,
 Pack synchronization contraction were rejected after device measurement. The
 parallel low-byte reducer and shard-offset schedule is retained after cutting
 that kernel from 28.904 us to 14.423-14.444 us. The current published V2 decode
-workflow checkpoint remains A10 at 271.191 us; T2 has been validated at
-256.123 and 255.959 us but is not yet published. Against the matching published
-vLLM-Ascend workflow at 169.797 us, the latest retained SIMT candidate has
-1.508x its latency and 0.663x its performance.
+workflow checkpoint is now T2 at 255.959 us; its two validation measurements
+are 256.123 and 255.959 us. Against the matching published vLLM-Ascend workflow
+at 169.797 us, the published SIMT V2 workflow has 1.508x its latency and 0.663x
+its performance.
 
 The 2x point is an intermediate checkpoint, not the completion target. The
 target is at least 0.90x vLLM-Ascend performance under the same selected-kernel
