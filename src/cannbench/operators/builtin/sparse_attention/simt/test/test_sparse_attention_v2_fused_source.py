@@ -70,7 +70,7 @@ def test_v2_fused_canonical_decode_reuses_kv_row_offsets():
     assert "kHead64FusedUbKvRowOffsetsOffset" in source
     assert (
         "kHead64FusedUbKvRowOffsetsBytes =\n"
-        "    kHead64FusedMaxSelectedHalf * sizeof(int32_t)"
+        "    kHead64FusedMaxSelectedOwnerRows * sizeof(int32_t)"
     ) in source
     assert "__ubuf__ int32_t* kv_row_offsets" in source
     assert "kHead64InvalidKvRowOffset" in source
@@ -126,7 +126,7 @@ def test_v2_fused_canonical_value_pack_stages_row_major_tiles_then_transposes():
     assert "kHead64FusedUbValueStagingOffset" in source
     assert (
         "kHead64FusedUbValueStagingBytes =\n"
-        "    kHead64FusedMaxSelectedHalf * kHead64FusedMaxValueTile *\n"
+        "    kHead64FusedMaxSelectedSubtileHalf * kHead64FusedMaxValueTile *\n"
         "    sizeof(bfloat16_t)"
     ) in source
     assert "__ubuf__ bfloat16_t* staged_values" in fast_vf
@@ -134,7 +134,7 @@ def test_v2_fused_canonical_value_pack_stages_row_major_tiles_then_transposes():
     assert "packed_offset" not in fast_vf
     assert "asc_vf_call<head64_fused_value_pack_fast_vf>" in fast_slot
     assert fast_slot.count("asc_transpose(") == 1
-    assert "static_cast<uint32_t>(selected_half) / 16U" in fast_slot
+    assert "static_cast<uint32_t>(selected_subtile_half) / 16U" in fast_slot
     assert "for (uint32_t dim_block = 0; dim_block < 16; ++dim_block)" in fast_slot
     assert "reinterpret_cast<__ubuf__ uint16_t*>" in fast_slot
     assert fast_slot.count("asc_sync_notify(PIPE_V, PIPE_MTE3, EVENT_ID0);") == 2
@@ -180,7 +180,7 @@ def test_v2_fused_canonical_value256_reuses_phase_local_l1():
     assert "kHead64FusedL1PvValuesOffset" in source
     assert "kHead64FusedL1PvPvOffset" in source
     assert "kHead64FusedL1PvBytes" in source
-    assert "kHead64FusedL1Bytes = kHead64FusedL1QkBytes" in source
+    assert "kHead64FusedL1Bytes = kHead64FusedL1PvBytes" in source
     assert "kHead64FusedL1KeysOffset" not in source
     assert aiv.count("kHead64FusedL1QkKeysOffset") == 1
     assert aic.count("kHead64FusedL1QkKeysOffset") == 1
@@ -204,13 +204,14 @@ def test_v2_fused_canonical_qk256_preserves_query_and_value256():
         "kHead64FusedL1PvProbabilitiesOffset =\n"
         "    kHead64FusedL1PersistentQueryBytes"
     ) in source
-    assert "kHead64FusedL1Bytes = kHead64FusedL1QkBytes" in source
+    assert "kHead64FusedL1Bytes = kHead64FusedL1PvBytes" in source
     assert (
-        "kHead64FusedMaxQkTile * kHead64FusedMaxSelectedHalf * sizeof(bfloat16_t)"
+        "kHead64FusedMaxQkTile * kHead64FusedMaxSelectedSubtileHalf * "
+        "sizeof(bfloat16_t)"
         in " ".join(source.split())
     )
     assert "kHead64Tile * kHead64FusedMaxQkTile" in aic
-    assert "kHead64FusedMaxQkTile * kHead64FusedMaxSelectedTile" in aic
+    assert "kHead64FusedMaxQkTile * kHead64FusedMaxSelectedSubtile" in aic
 
     qk_tile_selection = (
         "use_canonical_decode_pack\n"
@@ -229,11 +230,19 @@ def test_v2_fused_canonical_qk256_preserves_query_and_value256():
     assert "dim < static_cast<uint32_t>(current_k)" in fast_pack
     prepare_call = aiv[aiv.index("asc_vf_call<head64_fused_key_pack_prepare_vf>") :]
     fast_call = aiv[aiv.index("asc_vf_call<head64_fused_key_pack_fast_vf>") :]
-    assert "ub_keys_buf,\n              selected_half,\n              current_k);" in prepare_call
-    assert "k_start,\n              selected_half,\n              current_k);" in fast_call
+    normalized_prepare_call = " ".join(prepare_call.split())
+    normalized_fast_call = " ".join(fast_call.split())
+    assert (
+        "ub_keys_buf, selected_subtile_half, current_k);"
+        in normalized_prepare_call
+    )
+    assert (
+        "k_start, selected_subtile_half, current_k);"
+        in normalized_fast_call
+    )
 
 
-def test_v2_fused_canonical_selected128_keeps_generic_selected64():
+def test_v2_fused_canonical_selected256_streams_128_and_keeps_generic_selected64():
     source = _v2_fused_source()
     normalized_source = " ".join(source.split())
     predicate = _function_definition(
@@ -243,9 +252,19 @@ def test_v2_fused_canonical_selected128_keeps_generic_selected64():
     aic = _function_definition(source, "sparse_attention_head64_fused_aic(")
 
     assert "kHead64FusedGenericSelectedTile = kHead64SelectedTile" in source
-    assert "kHead64FusedCanonicalSelectedTile = 128" in source
+    assert "kHead64FusedCanonicalSelectedTile = 256" in source
+    assert "kHead64FusedCanonicalSelectedSubtile = 128" in source
+    assert (
+        "kHead64FusedGenericSelectedSubtile = kHead64FusedGenericSelectedTile"
+        in normalized_source
+    )
     assert (
         "kHead64FusedMaxSelectedTile = kHead64FusedCanonicalSelectedTile"
+        in normalized_source
+    )
+    assert (
+        "kHead64FusedMaxSelectedSubtile = "
+        "kHead64FusedCanonicalSelectedSubtile"
         in normalized_source
     )
     assert "plan.selected_tile == 64" in predicate
@@ -258,7 +277,13 @@ def test_v2_fused_canonical_selected128_keeps_generic_selected64():
     )
     for function in (aiv, aic):
         assert selected_tile_selection in function
-        assert "const int32_t selected_half = selected_tile / 2" in function
+        assert "const int32_t selected_subtile" in function
+        assert "? kHead64FusedCanonicalSelectedSubtile" in function
+        assert ": kHead64FusedGenericSelectedSubtile" in function
+        assert (
+            "const int32_t selected_subtile_half = selected_subtile / 2"
+            in function
+        )
         assert "local_selected_start += selected_tile" in function
         assert "partition_length - local_selected_start < selected_tile" in function
 
@@ -270,21 +295,23 @@ def test_v2_fused_canonical_selected128_keeps_generic_selected64():
     assert "const int32_t pv_gather_slots" in aic
 
 
-def test_v2_fused_selected128_uses_phase_local_memory_ownership():
+def test_v2_fused_selected256_streaming_uses_phase_local_memory_ownership():
     source = _v2_fused_source()
     normalized_source = " ".join(source.split())
     aic = _function_definition(source, "sparse_attention_head64_fused_aic(")
 
-    assert "kHead64FusedQkGatherSlots = 2" in source
+    assert "kHead64FusedGenericQkGatherSlots = 2" in source
+    assert "kHead64FusedCanonicalQkGatherSlots = 1" in source
     assert "kHead64FusedGenericPvGatherSlots = 2" in source
     assert "kHead64FusedCanonicalPvGatherSlots = 1" in source
     assert "kHead64FusedMaxSelectedTile" in source
+    assert "kHead64FusedMaxSelectedSubtile" in source
     assert (
-        "kHead64FusedQkGatherSlots * kHead64FusedL1KeySlotBytes" in source
+        "kHead64FusedL1QkKeyStorageBytes" in source
     )
-    assert "kHead64FusedL1PvValuesBytes" in source
-    assert "kHead64FusedL1Bytes = kHead64FusedL1QkBytes" in source
-    assert "static_assert(kHead64FusedL1QkBytes >= kHead64FusedL1PvBytes)" in source
+    assert "kHead64FusedL1PvValueStorageBytes" in source
+    assert "kHead64FusedL1Bytes = kHead64FusedL1PvBytes" in source
+    assert "static_assert(kHead64FusedL1PvBytes >= kHead64FusedL1QkBytes)" in source
 
     assert "kHead64FusedUbPersistentBytes" in source
     assert (
@@ -299,18 +326,22 @@ def test_v2_fused_selected128_uses_phase_local_memory_ownership():
         "kHead64FusedUbPvValuesOffset = kHead64FusedUbPvProbabilitiesOffset"
         in normalized_source
     )
-    assert "kHead64FusedUbBytes = kHead64FusedUbPvBytes" in source
-    assert "static_assert(kHead64FusedUbPvBytes >= kHead64FusedUbQkBytes)" in source
+    assert "kHead64FusedUbBytes = kHead64FusedUbQkBytes" in source
+    assert "static_assert(kHead64FusedUbQkBytes >= kHead64FusedUbPvBytes)" in source
 
     assert "__cb__ bfloat16_t l0_rhs_buf" in aic
     assert "__cc__ float l0_result_buf" in aic
+    assert (
+        "kHead64FusedMaxQkTile * kHead64FusedMaxSelectedSubtile"
+        in aic
+    )
     assert "l0_keys_buf" not in aic
     assert "l0_values_buf" not in aic
     assert "l0_scores_buf" not in aic
     assert "l0_pv_buf" not in aic
 
 
-def test_v2_fused_selected128_packs_64_rows_per_aiv_subblock():
+def test_v2_fused_selected256_packs_64_rows_per_streaming_subtile():
     source = _v2_fused_source()
     prepare = _function_definition(source, "head64_fused_key_pack_prepare_vf(")
     fast_key = _function_definition(source, "head64_fused_key_pack_fast_vf(")
@@ -326,26 +357,80 @@ def test_v2_fused_selected128_packs_64_rows_per_aiv_subblock():
     normalized_aiv = " ".join(aiv.split())
 
     for pack in (prepare, fast_key, fast_value):
-        assert "int32_t selected_half" in pack
+        assert "int32_t selected_subtile_half" in pack
         assert "local_selected = warp" in pack
-        assert "local_selected < static_cast<uint32_t>(selected_half)" in pack
+        assert (
+            "local_selected < static_cast<uint32_t>(selected_subtile_half)"
+            in pack
+        )
         assert "local_selected += kHead64FusedActiveWarps" in pack
 
-    assert "int32_t selected_half" in gather_value
+    assert "int32_t selected_subtile_half" in gather_value
     assert (
-        "row_block < static_cast<uint32_t>(selected_half) / 16U"
+        "row_block < static_cast<uint32_t>(selected_subtile_half) / 16U"
         in gather_value
     )
-    assert "MakeShape(selected_half, kHead64FusedCanonicalValueTile)" in gather_value
+    assert (
+        "MakeShape(selected_subtile_half, kHead64FusedCanonicalValueTile)"
+        in gather_value
+    )
 
     assert (
-        "selected_begin = static_cast<int32_t>(subblock_index) * selected_half"
+        "selected_begin = "
+        "static_cast<int32_t>(subblock_index) * selected_subtile_half"
         in normalized_aiv
     )
-    assert "MakeShape(current_k, selected_half)" in aiv
-    assert "MakeShape(selected_half, current_value)" in gather_generic
+    assert "MakeShape(current_k, selected_subtile_half)" in aiv
+    assert "MakeShape(selected_subtile_half, current_value)" in gather_generic
+    assert "selected_subtile_start += selected_subtile" in aiv
+    assert "selected_subtile_start += selected_subtile" in aic
+    assert "const int32_t selected_owner_offset = selected_subtile_start / 2" in aiv
+    assert "kv_row_offsets + selected_owner_offset" in aiv
     assert "const uint16_t selected_blocks" in aic
     assert "static_cast<uint16_t>(selected_tile / 16)" in aic
+
+
+def test_v2_fused_selected256_assembles_scores_then_accumulates_pv_subtiles():
+    source = _v2_fused_source()
+    aiv = _function_definition(source, "sparse_attention_head64_fused_aiv(")
+    aic = _function_definition(source, "sparse_attention_head64_fused_aic(")
+    normalized_aic = " ".join(aic.split())
+
+    assert aiv.count("asc_vf_call<head64_fused_softmax_vf>") == 1
+    assert "for (int32_t selected_subtile_start = 0;" in aic
+    assert "current_selected_subtile" in aic
+    assert (
+        "l1_scores_buf + selected_subtile_start * kHead64Tile" in aic
+    )
+    assert "MakeShape(kHead64Tile, current_selected_subtile)" in normalized_aic
+    assert "MakeShape(current_k, current_selected_subtile)" in normalized_aic
+    assert "MakeShape(current_selected_subtile, current_value)" in normalized_aic
+    assert "pv_params.k = current_selected_subtile" in aic
+    assert "pv_params.cmatrixInitVal = selected_subtile_start == 0" in aic
+
+
+def test_v2_fused_selected256_reuses_single_slot_only_after_l0b_copy():
+    aic = _function_definition(
+        _v2_fused_source(), "sparse_attention_head64_fused_aic("
+    )
+
+    qk_copy = aic.index("Copy(copy_l1_to_l0b, l0_keys")
+    qk_copy_done = aic.index(
+        "asc_sync_wait(PIPE_MTE1, PIPE_M, EVENT_ID1);", qk_copy
+    )
+    qk_single_slot_reuse = aic.index(
+        "if (has_next_k && qk_gather_slots == 1)", qk_copy
+    )
+    pv_copy = aic.index("Copy(copy_l1_to_l0b, l0_values")
+    pv_copy_done = aic.index(
+        "asc_sync_wait(PIPE_MTE1, PIPE_M, EVENT_ID1);", pv_copy
+    )
+    pv_single_slot_reuse = aic.index(
+        "if (has_next_pv_round && pv_gather_slots == 1)", pv_copy
+    )
+
+    assert qk_copy < qk_copy_done < qk_single_slot_reuse
+    assert pv_copy < pv_copy_done < pv_single_slot_reuse
 
 
 def test_v2_canonical_p4_combine_reuses_partition_weights_across_dimensions():

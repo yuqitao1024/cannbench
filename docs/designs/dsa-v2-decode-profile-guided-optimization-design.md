@@ -1778,14 +1778,18 @@ L1 maximum = 237,568 bytes
 QK UB = persistent 66,432 + Query 36,864 + Key half 32,768
         + full Score half 32,768
       = 168,832 bytes
-PV UB = persistent 66,432 + full Probability half 16,384
-        + Value half 32,768 + transpose staging 32,768 + PV 32,768
-      = 181,120 bytes
-UB maximum = 181,120 bytes
+PV UB = persistent 66,432 + Value half 32,768
+        + transpose staging 32,768 + PV 32,768
+      = 164,736 bytes
+UB maximum = 168,832 bytes
 
 L0B maximum = 65,536 bytes
 L0C maximum = 65,536 bytes
 ```
+
+The Probability half shares the Value-half offset: after Softmax, it is copied
+to L1 before Value gather starts and is no longer live in UB. Counting both at
+once would overstate the PV phase by 16,384 bytes.
 
 These are source estimates, not compiler proof. Production and
 `--cce-res-usage` builds on CANN 9.2.0 `dav-3510` must confirm fit and zero
@@ -1810,6 +1814,61 @@ two clean-process CannBench `BasicInfo` workflows that each measure no more
 than 276.973 us, a 1% improvement over the 279.771 us retained baseline. If
 either run misses the gate, or if a component regression erases the intended
 gain, restore A9 source and tests and record the negative result here.
+
+A10 passed the build, correctness, resource, and performance gates on Ascend
+950PR (`dav-3510`) with CANN 9.2.0, Bisheng 15.0.5, and a locked 1650 MHz
+frequency. Production and `--cce-res-usage` builds both completed. The changed
+Key prepare, Key fast, and Value fast VFs used 20, 15, and 18 registers,
+respectively, and every reported VF used zero Stack bytes. The compiler output
+therefore confirms that the source-visible L1, UB, L0B, and L0C ownership above
+fits the target.
+
+Five canonical runs with seeds 7 through 11 and one explicit generic
+selected64/P2 run all reported zero output and LSE mismatches at
+`atol=rtol=0.05`. Across the canonical runs, maximum absolute output error was
+0.0078125 through 0.009765625 and maximum absolute LSE error was 0.009243965
+through 0.009402275. The generic fallback therefore remains correct as well as
+the specialized path.
+
+Two clean CannBench `BasicInfo` workflow processes measured:
+
+| Boundary | A10 run 1 | A10 run 2 |
+| --- | ---: | ---: |
+| Dependency Indexer | 140.944 us | 141.187 us |
+| Sparse Attention fused | 117.852 us | 117.991 us |
+| Combine | 11.900 us | 12.013 us |
+| Selected workflow | 270.696 us | 271.191 us |
+| Excluded materialization Cast | 3.503 us | 3.612 us |
+
+Against the retained A9 workflow at 279.771 us, the two selected totals improve
+by 3.24% and 3.07%. Both are below the 276.973 us retention threshold, with the
+gain isolated to Sparse Attention while Indexer and Combine remain stable.
+A10 is retained. Candidate InstrTimeline was not recollected because BasicInfo
+already attributed the gain; detailed-profile latency was never part of the
+retention boundary.
+
+The final CannBench workflows set `CANNBENCH_SKIP_SIMT_INSTALL=1` only after the
+candidate module paths and ELF hashes were verified. This avoided a redundant
+Sparse Attention rebuild that had made SSH unavailable in two partial attempts;
+profiling, kernel selection, and workflow aggregation still ran through
+CannBench. Those partial attempts are preserved but are not used as results.
+
+Candidate provenance and evidence are:
+
+```text
+release archive SHA-256:
+  0d40e694feb4ecf8312247c0c686c956dc81a299a2a76080f1f38c45f7efb345
+fused source SHA-256:
+  43b7813e830aa1ba1d9550b917fe8e18dc64721f766c0d294694561b45c7303b
+production/resource fused ELF SHA-256:
+  f5e7fd00c4cfab5737fbf69a850e690dff56d5b9c27e7a0b5871dd557f762174
+evidence archive SHA-256:
+  f53609813615aedd0921bdfe9e71e3de30a222946c19f6738b6c1b7b24641016
+
+/root/cannbench-dsa-v2-a10-selected256-43b7813e/ # Ascend 950PR host
+/root/cannbench-dsa-v2-a10-selected256-43b7813e-evidence.tar.gz
+/tmp/cannbench-dsa-v2-a10-selected256-43b7813e-controller/ # local
+```
 
 ### W0: Workflow-Level Cleanup
 
