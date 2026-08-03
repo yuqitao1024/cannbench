@@ -373,6 +373,42 @@ def test_ascend_softmax_v3_fp16_huge_rows_use_generic_tiled_online_stats():
     assert "row_inv_sum[row] = 1.0f / combined_sum;" in source
 
 
+def test_ascend_softmax_v3_fp16_large_rows_pipeline_tiled_final_write():
+    source = _read_v3_simt_source("row_fast.asc")
+
+    assert "use_large_row_ub_tiled_write_row_softmax_fast" in source
+    assert "return kFp16Path && dim_size > 32768;" in source
+    assert "row_softmax_fast_large_ub_tiled_write_vf" in source
+    assert "row_softmax_fast_large_ub_tiled_write_pipeline_kernel<51200>" in source
+    assert "kWritePhysicalGridXLimit = 64" in source
+
+    pipeline_start = source.index(
+        "row_softmax_fast_large_ub_tiled_write_pipeline_impl"
+    )
+    pipeline_end = source.index(
+        "row_softmax_fast_large_ub_tiled_write_pipeline_kernel", pipeline_start
+    )
+    pipeline_source = source[pipeline_start:pipeline_end]
+    assert "__ubuf__ __fp16 row_tile_ub[2][kTileElements];" in pipeline_source
+    assert "asc_copy_gm2ub_align(" in pipeline_source
+    assert "asc_copy_ub2gm_align(" in pipeline_source
+    assert "next_tile_elements * sizeof(__fp16)" in pipeline_source
+    assert "tile_elements * sizeof(__fp16)" in pipeline_source
+    assert "asc_sync_wait(PIPE_MTE3, PIPE_V, next_event_id)" in pipeline_source
+    assert "asc_sync_notify(PIPE_MTE2, PIPE_V, next_event_id)" in pipeline_source
+    assert "asc_sync_notify(PIPE_V, PIPE_MTE3, event_id)" in pipeline_source
+    assert "asc_sync_notify(PIPE_MTE3, PIPE_V, event_id)" in pipeline_source
+    next_tile_start = pipeline_source.index("const bool has_next_tile")
+    prefetched_copy = pipeline_source.index(
+        "asc_copy_gm2ub_align(", next_tile_start
+    )
+    current_tile_compute = pipeline_source.index(
+        "asc_vf_call<row_softmax_fast_large_ub_tiled_write_vf>",
+        next_tile_start,
+    )
+    assert prefetched_copy < current_tile_compute
+
+
 def test_ascend_softmax_v3_uses_mixed_simd_simt_vf_launch_model():
     source = _read_v3_simt_sources(
         "row_persistent_fallback.asc",
