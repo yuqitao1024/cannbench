@@ -56,6 +56,11 @@ KERNEL_LIBRARIES = {
         "simt",
         "lightning_indexer_decode_radix_topk_bfloat16.asc",
     ),
+    "liblightning_indexer_decode_distributed_topk_bfloat16_v2_kernel.so": os.path.join(
+        EXTENSIONS_DIR,
+        "simt",
+        "lightning_indexer_decode_distributed_topk_bfloat16.asc",
+    ),
 }
 
 

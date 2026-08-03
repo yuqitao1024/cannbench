@@ -11,20 +11,22 @@ two-slot BF16 score producer/consumer pipeline, and single-scan deterministic
 Top-K compaction, transposed Value packing, and canonical Value256 tiling are
 retained after correctness and performance validation. Corrected canonical
 QK256 tiling is also retained on top of Value256 after preserving Query for
-all eight selected-token tiles. Pairwise PV coarsening,
+all eight selected-token tiles. The canonical Context-shard distributed
+histogram Top-K chain is retained on top of QK256 after reducing the complete
+Top-K boundary from about 82 us to 56.8-57.3 us. Pairwise PV coarsening,
 2048-thread Key/Value Pack widening, adjacent-value grouped loads, and Value
 Pack synchronization contraction were rejected after device measurement. The
-current published V2 decode workflow checkpoint is 335.631 us from retained
-QK256. The matching published vLLM-Ascend workflow is 169.797 us, so SIMT
-currently has 1.977x its latency and 0.506x its performance. The two QK256
-selected-workflow measurements are 334.621 and 335.631 us.
+current published V2 decode workflow checkpoint is 308.854 us from the retained
+distributed-histogram path. Its two selected-workflow measurements are 309.288
+and 308.854 us. Against the matching published vLLM-Ascend workflow at
+169.797 us, SIMT has 1.819-1.822x its latency and 0.549-0.550x its performance.
 
 The 2x point is an intermediate checkpoint, not the completion target. The
 target is at least 0.90x vLLM-Ascend performance under the same selected-kernel
 boundary. At the current 169.797 us reference this requires SIMT latency at or
-below 188.663 us, another 146.968 us or 43.8% below the published QK256
-checkpoint. Later stages remain gated by correctness and repeated device
-results.
+below 188.663 us, another 120.191 us or 38.9% below the best measured
+distributed-histogram run. Later stages remain gated by correctness and
+repeated device results.
 
 ## Scope And Baseline
 
@@ -818,12 +820,88 @@ Artifacts are preserved under:
 /tmp/cannbench-dsa-v2-a4-p4weights-fix-tbRFz2/    # Ascend host package
 ```
 
-### T0: Distributed Context-Shard Histogram Microbenchmark
+### T0: Distributed Context-Shard Histogram Top-K (Retained)
 
-Implement only the isolated launch-chain microbenchmark described in the V2
-unordered-radix design. Include histogram production, digit reducers, offsets,
-and compaction. Proceed to production integration only if the complete chain is
-below 105 us, which is a 20% improvement over the current 131.422 us stage.
+T0 is retained as an exact-shape production specialization for canonical
+V3.2 BF16 decode only:
+
+```text
+B=2, Q=2, C=32768, H=64, D=128, K=2048, context_shards=16
+```
+
+The existing score kernel and BF16 score workspace remain unchanged. The old
+single-block radix selector remains the fallback for every other shape. The
+canonical path replaces that selector with five pure-Vector launches:
+
+1. one `(row, shard)` block produces a 256-bin high-byte histogram;
+2. one row block reduces the shard histograms and selects the high byte;
+3. one `(row, shard)` block produces a conditional low-byte histogram;
+4. one row block selects the low byte and builds exclusive greater/equal
+   offsets for every shard; and
+5. one `(row, shard)` block compacts into disjoint output ranges.
+
+The chain uses two `int32 [4,16,256]` histogram workspaces, totaling 128 KiB,
+plus small row state and shard-offset tensors. Compaction reuses the packed
+16-bit greater/equal per-thread scan from T1 inside each shard. There are no
+global output atomics, inter-core flags, global spin waits, or new Basic API
+dependencies. The output remains unordered, unique, valid, deterministic, and
+score-set equivalent, including threshold ties.
+
+The production build used CANN 9.2.0, `dav-3510`, `-O3`, and Ascend 950PR at
+1650 MHz. The new VFs reported zero Stack bytes and the following register
+counts:
+
+| VF | Registers |
+| --- | ---: |
+| High-byte histogram | 22 |
+| High-byte reducer | 16 |
+| Low-byte histogram | 22 |
+| Low-byte reducer and offsets | 22 |
+| Compaction | 26 |
+
+Five repeats each of canonical, masked-tail, tied-threshold, near-threshold,
+and negative-score device cases passed with seed 7. Every run preserved the
+trusted Top-K score multiset, a stable selected index set, uniqueness, and the
+valid index range.
+
+Two clean-process CannBench `BasicInfo` workflows selected only the canonical
+case. The table uses the dependency Indexer launches captured in each Sparse
+Attention profile, matching the published selected-workflow convention. The
+materialization Cast remained visible but excluded:
+
+| Boundary | T0 run 1 | T0 run 2 |
+| --- | ---: | ---: |
+| Score | 83.584 us | 84.058 us |
+| High-byte histogram | 5.649 us | 5.697 us |
+| High-byte reducer | 10.699 us | 10.383 us |
+| Low-byte histogram | 5.043 us | 5.053 us |
+| Low-byte reducer and offsets | 29.093 us | 29.130 us |
+| Compaction | 6.795 us | 6.496 us |
+| Complete distributed Top-K | 57.279 us | 56.759 us |
+| Lightning Indexer | 140.863 us | 140.817 us |
+| Sparse Attention fused | 156.444 us | 156.199 us |
+| Combine | 11.981 us | 11.838 us |
+| DSA workflow | 309.288 us | 308.854 us |
+
+Relative to the 82.031 us post-A6/QK256-era Top-K observation, the complete
+five-launch chain improves by 30.2%-30.8%. Relative to the published QK256
+workflow checkpoint at 335.631 us, the two complete workflows improve by
+7.85% and 7.98%. Both runs exceed the 1% retention gate and the reset 75-78 us
+Top-K target, so T0 is retained.
+
+Candidate provenance and complete evidence are:
+
+```text
+source SHA-256:  27d0eee8002aa102078ee99766972086bc68163b9ac8b261ef92c69160938a55
+binary SHA-256:  b9e6770bbb670c6e28b1b38e4413bf31a5501b3c3617618cbb624fb2de191b28
+release SHA-256: 70235d1086407b7f0f588f0f9c018b9217e5f4e9379b36fa06df383448bf099d
+
+/tmp/cannbench-dsa-v2-t0-distributed-histogram-evidence.tar.gz
+/root/cannbench-dsa-v2-t0-qKjrsu/ # Ascend 950PR host
+```
+
+The local and remote evidence archive SHA-256 is
+`f761c9b1ada20558ae8a234e3b299c45691f7ce4ac5be508e5deba506711446d`.
 
 ### T1: Single-Block Radix Refinements
 
@@ -1456,11 +1534,10 @@ The complete QK256 evidence is preserved under:
 The local and remote evidence archive SHA-256 is
 `15241f23981977cb306deb6d752aeb6cec180e61b4c031f9915d5e63b36f940b`.
 
-QK256 is an incremental checkpoint toward the 0.90x target, not a reason to
-stop near 2x latency. The next candidate should use the isolated Context-shard
-distributed histogram chain with the post-T1 75-78 us gate. Exhausting these
-local tiling candidates without approaching the target requires reopening
-fusion and ownership boundaries rather than declaring the series complete.
+QK256 was an incremental checkpoint toward the 0.90x target, not a reason to
+stop near 2x latency. T0 subsequently passed the post-T1 75-78 us gate and is
+documented above. The remaining gap requires reopening fusion and ownership
+boundaries rather than declaring the local optimization series complete.
 
 ### W0: Workflow-Level Cleanup
 
@@ -1483,9 +1560,11 @@ KV tensors, so this Cast is not expected once per decode token. Keep it visible
 in raw evidence, but do not add it to or claim its removal from the published
 workflow boundary without an intentional contract change.
 
-Consider score-to-histogram fusion only after S0-S2 and T0 establish that
-avoiding the BF16 score workspace is worth the added ownership and
-synchronization complexity.
+T0 establishes that distributed threshold selection is worthwhile without
+changing score production. Score-to-histogram fusion is now a candidate only
+if a separate design can remove material BF16 score-workspace traffic without
+reintroducing cross-core coordination, output atomics, or a fragile
+producer/consumer protocol.
 
 ### C0: API Boundary Convergence
 

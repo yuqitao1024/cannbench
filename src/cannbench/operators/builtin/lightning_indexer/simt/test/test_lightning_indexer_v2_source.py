@@ -11,6 +11,12 @@ V2_ROOT = (
 DECODE_RADIX_SOURCE = (
     V2_ROOT / "csrc" / "simt" / "lightning_indexer_decode_radix_topk_bfloat16.asc"
 )
+DISTRIBUTED_TOPK_SOURCE = (
+    V2_ROOT
+    / "csrc"
+    / "simt"
+    / "lightning_indexer_decode_distributed_topk_bfloat16.asc"
+)
 CONTEXT_SHARDED_SOURCE = (
     V2_ROOT / "csrc" / "simt" / "lightning_indexer_context_sharded_family_64x128.asc"
 )
@@ -109,6 +115,90 @@ def test_decode_radix_selector_builds_as_an_independent_device_library():
 
     assert "lightning_indexer_decode_radix_topk_bfloat16.asc" in setup_source
     assert '"liblightning_indexer_decode_radix_topk_bfloat16_v2_kernel.so"' in setup_source
+
+
+def test_decode_distributed_topk_owns_histograms_offsets_and_output_ranges():
+    source = DISTRIBUTED_TOPK_SOURCE.read_text(encoding="utf-8")
+
+    for contract in (
+        "constexpr int32_t kContextCount = 32768;",
+        "constexpr int32_t kTopK = 2048;",
+        "constexpr int32_t kCanonicalContextShardCount = 16;",
+        "lightning_indexer_decode_distributed_high_histogram_bfloat16_v2_kernel",
+        "lightning_indexer_decode_distributed_select_high_bfloat16_v2_kernel",
+        "lightning_indexer_decode_distributed_low_histogram_bfloat16_v2_kernel",
+        "lightning_indexer_decode_distributed_select_low_offsets_bfloat16_v2_kernel",
+        "lightning_indexer_decode_distributed_compact_bfloat16_v2_kernel",
+        "asc_atomic_add(local_histogram + bucket, 1U);",
+        "shard_greater_offset",
+        "shard_equal_offset",
+        "total_greater_count",
+        "equal_count_needed",
+        "output[row_offset + output_slot] = context_index;",
+    ):
+        assert contract in source
+
+    assert source.count("constexpr int32_t kRadixBins = 256;") == 1
+    assert source.count("__gm__ uint32_t* histogram") >= 2
+    assert "block_index / context_shard_count" in source
+    assert "block_index % context_shard_count" in source
+    assert "for (int32_t offset = 1; offset < kThreadsPerBlock; offset <<= 1)" in source
+    assert "asc_atomic_add(output" not in source
+    for forbidden in (
+        "basic_api/",
+        "kernel_operator.h",
+        "AscendC::LocalTensor",
+        "SetFlag",
+        "WaitFlag",
+        "PipeBarrier",
+        "CrossCore",
+        "asc_sync_inter",
+    ):
+        assert forbidden not in source
+
+
+def test_decode_distributed_topk_builds_as_an_independent_device_library():
+    setup_source = (V2_ROOT.parent / "setup.py").read_text(encoding="utf-8")
+
+    assert "lightning_indexer_decode_distributed_topk_bfloat16.asc" in setup_source
+    assert (
+        '"liblightning_indexer_decode_distributed_topk_bfloat16_v2_kernel.so"'
+        in setup_source
+    )
+
+
+def test_decode_bridge_uses_distributed_topk_only_for_canonical_shape():
+    bridge = (V2_ROOT / "csrc" / "lightning_indexer.asc").read_text(
+        encoding="utf-8"
+    )
+    body = _function_body(
+        bridge,
+        "lightning_indexer_forward_decode_family_64x128_context_sharded_bfloat16(",
+    )
+
+    assert (
+        "const bool use_distributed_topk =\n"
+        "      batch_size == 2 && query_count == 2 && context_shard_count == 16;"
+    ) in body
+    for workspace in (
+        "high_histograms",
+        "low_histograms",
+        "radix_state",
+        "shard_offsets",
+    ):
+        assert workspace in body
+
+    launches = (
+        "launch_lightning_indexer_context_sharded_family_64x128_bfloat16_v2(",
+        "launch_lightning_indexer_decode_distributed_high_histogram_bfloat16_v2(",
+        "launch_lightning_indexer_decode_distributed_select_high_bfloat16_v2(",
+        "launch_lightning_indexer_decode_distributed_low_histogram_bfloat16_v2(",
+        "launch_lightning_indexer_decode_distributed_select_low_offsets_bfloat16_v2(",
+        "launch_lightning_indexer_decode_distributed_compact_bfloat16_v2(",
+    )
+    positions = [body.index(launch) for launch in launches]
+    assert positions == sorted(positions)
+    assert "} else {\n    launch_lightning_indexer_decode_radix_topk_bfloat16_v2(" in body
 
 
 def test_decode_bridge_launches_score_before_unordered_radix():
