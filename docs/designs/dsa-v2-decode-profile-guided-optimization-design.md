@@ -1626,6 +1626,58 @@ clean CannBench `BasicInfo` workflows each improve the complete 308.854 us
 baseline by at least 1%. Otherwise the source candidate is reverted and the
 negative result is recorded here.
 
+A9 passed all retention gates. The retained fused source SHA-256 is
+`a3e79cd2ff256a9b633e5eb055802a4d819b28e25aab09c75cfb469661e520e7`;
+the production and resource-build fused ELF SHA-256 is
+`015b567ba3eb29f916e9a93475936741096b1ae593bf078ab48e1d60`. The CANN 9.2.0
+`dav-3510` production build completed at `-O3`, and the resource build accepted
+the source-visible 237,568-byte L1, 164,480-byte UB, and 65,536-byte L0B/L0C
+maxima. Every changed VF reported zero Stack bytes:
+
+| VF | Retained registers | A9 registers |
+| --- | ---: | ---: |
+| Softmax | 32 | 32 |
+| Key Pack prepare | 14 | 20 |
+| Key Pack fast | 13 | 15 |
+| Value Pack fast | 13 | 18 |
+| Generic Key Pack | 19 | 26 |
+| Generic Value Pack | 18 | 30 |
+| Output update | 14 | 14 |
+
+Five independent canonical full-accuracy processes with seeds 7 through 11
+passed at `atol=rtol=0.05`. Every process reported zero output and LSE
+mismatches while covering negative, out-of-range, valid-past, and
+causal-future indices. Output maximum absolute error ranged from 0.0078125 to
+0.009765625 and LSE maximum absolute error ranged from 0.00924 to 0.00940. An
+additional explicit P2 run exercised the generic selected64/two-PV-slot path
+and also reported zero output/LSE mismatches.
+
+Two clean-process CannBench `BasicInfo` workflows selected only canonical V3.2
+decode and ran at 1650 MHz. The table uses the dependency Indexer launches
+captured in each Sparse Attention profile, matching the published convention;
+the 3.613/3.532 us materialization Cast remains visible but excluded:
+
+| Boundary | T0 published | A9 run 1 | A9 run 2 |
+| --- | ---: | ---: | ---: |
+| Score | 84.058 us | 84.093 us | 83.389 us |
+| High-byte histogram | 5.697 us | 5.655 us | 5.744 us |
+| High-byte reducer | 10.383 us | 10.876 us | 10.867 us |
+| Low-byte histogram | 5.053 us | 5.162 us | 5.093 us |
+| Low-byte reducer and offsets | 29.130 us | 28.948 us | 28.571 us |
+| Compaction | 6.496 us | 6.999 us | 6.743 us |
+| Complete distributed Top-K | 56.759 us | 57.640 us | 57.018 us |
+| Lightning Indexer | 140.817 us | 141.733 us | 140.407 us |
+| Sparse Attention fused | 156.199 us | 126.155 us | 127.250 us |
+| Combine | 11.838 us | 11.903 us | 12.114 us |
+| DSA workflow | 308.854 us | 279.791 us | 279.771 us |
+
+Sparse Attention improves by 19.23% and 18.53% against the matching retained
+boundary. The complete workflow improves by 9.41% and 9.42%, with only 0.020 us
+spread between candidate totals. Indexer and Combine remain within their
+existing run-to-run range, so the gain is isolated to the four-tile Sparse
+Attention schedule rather than a favorable dependency fluctuation. A9 is
+retained.
+
 Raw baseline evidence is preserved under:
 
 ```text
@@ -1635,6 +1687,17 @@ Raw baseline evidence is preserved under:
 
 The copied Sparse Attention trace SHA-256 is
 `4066e8ceb04c76994a788d0f0f93121bfd7d7c0fb86cd7ec201618ad97be69f5`.
+
+Candidate evidence is preserved under:
+
+```text
+/tmp/cannbench-dsa-v2-a9-selected128-a3e79cd2-evidence.tar.gz
+/root/cannbench-dsa-v2-a9-selected128-a3e79cd2/ # Ascend 950PR host
+/root/cannbench-dsa-v2-a9-selected128-a3e79cd2-evidence.tar.gz
+```
+
+The local and remote candidate evidence archive SHA-256 is
+`84fda6ac152275146546458390c4206e555e5f0a8e5c0b6c47ee3def90e2bf82`.
 
 ### W0: Workflow-Level Cleanup
 
