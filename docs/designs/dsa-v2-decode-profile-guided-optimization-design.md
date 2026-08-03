@@ -16,16 +16,19 @@ histogram Top-K chain is retained on top of QK256 after reducing the complete
 Top-K boundary from about 82 us to 56.8-57.3 us. Pairwise PV coarsening,
 2048-thread Key/Value Pack widening, adjacent-value grouped loads, and Value
 Pack synchronization contraction were rejected after device measurement. The
-current published V2 decode workflow checkpoint is 279.771 us after the
-retained selected128 schedule. Its two selected-workflow measurements are
-279.791 and 279.771 us. Against the matching published vLLM-Ascend workflow at
-169.797 us, SIMT has 1.648x its latency and 0.607x its performance.
+current published V2 decode workflow checkpoint is 271.191 us after the
+retained selected256/stream128 schedule. Its two selected-workflow
+measurements are 270.696 and 271.191 us. Against the matching published
+vLLM-Ascend workflow at 169.797 us, SIMT has 1.597x its latency and 0.626x its
+performance.
 
 The 2x point is an intermediate checkpoint, not the completion target. The
 target is at least 0.90x vLLM-Ascend performance under the same selected-kernel
 boundary. At the current 169.797 us reference this requires SIMT latency at or
-below 188.663 us, another 91.108 us or 32.6% below the retained selected128
-run. Later stages remain gated by correctness and repeated device results.
+below 188.663 us, another 82.528 us or 30.4% below the retained selected256
+run. The intermediate 0.70x point requires no more than 242.567 us, another
+28.624 us below the current published result. Later stages remain gated by
+correctness and repeated device results.
 
 ## Scope And Baseline
 
@@ -1869,6 +1872,92 @@ evidence archive SHA-256:
 /root/cannbench-dsa-v2-a10-selected256-43b7813e-evidence.tar.gz
 /tmp/cannbench-dsa-v2-a10-selected256-43b7813e-controller/ # local
 ```
+
+### T2: Parallel Low-Byte Reducer And Shard Offsets
+
+After A10, the second clean `BasicInfo` workflow is 271.191 us. Indexer is now
+141.187 us, slightly larger than Sparse Attention fused plus Combine at
+130.004 us. The retained distributed Top-K chain contributes 57.789 us, with
+the low-byte reducer and shard-offset kernel alone contributing 28.904 us:
+
+| T0 stage | A10 run 2 |
+| --- | ---: |
+| High-byte histogram | 5.696 us |
+| High-byte reducer | 10.495 us |
+| Low-byte histogram | 5.123 us |
+| Low-byte reducer and offsets | 28.904 us |
+| Compaction | 7.571 us |
+
+The fourth stage is 50.0% of Top-K and 10.7% of the selected workflow. Its
+current 256-thread VF first reduces every low bucket across 16 shards. After
+the low threshold is known, however, only 16 threads remain active and each
+serially scans all high buckets above `selected_high` and all low buckets above
+`selected_low` for one shard. Thread zero then serially constructs all 16
+greater/equal shard offsets. This is a work-distribution problem inside the
+existing radix algorithm, not a new Top-K algorithm.
+
+Three implementations were considered:
+
+1. Keep the serial per-shard tails. This preserves the source but leaves most
+   reducer threads idle during the measured dominant region.
+2. Build per-shard suffix tables in the histogram kernels. This makes the
+   reducer cheap but adds another 64 KiB GM table or overwrites data that
+   is still needed to select the global low threshold. It also changes two
+   kernels and their traffic, so it is not the first experiment.
+3. Reuse the reducer's existing 256-word combined-histogram UB after threshold
+   selection as 256 shard/group partials. This is selected because it changes
+   one kernel, adds no launch or GM workspace, and isolates the hypothesis.
+
+The canonical mapping is:
+
+```text
+reducer threads             = 256
+context shards              = 16
+bucket groups per shard     = 16
+buckets per group           = 16
+thread                      = shard * 16 + bucket_group
+partial                     = sum(high buckets > selected_high)
+                            + sum(low buckets > selected_low)
+```
+
+Every thread reads at most 16 high and 16 low histogram counters and writes
+one UB partial. After a block barrier, one thread per shard reduces its 16 UB
+partials and reads the threshold-equal counter. After a second barrier, the
+first 16 threads independently form each shard's exclusive greater/equal
+offset by summing only prior shard totals. The last of those threads publishes
+the total-greater count. This final prefix has at most 15 UB reads per field;
+it does not justify another scan buffer or synchronization round.
+
+The existing reducer allocation remains sufficient:
+
+```text
+combined histogram / shard-group partials = 256 * 4 = 1,024 bytes
+shard greater counts                       =  16 * 4 =    64 bytes
+shard equal counts                         =  16 * 4 =    64 bytes
+total reducer UB                           =             1,152 bytes
+```
+
+All sums are exact unsigned integer counts bounded by the 32,768-token
+context. T2 preserves the five kernel launches, histogram and state layouts,
+unordered score-set semantics, deterministic threshold-tie completion,
+fallback dispatch, and the `C API + SIMT API` boundary. It adds no atomics,
+Basic API dependency, inter-core synchronization, or public-layer branch.
+
+Source contracts must prove the 16-by-16 ownership, bounded 16-bucket partial
+loops, reuse of the 256-word UB region, one-thread-per-shard partial reduction,
+parallel exclusive shard offsets, and absence of the old one-thread-per-shard
+full-tail loops. Device correctness must cover canonical, masked-tail,
+tied-threshold, near-threshold, and negative-score inputs with stable unordered
+Top-K score sets and valid unique indices.
+
+The absolute ceiling is the current 28.904 us kernel, not a promised saving.
+A 2x reducer improvement would save about 14.45 us, moving the workflow only
+to about 256.74 us or 0.661x vLLM-Ascend performance; T2 alone is not expected
+to reach 0.70x. Retain it only if production/resource builds pass with zero
+Stack in the changed VF, correctness remains exact, and two clean CannBench
+`BasicInfo` workflows each measure no more than 268.479 us, a 1% reduction
+from the 271.191 us retained boundary. Otherwise restore the T0 reducer and
+record the negative result here.
 
 ### W0: Workflow-Level Cleanup
 
