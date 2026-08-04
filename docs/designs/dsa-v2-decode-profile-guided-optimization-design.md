@@ -2819,6 +2819,151 @@ operator-local profile selection, direct fallback, and retention gate. It is
 not authorized by A13.1 design approval alone. A positive A13.1/A13.2 device
 result is the prerequisite for writing that detailed design.
 
+### A14: Native BF16x2 Staging And Score Arithmetic
+
+A13 closes the current index-order locality hypothesis. The next independent
+experiments use the CANN SIMT native `bfloat16x2_t` type in two independently
+measured stages. A14.1 targets the remaining canonical Sparse Attention SIMT
+packing work. A14.2 targets the two BF16 head contributions already owned by
+each Lightning Indexer score lane. They are never introduced in the same
+unmeasured candidate: A14.2 starts from the retained result of A14.1, whether
+that result is the native-pair candidate or the restored scalar baseline.
+
+#### A14.1: Native BF16x2 Canonical Value Staging
+
+The retained `head64_fused_value_pack_fast_vf` maps one warp to one selected
+row. Each lane currently handles scalar dimensions `lane, lane + 32, ...` for
+the 256-dimension canonical Value tile. The GM row stride is 576 BF16 values,
+the canonical dimension start is a multiple of 256 BF16 values, and every
+row-major 16-by-16 staging tile starts at an aligned UB offset. A14.1 instead
+maps each lane to adjacent even/odd pairs:
+
+```text
+pair index     = lane, lane + 32, lane + 64, lane + 96
+first dim      = 2 * pair index
+second dim     = first dim + 1
+GM operation   = one aligned bfloat16x2_t load
+UB operation   = one aligned bfloat16x2_t store
+```
+
+Every pair remains inside one 16-dimension tile because its first dimension is
+even. Both the source offset and A6 staging offset are therefore four-byte
+aligned. Invalid rows write a zero `bfloat16x2_t`. The existing `asc_transpose`
+conversion, Tensor API UB-to-L1 copy, L1/L0 ownership, QK and PV schedules,
+selected256/compute128 tiling, P4 task mapping, 1024-thread launch, and
+producer/consumer protocol remain unchanged.
+
+This candidate is materially different from the rejected A5 grouped loads.
+A5 loaded adjacent BF16 bit patterns through `uint32_t` or `uint64_t` and then
+scattered scalar values directly into the old ZN destination. The 32-bit and
+64-bit variants regressed the fused kernel by about 37% and 113%. A6 later
+replaced that destination with contiguous row-major tile staging followed by
+`asc_transpose`. A14.1 uses the native BF16 pair type for both the GM load and
+the contiguous UB store, so it tests a new compiler instruction and storage
+mapping rather than repeating A5.
+
+The first candidate changes only the exact canonical V3.2 decode fast Value
+Pack. It does not vectorize Query Pack, Key Pack, Softmax, Indexer score
+postprocessing, Top-K, generic decode, prefill, V1, tails, or noncanonical
+shapes. Those are separate candidates only after A14.1 establishes a positive
+native-pair result. In particular, Score postprocessing has nonadjacent head
+loads and BF16 rounding-sensitive arithmetic, while Softmax accumulates and
+evaluates exponentials in FP32; neither belongs in this memory-access test.
+
+Source-contract tests must first fail on the retained scalar source and then
+prove:
+
+- the canonical fast Value Pack uses `bfloat16x2_t` GM and UB pointers;
+- lane-to-pair mapping covers every dimension in `[0, 256)` exactly once;
+- every source and staging pair begins at an even BF16 offset;
+- invalid rows write two BF16 zeros without a scalar tail;
+- the retained A6 `asc_transpose` path and its staging allocation remain;
+- generic Value Pack, Query/Key Pack, prefill, V1, dispatch, task count, and
+  launch count remain unchanged;
+- no public-layer branch or new Basic API dependency is introduced.
+
+The production and `--cce-res-usage` builds must use CANN 9.2.0, `dav-3510`,
+and `-O3`. The changed VF must report zero Stack and no material register
+increase over the retained scalar Value Pack. Compiler acceptance alone does
+not prove vector lowering; retain the production ELF and, if timing is
+positive, use `InstrTimeline` or generated-instruction evidence to confirm the
+native pair path rather than inferring it from source spelling.
+
+Device correctness uses five fresh canonical processes with seeds 7 through
+11 at `atol=rtol=0.05`, covering negative, out-of-range, valid-past, and
+causal-future indices. One explicit noncanonical P2/selected64 process proves
+that the generic scalar fallback remains valid. Every process must report zero
+output and LSE mismatches.
+
+Performance uses two alternating clean baseline/candidate pairs through the
+CannBench `bench` subcommand with its default `BasicInfo` metric set. Retain
+A14.1 only if both pairs improve fused Sparse Attention by at least 2% and the
+complete selected workflow by at least 1%, while Indexer and Combine each stay
+within 1.0 us of their paired baselines. Collect `Default` or `InstrTimeline`
+only after the `BasicInfo` gate passes. A failed candidate is restored to the
+scalar A10/A6 Value staging source, recorded here, and not published.
+
+#### A14.2: Native BF16x2 Lightning Indexer Score Arithmetic
+
+The retained decode score postprocess maps one warp to one context position.
+Each lane reads head `lane` and head `lane + 32`, applies the same BF16-visible
+sequence to both, converts the two weighted BF16 values to FP32, and joins the
+existing FP32 warp reduction. The two head addresses are not adjacent, so
+A14.2 does not claim a paired memory operation. It forms a register pair only
+after the two scalar BF16 loads:
+
+```text
+dot_pair      = make_bfloat162(first_dot, second_dot)
+relu_pair     = __hmaxx2(dot_pair, zero_pair)
+weight_pair   = make_bfloat162(first_weight, second_weight)
+weighted_pair = __hmulx2(relu_pair, weight_pair)
+weighted_fp32 = __bfloat1622float2(weighted_pair)
+lane sum      = weighted_fp32.x + weighted_fp32.y
+```
+
+This preserves the retained numerical contract: each MMAD result is already
+BF16, ReLU produces BF16, multiplication by the corresponding BF16 weight
+rounds to BF16, and only then does the warp accumulate in FP32. The FP32 warp
+tree, lane ownership, score output conversion, two-slot producer/consumer
+pipeline, mixed-task count, score workspace, and distributed Top-K chain stay
+unchanged.
+
+Do not replace the two operations with `__hfmax2_relu`. That interface computes
+`relu(x * y + z)`, whereas the Indexer requires `relu(x) * weight`; negative
+weights make the two expressions observably different. Do not use `h2exp`,
+BF16 pair addition, or a BF16 shuffle reduction. On the tested SDK `h2exp`
+expands to two FP32 `expf` calls and rounds their results to BF16, and BF16
+addition would change the retained FP32 reduction contract. Sparse Attention
+Softmax therefore remains FP32 and outside A14.2.
+
+Source-contract tests must first fail on the retained scalar postprocess and
+then prove:
+
+- the two existing scalar dot and weight loads feed `bfloat16x2_t` pairs;
+- ReLU uses `__hmaxx2`, multiplication uses `__hmulx2`, and the result uses
+  `__bfloat1622float2` before FP32 addition;
+- `__hfmax2_relu`, `h2exp`, and BF16 pair reduction are absent;
+- the existing five-step `asc_shfl_down` FP32 reduction and lane-zero BF16
+  output remain;
+- canonical, masked-tail, tied-threshold, near-threshold, negative-weight, V1,
+  prefill, and noncanonical paths retain their existing dispatch contracts;
+- no launch, workspace, public output, or Basic API dependency is added.
+
+The changed score postprocess VF must compile with zero Stack and no material
+register increase. Device accuracy runs five repeats each for canonical,
+masked-tail, tied-threshold, near-threshold, and negative-weight inputs. It
+requires the exact unordered Top-K score multiset, the deterministic T3 tie
+subset, a stable selected set, unique valid indices, and unchanged fallback
+behavior.
+
+A14.2 uses two alternating clean baseline/candidate pairs through CannBench
+`BasicInfo`, starting from the retained A14.1 decision. Retain it only if both
+pairs improve the Score kernel by at least 3% and the complete selected
+workflow by at least 1%, while every radix stage, Sparse Attention, and Combine
+remain within 1.0 us of their paired baselines. A failed candidate is restored
+to the scalar score arithmetic, recorded here, and not published. Detailed
+metrics are collected only after the `BasicInfo` gate passes.
+
 ### W0: Workflow-Level Cleanup
 
 Keep dependency materialization and helper launches visible in raw profiles.
