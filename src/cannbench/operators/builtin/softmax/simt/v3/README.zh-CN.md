@@ -42,7 +42,8 @@ row shape 的多路径实现：
 4. 针对高频的 `dim_size=512/1024`，先隔离编译单元规避编译器 UB
    估算问题，再引入 GM -> UB -> SIMT 计算 -> GM 的双缓冲流水。
 5. 针对 logits 大 row，按“一整行能否放入 UB”继续分流：能放入时使用
-   whole-row UB recompute；放不下时使用三个 kernel 和行级 GM workspace。
+   whole-row UB recompute；放不下时使用两个 MTE/UB tiled kernel 和行级
+   GM workspace。
 
 这条路径与 PyTorch CUDA 的经验一致：Softmax 的关键不是找到一个覆盖所有
 shape 的万能 kernel，而是围绕 row 长度、对齐、片上存储容量和寄存器压力
@@ -105,23 +106,23 @@ else:
             通用 persistent register/shuffle kernel
     else:
         fast row path，block_x = 1024
-        if fp16 and 8192 <= dim_size <= 32768:
+        if fp16 and 8192 <= dim_size <= 56320:
             whole-row UB recompute path
-        elif fp32 and 8192 <= dim_size <= 16384:
+        elif fp32 and 8192 <= dim_size <= 28160:
             whole-row UB recompute path
         elif row 超过对应 whole-row UB 上限:
-            三 kernel GM workspace path
+            两 kernel MTE/UB tiled workspace path
         elif 2 <= ceil(dim_size / 1024) <= 8:
             register-cache path
         else:
             direct ILP + half2/scalar fast kernel
 ```
 
-判断顺序也是优先级：whole-row UB 和 GM workspace 高于 register-cache。
+判断顺序也是优先级：whole-row UB 和 tiled workspace 高于 register-cache。
 在后续两个大-row 分支加入后，当前受支持的 fp16/fp32 shape 会先被
-persistent、register-cache、whole-row UB 或 GM workspace 覆盖，因此最后的
-direct fast kernel 不再由主分发命中；但它的 ILP、x4/x2 和 scalar 访问助手
-仍被 GM workspace 路径复用。
+persistent、register-cache、whole-row UB 或 tiled workspace 覆盖，因此最后的
+direct fast kernel 不再由主分发命中。它的 ILP、x4/x2 和 scalar 访问助手
+作为通用 fallback 实现继续保留。
 
 代码还保留了 `GenericLike` 枚举和防御性报错，但当前 fp16/fp32 selector
 不会返回该枚举；这里的 fail-fast 用于防止未来扩展 selector 后静默进入
@@ -134,7 +135,7 @@ direct fast kernel 不再由主分发命中；但它的 ILP、x4/x2 和 scalar �
 | `512` | `persistent_512` 专用 GM/UB 双缓冲 |
 | `1024` | `persistent_1024` 专用 GM/UB 双缓冲 |
 | `32128` | fast row 下的 whole-row UB recompute |
-| `50265` | fast row 下的三 kernel GM workspace |
+| `50265` | fast row 下的 whole-row UB 双缓冲流水 |
 
 ## 4. 按提交记录梳理优化演进
 
@@ -286,9 +287,9 @@ dim_size == 1024 -> persistent_1024 专用流水
 区间。它也说明阈值不能只看 `dim_size`，还必须考虑输入和输出 dtype 对 UB
 容量的共同占用。
 
-### 4.11 为超大 logits row 增加 GM workspace 路径（`18059f8`）
+### 4.11 为超大 logits row 增加 GM workspace 路径（`18059f8`，已被后续实现替代）
 
-**已实现。** 当一整行超过 UB 上限时，V3 不再尝试 whole-row staging，而是
+**历史实现。** 当一整行超过当时的 UB 上限时，V3 不再尝试 whole-row staging，而是
 拆成三个有全局顺序保证的 kernel：
 
 ```text
@@ -303,6 +304,39 @@ fp16 的触发条件是 `dim_size > 32768`，fp32 是 `dim_size > 16384`。works
 
 这个设计牺牲两次额外 kernel launch 和 workspace 分配，换取无需跨 core
 同步的全局阶段边界，并继续复用 ILP=4、fp16 x4/x2 和标量访问助手。
+
+### 4.12 释放 224 KiB UB 并统一大 row MTE 分块路径
+
+当前构建为每个 ASC 翻译单元增加：
+
+```text
+--cce-disable-vf-stack-reserved-ubuf
+--cce-disable-asc-reserved-ubuf
+```
+
+在已验证的 Ascend 950PR、CANN 9.2 环境中，可用 UB 从 216 KiB 提高到
+224 KiB。实现只把 220 KiB 用于双缓冲数据区，剩余约 4 KiB 留给 reduction
+scratch、在线统计、对齐和编译器开销。对应上限为：
+
+- fp16：`56320` 元素；
+- fp32：`28160` 元素。
+
+超过整行上限后，fp16/fp32 共用两 kernel 流水：
+
+```text
+kernel 1: MTE2 分块 GM -> UB，SIMT 在线合并 tile max/sum -> 行级 workspace
+kernel 2: MTE2 分块 GM -> UB，SIMT normalize，MTE3 分块 UB -> GM
+```
+
+bulk 输入和输出不再由 SIMT 线程直接访问 GM。GM workspace 仍保存每行的
+`row_max` 和 `row_inv_sum`，共 8 字节；它用于两个 kernel 之间的全局阶段边界，
+不是大 tensor 搬运路径。
+
+在 Ascend 950PR、CANN 9.2、1650 MHz 上用仓库标准 `msopprof BasicInfo`
+验证 `(1024, 49152)` fp32：历史 direct-GM 三 kernel 合计 `0.853744 ms`，
+当前 MTE/UB 两 kernel 合计 `0.436659 ms`，约为 `1.95x`。FP16 已发布大 shape
+的代表性对比基本持平：`longformer_logits` 为 `0.896138 -> 0.898242 ms`，
+`m2m100_logits` 为 `1.464791 -> 1.464915 ms`。
 
 ## 5. 已实现优化方法归纳
 
@@ -319,7 +353,7 @@ fp16 的触发条件是 `dim_size > 32768`，fp32 是 `dim_size > 16384`。works
 | UB staging | 512/1024 使用双缓冲 GM/UB 流水 | `bb1c443` |
 | 分发正确性 | 专用 512/1024 与通用 fallback 明确分离 | `15efd0e` |
 | 大 row 片上计算 | 能放入 UB 时 whole-row recompute | `af01f6f` |
-| 超大 row 分阶段 | max/sum/write 三 kernel + 行级 workspace | `18059f8` |
+| 超大 row 分阶段 | MTE/UB tiled stats/write 两 kernel + 行级 workspace | `18059f8` 后续优化 |
 
 ## 6. 发布数据中的代表性变化
 
@@ -343,7 +377,7 @@ shape，并比较相邻阶段。数字是端到端 `latency_ms`。
 数据与专用 GM/UB 流水的优化目标一致：`512/1024` attention shape 获得了
 约 2 倍以上的阶段性提升。
 
-### 6.2 超大 logits GM workspace 阶段
+### 6.2 历史超大 logits GM workspace 阶段
 
 比较 2026-07-15 快照 `4934a05` 与 2026-07-25 快照 `9f5b1bd`。期间主要
 实现变化包括 `af01f6f` 和 `18059f8`。
@@ -356,8 +390,9 @@ shape，并比较相邻阶段。数字是端到端 `latency_ms`。
 | `mt5_logits` | `250112` | 3.151859 | 1.548414 | 2.04x |
 | `xglm_logits` | `256008` | 1.706247 | 0.804254 | 2.12x |
 
-这些 case 都超过 fp16 whole-row UB 上限，因此会进入三 kernel GM workspace
-路径。阶段性收益集中在约 1.8x 到 2.1x。
+这些 case 当时都超过 fp16 whole-row UB 上限，因此进入三 kernel GM
+workspace 路径。阶段性收益集中在约 1.8x 到 2.1x；当前实现已改为两 kernel
+MTE/UB tiled 路径，不能用这组历史数据代表当前 kernel 拆分。
 
 whole-row 区间的快照结果不完全一致：`convbert_logits` 从 2.277790 ms 降至
 2.132864 ms，而 `t5_logits` 从 0.952573 ms 上升至 1.113437 ms。这说明
@@ -368,7 +403,7 @@ whole-row 区间的快照结果不完全一致：`convbert_logits` 从 2.277790 
 
 ### 7.1 分发阈值仍以经验常量为主
 
-`64`、`1024`、`8192`、`16384`、`32768` 等阈值直接写在源码中。它们已经
+`64`、`1024`、`8192`、`28160`、`56320` 等阈值直接写在源码中。它们已经
 形成可工作的策略，但还缺少由 device 属性、UB 可用容量和 occupancy
 统一推导的 cost model。
 
@@ -386,7 +421,7 @@ shape 上稳定获益，仍需同环境的受控 A/B 才能确认。
 
 ### 7.4 超大 row 路径有额外 launch 和分配成本
 
-每次调用会创建 `row_max` 与 `row_inv_sum` 两个 tensor，并启动三个 kernel。
+每次调用会创建 `row_max` 与 `row_inv_sum` 两个 tensor，并启动两个 kernel。
 当 `outer_size` 较小或 row 仅略超 UB 上限时，固定开销可能抵消访存收益。
 
 ### 7.5 编译器行为是实现约束的一部分
@@ -406,7 +441,7 @@ shape 上稳定获益，仍需同环境的受控 A/B 才能确认。
 ### P0-1：先建立按路径分组的稳定测量闭环
 
 为 persistent 512、persistent 1024、其他 persistent、register fast、
-whole-row UB、large-row GM 和 spatial 各选代表 case。每次修改至少记录：
+whole-row UB、large-row tiled 和 spatial 各选代表 case。每次修改至少记录：
 
 - kernel 名和实际命中的分发路径；
 - device kernel latency 与端到端 latency；
@@ -422,7 +457,7 @@ warmup/iters 和输入种子；每个候选保留不少于 20 个有效性能样
 median、p95 和离散程度；上述路径代表 case 可确认实际 kernel；40 个
 canonical case 全部通过准确率回归。
 
-### P0-2：重新标定 whole-row UB 与 GM workspace 的边界
+### P0-2：重新标定 whole-row UB 与 tiled workspace 的边界
 
 当前边界只由 dtype 和 row length 决定。建议至少把以下变量纳入决策：
 
@@ -530,9 +565,9 @@ row sum 检查。
 - `512` 专用 persistent；
 - `1024` 专用 persistent；
 - fast register-cache；
-- GM workspace 内复用的 shifted `half2` 访问；
+- large-row MTE/UB tiled stats/write；
 - whole-row UB recompute；
-- large-row GM workspace；
+- large-row 行级 workspace；
 - spatial。
 
 ### 9.3 编译器回归

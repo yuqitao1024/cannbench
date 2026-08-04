@@ -72,6 +72,8 @@ class AscendBuildExtension(build_ext):
             f"--npu-arch={NPU_ARCH}",
             "-fPIC",
             "-std=c++17",
+            "--cce-disable-vf-stack-reserved-ubuf",
+            "--cce-disable-asc-reserved-ubuf",
             opt_flag,
             f"-D_GLIBCXX_USE_CXX11_ABI={abi_value}",
         ]

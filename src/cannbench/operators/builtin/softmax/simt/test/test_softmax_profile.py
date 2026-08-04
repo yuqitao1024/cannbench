@@ -6,9 +6,8 @@ def test_softmax_v3_profile_sums_multistage_kernels_across_files(tmp_path):
     profile_dir = tmp_path / "profile"
     profile_dir.mkdir()
     for name, duration_us in (
-        ("row_softmax_fast_large_gmem_max_kernel", 950),
-        ("row_softmax_fast_large_gmem_sum_kernel", 1850),
-        ("row_softmax_fast_large_gmem_write_kernel", 2900),
+        ("row_softmax_fast_large_ub_tiled_stats_pipeline_kernel", 1850),
+        ("row_softmax_fast_large_ub_tiled_write_pipeline_kernel", 2900),
     ):
         (profile_dir / f"{name}.csv").write_text(
             "Op Name,Task Duration(us)\n"
@@ -27,7 +26,7 @@ def test_softmax_v3_profile_sums_multistage_kernels_across_files(tmp_path):
     )
 
     assert selection.aggregate_across_files
-    assert summary.latency_ms == 5.7
+    assert summary.latency_ms == 4.75
 
 
 def test_softmax_non_v3_profile_keeps_default_per_file_aggregation():

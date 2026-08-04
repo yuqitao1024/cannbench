@@ -39,6 +39,37 @@ picture.
 Treat a resource error code as a symptom. Confirm the effective resource
 request before redesigning the algorithm.
 
+### Account For Optional UB Reserved Regions
+
+On the tested Ascend 950PR and CANN 9.2 toolchain, Bisheng leaves 216 KiB of UB
+available by default. Compiling every ASC translation unit with both of these
+options releases two compiler-reserved regions and raises the observed usable
+limit to 224 KiB (229376 bytes):
+
+```text
+--cce-disable-vf-stack-reserved-ubuf
+--cce-disable-asc-reserved-ubuf
+```
+
+Treat this as a toolchain-specific build contract, not a portable hardware
+constant. Verify that the installed compiler accepts both options and validate
+the resulting binary on the target device.
+
+Do not size data arrays to the full 224 KiB. Apply the capacity worksheet to all
+simultaneously live allocations:
+
+```text
+data_bytes <= 229376 - reduction_scratch - pipeline_state
+              - alignment_padding - compiler_margin
+```
+
+For a double-buffered in-place tile, `data_bytes` is
+`2 * tile_elements * sizeof(dtype)`. For separate input/output buffers, include
+both arrays; for independently double-buffered input and output, include all
+four slots. Keep the usable-UB constant, tile constants, and compile options in
+sync, add compile-time capacity assertions where the language permits, and
+recheck compiler resource metadata whenever any live UB allocation changes.
+
 ## Define Work Ownership
 
 Write the mapping explicitly:
