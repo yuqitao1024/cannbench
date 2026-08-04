@@ -418,6 +418,31 @@ def test_ascend_softmax_v3_fp16_50k_rows_use_single_inplace_ub_pipeline():
     assert "row_softmax_fast_large_ub_stats_pipeline_kernel" not in row_fast_source
 
 
+def test_ascend_softmax_v3_large_fp16_ub_reductions_use_half2_with_tail_fallback():
+    source = _read_v3_simt_source("row_fast.asc")
+    whole_row_start = source.index("row_softmax_fast_large_row_forward_vf")
+    whole_row_end = source.index(
+        "row_softmax_fast_large_row_recompute_impl", whole_row_start
+    )
+    tiled_start = source.index("row_softmax_fast_large_ub_tiled_stats_vf")
+    tiled_end = source.index("row_softmax_fast_large_ub_tiled_write_vf", tiled_start)
+
+    for section, input_name, size_name in (
+        (source[whole_row_start:whole_row_end], "input_ub", "tile_size"),
+        (source[tiled_start:tiled_end], "tile_ub", "tile_elements"),
+    ):
+        half2_cast = (
+            "reinterpret_cast<__ubuf__ const half2*>(" + input_name + ")"
+        )
+        assert section.count(half2_cast) >= 2
+        assert section.count("__low2float(") >= 4
+        assert section.count("__high2float(") >= 4
+        assert section.count("if (pair_offset + 1 < half2_size)") >= 2
+        assert section.count(f"if (({size_name} % 2) != 0 && threadIdx.x == 0)") >= 2
+        assert "offset = threadIdx.x * kLargeRowILP" in section
+        assert "offset += blockDim.x * kLargeRowILP" in section
+
+
 def test_ascend_softmax_v3_fp16_and_fp32_huge_rows_use_tiled_online_stats():
     source = _read_v3_simt_source("row_fast.asc")
 
