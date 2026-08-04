@@ -3176,6 +3176,37 @@ remote run: /root/cannbench-dsa-v2-a15-score-pad-a4769cc/.cannbench-runs/
 local failure summary: /tmp/a15-candidate-smoke/
 ```
 
+#### A15.1b: Capacity-Neutral Score NZ2DN
+
+Changing lane-to-head ownership alone cannot repair the retained row-major
+layout: for any permutation of the 32 heads, the 64-byte row stride still maps
+all lanes onto the same four bank-group/subbank resources. A separate transpose
+would also add a full-tile read/write stage to every context tile.
+
+Ascend 950PR Fixpipe instead supports an inline `COLUMN_MAJOR` NZ2DN transform
+from L0C to UB. The candidate writes the same 64-by-32 BF16 values as a physical
+`[context][head]` matrix and changes only the SIMT address formula:
+
+```text
+row-major:    shared_scores[head * 32 + context]
+column-major: shared_scores[context * 64 + head]
+```
+
+The two slots remain exactly 8 KiB. For one scalar BF16 head load, lanes 0-31
+then span eight rather than four bank-group/subbank resources, reducing the
+maximum different-address multiplicity from eight to four. Fixpipe also avoids
+the previous NZ2ND conversion. This first discriminator preserves the scalar
+arithmetic and reduction order; packed BF16 loads are a separate follow-up only
+if the layout itself is retained.
+
+Require the full Indexer accuracy suite and complete V3.2 decode accuracy on
+the target device. Measure two fresh-process CannBench `BasicInfo` runs against
+the exact restored stride-32 baseline. Retain this layout only if both runs
+improve the Score kernel by at least 1% and the selected workflow does not
+regress, with each Top-K stage, Sparse Attention, and Combine within 1.0 us of
+the paired baseline. A hardware fault, accuracy difference, or failure of the
+paired gate restores the row-major source before A15.2/A15.3.
+
 #### A15.2: Sparse Attention NZ And Staging Accesses
 
 The canonical fused Sparse Attention SIMT stages contain several fixed aliases:

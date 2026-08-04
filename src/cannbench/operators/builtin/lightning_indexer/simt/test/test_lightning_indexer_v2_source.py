@@ -314,6 +314,46 @@ def test_v2_context_sharded_postprocess_uses_all_threads_for_head_reduction():
     assert "asc_shfl_down" in source
 
 
+def test_v2_context_sharded_score_uses_capacity_neutral_column_major_layout():
+    source = CONTEXT_SHARDED_SOURCE.read_text(encoding="utf-8")
+    postprocess = _function_body(
+        source, "lightning_indexer_context_sharded_postprocess_vf("
+    )
+    aic = _function_body(source, "lightning_indexer_context_sharded_aic(")
+
+    for contract in (
+        "kColumnMajorUbFixpipeConfig",
+        "AscendC::CO2Layout::COLUMN_MAJOR",
+        "FixpipeParamsC310<AscendC::CO2Layout::COLUMN_MAJOR>",
+        "fixpipe_params.dstStride = kHeadCount;",
+        "fixpipe_params.params = {1, 0, 0, 1};",
+        "tile_context_index * kHeadCount + first_head_index",
+        "tile_context_index * kHeadCount + second_head_index",
+    ):
+        assert contract in source
+
+    assert aic.count(
+        "Fixpipe<bfloat16_t, float, kColumnMajorUbFixpipeConfig>"
+    ) == 2
+    assert "kRowMajorUbFixpipeConfig" not in source
+    assert "head_index * kContextTileSize" not in postprocess
+    assert "static_assert(2 * kSharedScoreSlotBytes == 8 * 1024);" in source
+
+    context_index = 0
+    row_major_resources = [
+        ((head * 32 + context_index) * 2 // 8) % 32 for head in range(32)
+    ]
+    column_major_resources = [
+        ((context_index * 64 + head) * 2 // 8) % 32 for head in range(32)
+    ]
+    assert len(set(row_major_resources)) == 4
+    assert len(set(column_major_resources)) == 8
+    assert max(row_major_resources.count(value) for value in set(row_major_resources)) == 8
+    assert max(
+        column_major_resources.count(value) for value in set(column_major_resources)
+    ) == 4
+
+
 def test_v2_context_sharded_score_pipeline_uses_two_owned_bf16_slots():
     source = CONTEXT_SHARDED_SOURCE.read_text(encoding="utf-8")
     aic = _function_body(
