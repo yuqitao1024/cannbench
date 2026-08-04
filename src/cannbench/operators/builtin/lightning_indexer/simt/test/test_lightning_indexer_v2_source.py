@@ -157,6 +157,37 @@ def test_decode_distributed_topk_owns_histograms_offsets_and_output_ranges():
         assert forbidden not in source
 
 
+def test_decode_distributed_low_reducer_groups_threshold_scan():
+    source = DISTRIBUTED_TOPK_SOURCE.read_text(encoding="utf-8")
+    reducer = _function_body(
+        source,
+        "lightning_indexer_decode_distributed_select_low_offsets_bfloat16_v2_vf(",
+    )
+    normalized_source = " ".join(source.split())
+    normalized_reducer = " ".join(reducer.split())
+
+    for contract in (
+        "constexpr int32_t kThresholdGroupCount = 16;",
+        "constexpr int32_t kThresholdBucketsPerGroup = 16;",
+        "kThresholdGroupCount * kThresholdBucketsPerGroup == kRadixBins",
+    ):
+        assert contract in normalized_source
+
+    for contract in (
+        "__ubuf__ uint32_t* threshold_group_counts = shard_greater_counts",
+        "if (thread_index < kThresholdGroupCount)",
+        "group_bucket_begin = thread_index * kThresholdBucketsPerGroup",
+        "threshold_group_counts[thread_index] = group_count",
+        "higher_group = thread_index + 1",
+        "greater_count < remaining_rank",
+        "selected_bucket >= group_bucket_begin",
+    ):
+        assert contract in normalized_reducer
+
+    assert "if (thread_index == 0)" not in reducer
+    assert "selected_bucket = kRadixBins - 1" not in normalized_reducer
+
+
 def test_decode_distributed_low_reducer_parallelizes_shard_bucket_tails():
     source = DISTRIBUTED_TOPK_SOURCE.read_text(encoding="utf-8")
     reducer = _function_body(

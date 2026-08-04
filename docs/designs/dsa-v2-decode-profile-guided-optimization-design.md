@@ -17,17 +17,18 @@ Top-K boundary from about 82 us to 56.8-57.3 us. Pairwise PV coarsening,
 2048-thread Key/Value Pack widening, adjacent-value grouped loads, and Value
 Pack synchronization contraction were rejected after device measurement. The
 parallel low-byte reducer and shard-offset schedule is retained after cutting
-that kernel from 28.904 us to 14.423-14.444 us. The current published V2 decode
-workflow checkpoint is now T2 at 255.959 us; its two validation measurements
-are 256.123 and 255.959 us. Against the matching published vLLM-Ascend workflow
-at 169.797 us, the published SIMT V2 workflow has 1.508x its latency and 0.663x
-its performance.
+that kernel from 28.904 us to 14.423-14.444 us. T3 low-byte grouped threshold
+selection is retained after reducing its reducer from 14.945 us to 7.494-7.600
+us. The current published V2 decode workflow checkpoint is now T3 at 249.697
+us; its two validation measurements are 250.964 and 249.697 us. Against the
+matching published vLLM-Ascend workflow at 169.797 us, the published SIMT V2
+workflow has 1.471x its latency and 0.680x its performance.
 
 The 2x point is an intermediate checkpoint, not the completion target. The
 target is at least 0.90x vLLM-Ascend performance under the same selected-kernel
 boundary. At the current 169.797 us reference this requires SIMT latency at or
-below 188.663 us, another 67.296 us or 26.3% below T2 run 2. The intermediate
-0.70x point requires no more than 242.567 us, another 13.392 us below T2 run 2.
+below 188.663 us, another 61.034 us or 24.4% below T3 run 2. The intermediate
+0.70x point requires no more than 242.567 us, another 7.130 us below T3 run 2.
 Later stages remain gated by correctness and repeated device results.
 
 ## Scope And Baseline
@@ -2014,6 +2015,325 @@ evidence archive SHA-256:
 /root/cannbench-dsa-v2-t2-parallel-low-64ab06a2/ # Ascend 950PR host
 /root/cannbench-dsa-v2-t2-parallel-low-64ab06a2-evidence.tar.gz
 /tmp/cannbench-dsa-v2-t2-controller-EV89Bo/ # local
+```
+
+### A11: Canonical Selected512 With UB-Resident Query Replay
+
+T2 changes only Lightning Indexer, so Sparse Attention still uses the retained
+A10 source SHA-256
+`43b7813e830aa1ba1d9550b917fe8e18dc64721f766c0d294694561b45c7303b`.
+Fresh CannBench `Default` and `InstrTimeline` workflows were collected from the
+T2 package in separate clean processes through `bench --aic-metrics`. No
+direct profiler command or custom profiler option was used. Both collections
+ran on Ascend 950PR with CANN 9.2.0, `dav-3510`, production `-O3`, and a stable
+1650 MHz frequency. Their selected dependency boundaries were:
+
+| Boundary | Default | InstrTimeline |
+| --- | ---: | ---: |
+| Dependency Indexer | 124.281999 us | 124.563997 us |
+| Sparse Attention fused | 118.278000 us | 118.178001 us |
+| Combine | 11.695000 us | 12.168000 us |
+| Selected workflow | 254.254999 us | 254.909998 us |
+| Excluded materialization Cast | 3.524000 us | 4.240000 us |
+
+The copied fused trace and ELF SHA-256 values are
+`a2885da5461a5f40f99c4dc7c9772e6792959cbd6eb2be51aef6db9ca16e86b0`
+and
+`5ca302ae61115c869b789143d988293b403b3db1b1672f4d8dc0b31e326871d9`.
+The ELF source symbol and local repository source hash agree, excluding a stale
+Sparse Attention module. Raw artifacts are preserved under:
+
+```text
+/root/cannbench-dsa-v2-t2-parallel-low-64ab06a2/results-default/
+/root/cannbench-dsa-v2-t2-parallel-low-64ab06a2/results-instrtimeline/
+/tmp/cannbench-dsa-v2-t2-current-profile/
+```
+
+The current binary has stable AIV call markers: Key Prepare at
+`0x120053e014c8`, Key Fast at `0x120053e01544`, Softmax at
+`0x120053e01720`, first Value Pack at `0x120053e01840`, following Value
+Packs at `0x120053e01d24`, Output Update at `0x120053e02210`, and final
+Output Write at `0x120053e01094`. Every one of the 12 recorded AIV lanes has
+two complete outer tiles. The profiler again warns that kernels exceeding 108
+sub-blocks may lose dynamic records, so complete markers define the critical
+intervals while individual long event durations are not summed:
+
+| Per-outer-tile interval | Samples | Mean | Minimum | Maximum |
+| --- | ---: | ---: | ---: | ---: |
+| First Key Prepare to Softmax | 24 | 26.478 us | 25.649 us | 27.087 us |
+| Softmax to first Value Pack | 24 | 5.314 us | 5.116 us | 5.530 us |
+| First Value Pack to next tile/output | 24 | 17.966 us | 16.781 us | 19.008 us |
+| Complete outer tile | 24 | 49.758 us | 47.910 us | 51.243 us |
+| Both outer tiles per lane | 12 | 99.515 us | 97.891 us | 101.341 us |
+
+The two outer tiles perform the same total QK, exponential, Value Pack, and PV
+arithmetic required for 512 selected rows. The removable work is narrower:
+one online-Softmax state transition, two 256-dimension Output Update calls,
+and one outer phase boundary. A naive selected512 constant change is invalid.
+Keeping the full 73,728-byte Query in L1 while adding a 131,072-byte Score
+tensor and a 65,536-byte Key subtile would require 270,336 bytes.
+
+A11 instead retains the already packed full Query in UB and replays only the
+current 64-by-256 Query slice to a 32 KiB L1 staging region beside each Key
+gather. It keeps selected128 compute subtiles, QK256, Value256, and the current
+single canonical gather slots. The four selected subtiles produce one full
+64-by-512 Score tensor, one Softmax call, and one full Probability tensor. Once
+all QK work is complete, Query is dead for this P4 task and its L1 region is
+reused by PV. The source-visible capacity worksheet is:
+
+```text
+QK L1 = Query slice 32,768 + Key subtile 65,536 + Score512 131,072
+       = 229,376 bytes
+PV L1 = Probability512 65,536 + Value subtile 65,536 + PV 65,536
+       = 196,608 bytes
+L1 maximum = 229,376 bytes
+
+Persistent UB = max/sum/scale 384 + running output 65,536
+                + 256 row offsets 1,024
+              = 66,944 bytes
+QK UB = persistent 66,944 + Query 36,864 + Key half 32,768
+        + Score half 65,536
+      = 202,112 bytes
+PV UB = persistent 66,944 + Value half 32,768
+        + transpose staging 32,768 + PV 32,768
+      = 165,248 bytes
+UB maximum = 202,112 bytes
+
+L0B maximum = 65,536 bytes
+L0C maximum = 65,536 bytes
+```
+
+The QK L1 maximum is below A10's compiler-accepted 237,568 bytes, and the UB
+maximum leaves 19,072 bytes below the tested 216 KiB limit. These calculations
+are design evidence only; production and `--cce-res-usage` builds must still
+confirm the effective allocation and zero Stack in changed VFs.
+
+Generic decode and prefill retain selected64, persistent L1 Query, QK128,
+Value128, and two gather slots. Only the exact canonical predicate uses the
+selected512 layout and Query replay. A11 adds no flag IDs, inter-core
+coordination, Basic API dependency, workspace, output schema, or public-layer
+branch. Query replay must complete before the existing Key-ready publication,
+so AIC observes Query and Key through the same one-slot ownership boundary.
+
+The cost is three additional full packed-Query UB-to-L1 traversals per task.
+The experiment is retained only if production/resource builds fit, five fresh
+canonical accuracy processes and one explicit generic P2 process pass at
+`atol=rtol=0.05`, and two clean CannBench `BasicInfo` workflows each improve
+the 255.959001 us T2 checkpoint by at least 1%. If Query replay erases the
+saved Softmax/update boundary, restore A10 and record A11 as rejected before
+starting T3 high- and low-byte grouped threshold selection independently.
+
+A11 was built and tested but rejected by that gate. The candidate source,
+release archive, and production fused ELF SHA-256 values were respectively
+`8383d78d11d542ed8c1724b35d3b691a421ecd4adb41e59387351e6b0c26d973`,
+`40992e0077c27d29e0cefd8a95374d8d746666706c81212b526e3a9a42f962dc`,
+and `c7ac54fdffd56ec7051cd853610d7de18ab71df003bce78d04c6d4863d49a47d`.
+The production and resource builds both completed. The resource report showed
+zero Stack in every changed VF, with 32 registers in Softmax, 30 in generic
+Value, 26 in generic Key, 24 in Output Write, and at most 20 elsewhere. This
+matches the retained A10 resource shape and rules out a spill regression.
+
+Five fresh canonical decode processes, seeds 7 through 11, passed against the
+existing torch oracle at `atol=rtol=0.05`. Every process covered negative,
+out-of-range, valid-past, and causal-future indices and reported zero output and
+LSE mismatches. Output maximum absolute error was 0.0078125 to 0.009765625;
+LSE maximum absolute error was 0.009243965 to 0.009402275. A separate forced
+P2/selected64 process also passed with zero mismatches, confirming that the
+generic fallback remained valid.
+
+Two clean CannBench `BasicInfo` workflows were then collected at 1650 MHz. The
+workflow boundary follows the published convention: it uses the dependency
+Indexer launches captured with Sparse Attention, includes every radix stage,
+the fused kernel, and Combine, and excludes the materialization Cast.
+
+| A11 boundary | Run 1 | Run 2 |
+| --- | ---: | ---: |
+| Dependency Indexer | 126.537 us | 126.509 us |
+| Sparse Attention fused | 115.481 us | 115.609 us |
+| Combine | 12.317 us | 12.116 us |
+| Selected workflow | 254.335 us | 254.234 us |
+| Excluded Cast | 3.458 us | 3.828 us |
+| Gain from 255.959001 us T2 | 0.244% | 0.674% |
+
+Both runs missed the required 253.399411 us threshold. Selected512 removes one
+Softmax state transition and half of the Output Update calls per P4 task, but
+the three extra packed-Query UB-to-L1 replays and the larger Score/Probability
+lifetimes consume most of that saving. The A11 implementation and its
+source-only contracts are therefore reverted; the retained code remains A10
+selected256 plus the T2 Indexer. The negative package and raw results remain at:
+
+```text
+/root/cannbench-dsa-v2-a11-selected512-8383d78d/
+/root/cannbench-dsa-v2-a11-selected512-8383d78d/a11-basicinfo-run1/
+/root/cannbench-dsa-v2-a11-selected512-8383d78d/a11-basicinfo-run2/
+/tmp/cannbench-dsa-v2-a11-controller/
+```
+
+This result closes A11. T3 must test high-byte and low-byte grouped threshold
+selection independently against the restored T2 source so their effects remain
+attributable.
+
+### T3: Grouped Radix Threshold Selection
+
+The retained distributed Top-K chain reduces each high-byte histogram bin
+across 16 context shards with one of 256 reducer threads, then leaves thread
+zero to scan all 256 combined bins in descending order. The corresponding
+high-selector launch costs about 10.5 us in current T2 profiles. A complete
+parallel prefix over 256 bins would replace that serial loop with extra UB,
+multiple full-block barriers, and a more complex ownership protocol. That cost
+is disproportionate to this small reducer.
+
+T3 first tests a 16-by-16 grouped selector. Threads 0 through 15 each sum one
+contiguous 16-bin group after the existing shard reduction. Each group worker
+then sums only the higher group totals. The unique worker satisfying
+`greater < 2048 <= greater + group_count` scans its own 16 bins from high to
+low and writes the same selected high byte and remaining rank as T2. The worst
+serial dependency per active worker is therefore 15 group totals plus 16 bins,
+instead of 256 bins in thread zero.
+
+The 16 group totals reuse the already allocated reducer UB words following the
+256-bin histogram. The experiment changes no GM workspace, state field, host
+bridge, kernel count, launch ordering, ordered-BF16 mapping, tie rule, compact
+schedule, or unordered Top-K output contract. Low-byte threshold selection is
+kept byte-for-byte at T2 during this experiment. The high-byte variant must pass
+source contracts, production/resource builds, canonical and fallback device
+accuracy, and two clean `BasicInfo` workflows. It is retained only if both
+workflows are at most 253.399411 us; otherwise it is restored before low-byte
+grouping is tested independently.
+
+The high-byte variant passed implementation and correctness checks but was
+rejected by the workflow gate. Its source, release archive, production ELF, and
+resource ELF SHA-256 values were respectively
+`f261f64b4cfc473315b363a53c80d73a371546ceb79d6cc29b8ebe1ba031bc8d`,
+`0835b06e8cf1c040b692b7813aa070b7b011ba70851f9cbb1f90f9fca2707cae`,
+`aa8601c5dbe4b2fc5235d43b4d5b7827ba1a5e5c9f3e0b9bb096cbb2e410b17b`,
+and `4b691fcfbb9107a947ccef0e2ab14dca76c96ca03e898aa970af06594beb921e`.
+Production and `--cce-res-usage` builds completed. The changed high selector
+used 24 registers and zero Stack, versus 16 registers and zero Stack in T2;
+all other distributed Top-K VFs retained their T2 resource values.
+
+One thousand and three synthetic histogram cases, including exact group and
+rank boundaries, produced the same selected high byte and remaining rank as
+the T2 serial scan. On device, five repeats each of canonical, masked-tail,
+tied-threshold, near-threshold, and negative-score cases preserved the exact
+unordered Top-K score multiset and stable index set. A separate batch-1 decode
+process exercised the non-canonical fallback and also preserved the reference
+score multiset, unique indices, and valid-context bounds.
+
+Two clean CannBench `BasicInfo` workflows ran at 1650 MHz with the retained T2
+Sparse Attention source hash
+`43b7813e830aa1ba1d9550b917fe8e18dc64721f766c0d294694561b45c7303b`.
+The selected boundary follows the published dependency convention and excludes
+only the materialization Cast:
+
+| Boundary | T3 high run 1 | T3 high run 2 |
+| --- | ---: | ---: |
+| Score | 83.343002 us | 83.417999 us |
+| High-byte histogram | 5.561000 us | 5.459000 us |
+| High-byte reducer | 8.855000 us | 8.723000 us |
+| Low-byte histogram | 5.199000 us | 5.170000 us |
+| Low-byte reducer and offsets | 14.840000 us | 14.802000 us |
+| Compaction | 7.049000 us | 6.586000 us |
+| Dependency Indexer | 124.847002 us | 124.157999 us |
+| Sparse Attention fused | 118.776001 us | 118.512001 us |
+| Combine | 12.036000 us | 11.912000 us |
+| Selected workflow | 255.659003 us | 254.582000 us |
+| Excluded Cast | 3.434000 us | 3.542000 us |
+| Gain from 255.959001 us T2 | 0.117% | 0.538% |
+
+Grouping reduces the high selector by about 16.7% to 20.2%, confirming that
+its serial scan was real, but the kernel's approximately 10.8 us baseline share
+is too small to produce the required 1% full-workflow gain under normal
+component variance. Both runs miss 253.399411 us, so the high-byte source and
+its source-only test are restored to T2. The evidence remains at:
+
+```text
+/root/cannbench-dsa-v2-t3-high-grouped-f261f64b/
+/root/cannbench-dsa-v2-t3-high-grouped-f261f64b/t3-high-basicinfo-run1/
+/root/cannbench-dsa-v2-t3-high-grouped-f261f64b/t3-high-basicinfo-run2/
+/tmp/cannbench-dsa-v2-t3-high-controller-5yXM13/
+```
+
+The next experiment applies the same grouped threshold idea only to the
+low-byte threshold scan inside the retained T2 low reducer. It starts from the
+restored T2 high selector and must satisfy the same independent correctness and
+workflow gates.
+
+For the low-byte experiment, threads 0 through 15 again own contiguous 16-bin
+groups after all 256 combined low-bin counts are visible. The unique group
+containing `remaining_rank` scans only its local bins and writes the existing
+16-bit threshold key. No extra UB is required: during threshold selection, the
+16 `shard_greater_counts` words have not yet acquired their per-shard values,
+so they temporarily hold the group totals. A full-block synchronization ends
+that temporary lifetime before the retained T2 partial-tail reduction
+overwrites the same words with their original per-shard meaning.
+
+This alias must not change the subsequent selected-low read, 16-by-16 shard
+tail ownership, equal counts, exclusive shard offsets, or total-greater state.
+The low reducer already uses 32 registers in T2, so a zero-Stack resource build
+is a hard gate before device timing. High-byte grouping remains reverted. The
+same canonical/fallback correctness suite and two-workflow 253.399411 us
+retention threshold apply.
+
+The low-byte variant passed every gate and is retained. Its source, release
+archive, production distributed Top-K ELF, and resource ELF SHA-256 values are
+respectively
+`17d008cf5b79a046e3e19fd8c6b76358c572db93fafb7394cab221352b7d3be0`,
+`66540a59063cac4d4c9d97ab0edbbb418255c0f97a575799211172a24dfb80ab`,
+`a7ab5871f45345ec6778be1cdfc70a36412629e0f4778be3d8980d235c7052d5`,
+and `8892073152d96696521ab2ee75c8ae24f99d15b940d4bf921a673390633ebb23`.
+Production and `--cce-res-usage` builds completed. The changed low reducer uses
+33 registers and zero Stack, compared with 32 registers and zero Stack in T2.
+The restored T2 high selector remains at 16 registers and zero Stack. The one
+extra low-reducer register therefore does not introduce a spill or change the
+launch geometry.
+
+One thousand and three synthetic histogram/rank cases matched the T2 serial
+low-byte selector exactly. They include empty and concentrated groups, exact
+group boundaries, exact bin boundaries, and ranks spanning every valid
+cumulative interval. On device, five repeats each of canonical, masked-tail,
+tied-threshold, near-threshold, and negative-score cases preserved the exact
+unordered Top-K score multiset, stable and unique indices, and valid-context
+bounds. A separate batch-1 process exercised the non-canonical fallback with
+the same results.
+
+Two clean CannBench `BasicInfo` workflows then ran at 1650 MHz on Ascend 950PR,
+CANN 9.2.0, and `dav-3510`. Both used the retained Sparse Attention source hash
+`43b7813e830aa1ba1d9550b917fe8e18dc64721f766c0d294694561b45c7303b`
+and ELF hash
+`f5e7fd00c4cfab5737fbf69a850e690dff56d5b9c27e7a0b5871dd557f762174`.
+The selected boundary uses the dependency Indexer launches captured in the
+second workflow case, includes every radix stage, Sparse Attention fused, and
+Combine, and excludes only the materialization Cast:
+
+| Boundary | T3 low run 1 | T3 low run 2 |
+| --- | ---: | ---: |
+| Score | 83.832001 us | 83.748001 us |
+| High-byte histogram | 5.729000 us | 5.687000 us |
+| High-byte reducer | 10.640000 us | 10.587000 us |
+| Low-byte histogram | 5.078000 us | 4.976000 us |
+| Low-byte reducer and offsets | 7.600000 us | 7.494000 us |
+| Compaction | 6.821000 us | 6.837000 us |
+| Dependency Indexer | 119.700001 us | 119.329001 us |
+| Sparse Attention fused | 119.035004 us | 118.403000 us |
+| Combine | 12.229000 us | 11.965000 us |
+| Selected workflow | 250.964005 us | 249.697001 us |
+| Excluded Cast | 3.548000 us | 3.587000 us |
+| Gain from 255.959001 us T2 | 1.951% | 2.446% |
+
+Both runs are below the 253.399411 us retention threshold. The low reducer and
+offset kernel falls from the T2 14.945000 us checkpoint to 7.600000 us and
+7.494000 us, while the rest of the dependency boundary remains structurally
+unchanged. Unlike high-byte grouping, this removes enough serialized work to
+produce a stable full-workflow gain above 1%. T3 therefore retains only the
+low-byte grouped selector; the high-byte selector remains the original T2
+implementation. Build, accuracy, and raw profile artifacts are preserved at:
+
+```text
+/root/cannbench-dsa-v2-t3-low-grouped-17d008cf/
+/root/cannbench-dsa-v2-t3-low-grouped-17d008cf/t3-low-basicinfo-run1/
+/root/cannbench-dsa-v2-t3-low-grouped-17d008cf/t3-low-basicinfo-run2/
+/tmp/cannbench-dsa-v2-t3-low-controller-u5Agxd/
 ```
 
 ### W0: Workflow-Level Cleanup
