@@ -3104,6 +3104,123 @@ The evidence archive SHA-256 is:
 7006397f01dd055269bbecee1a1d8685441da4415946e571f34eb698d19f2ad9
 ```
 
+### A15: UB Subbank-Conflict Elimination
+
+The Ascend 950PR SIMT UB bank-conflict guide documents 16 UB banks arranged as
+8 bank groups, with four 8-byte subbanks per bank row. In one warp instruction,
+different addresses that resolve to the same subbank number in the same bank
+group serialize. For an aligned address, the relevant resource pair can be
+reasoned about as `floor(byte_address / 8) % 32`; identical-address reads may
+merge, but different UB rows do not. The official transpose example removes a
+fixed-stride column conflict by padding the physical row without changing the
+logical matrix.
+
+Source inspection finds three independent fixed-stride candidates in the
+retained canonical V3.2 decode path. They must be tested one at a time. Each
+candidate starts from the retained result of the previous one, preserves the
+public layouts and launch graph, and is restored before the next candidate if
+it fails its gate.
+
+#### A15.1: Padded Lightning Indexer Score Rows
+
+The retained Score Fixpipe writes a row-major BF16 UB matrix with 64 heads and
+32 contexts. Each warp owns one context and its lanes read different heads:
+
+```text
+shared_scores[head * 32 + context]
+```
+
+Adjacent lanes therefore read addresses 64 bytes apart. This advances the UB
+resource number by `64 / 8 = 8 (mod 32)`, so one warp reaches only four
+bank-group/subbank pairs and eight different head rows contend for each pair.
+The first-head and second-head loads are separate instructions with the same
+eight-way pattern. A14.2 did not test this issue because it paired values only
+after both scalar UB loads.
+
+The candidate changes only the physical Score row stride from 32 to 36 BF16
+elements. A 72-byte stride advances by nine subbank units; `gcd(9, 32) = 1`, so
+the 32 head rows cover all 32 resource pairs. The Fixpipe `dstStride`, both
+slot sizes, `LocalTensor` capacities, slot offsets, and postprocess address
+calculation change together. Logical Score values, context tile size, two-slot
+pipeline, BF16 rounding, FP32 warp reduction, output workspace, launch count,
+and dispatch remain unchanged. The two padded slots add only 1,024 UB bytes.
+
+Source-contract tests must first fail on stride 32 and then prove:
+
+- the logical context tile remains 32 while the physical row stride is 36;
+- both Fixpipe and both postprocess loads use the physical stride;
+- slot byte and entry calculations include padding and do not overlap;
+- the 32 lane addresses cover all 32 bank-group/subbank resources;
+- canonical decode dispatch, fallback radix paths, prefill, and V1 are unchanged.
+
+Build with production `-O3` for `dav-3510`, require zero Stack and no material
+register increase in the postprocess VF, and run the full Indexer accuracy
+matrix plus complete V3.2 decode accuracy. Measure two fresh-process CannBench
+`BasicInfo` baseline/candidate pairs. Retain A15.1 only if both pairs improve
+the Score kernel by at least 2% and the selected workflow by at least 0.5%,
+while all radix stages, Sparse Attention, and Combine stay within 1.0 us of
+their paired baselines. These gates are lower than an algorithmic candidate
+because padding removes a hardware serialization without adding work.
+
+#### A15.2: Sparse Attention NZ And Staging Accesses
+
+The canonical fused Sparse Attention SIMT stages contain several fixed aliases:
+
+- Score and PV reads use `head64_fused_nz_offset`. Lanes 0 and 16 access
+  different 8-byte ranges separated by 2,048 bytes for FP32, which resolves to
+  the same bank-group/subbank resource and creates a two-way read conflict.
+- Query, Key, and Probability BF16 NZ writes separate corresponding lane
+  groups by 1,024 or 2,048 bytes. Canonical Value staging separates the two
+  16-dimension halves by 512 bytes. These are different UB rows mapped back to
+  the same subbank resources and are write-conflict candidates.
+
+NZ is an AIC/Tensor API contract, so this candidate must not add padding inside
+an NZ tensor that Cube later consumes. First isolate the read-side Score/PV
+boundary: copy the AIC-produced NZ half into an AIV-private padded row-major
+view, or remap warp ownership only if the mapping still covers every logical
+head/value exactly once and preserves the reduction order. Measure that
+conversion as part of the fused kernel. Continue to pack-write remapping only
+if the read-side discriminator is retained; do not combine read and write
+changes into one measurement.
+
+Every Sparse candidate requires pure address-mapping tests showing that one
+warp's different 8-byte ranges no longer alias a resource, production/resource
+builds, five fresh canonical accuracy processes, a noncanonical fallback run,
+and complete workflow accuracy. Retain an individual Sparse candidate only if
+both paired runs improve the fused Sparse Attention kernel by at least 1% and
+the selected workflow by at least 0.5%, with Indexer and Combine within 1.0 us.
+Restore failed subcandidates before testing the next mapping.
+
+#### A15.3: Conflict-Free Top-K Low-Threshold Group Reduction
+
+The retained low-byte reducer assigns one of 16 groups to each of 16 active
+lanes and sums:
+
+```text
+combined_histogram[16 * lane + bucket_in_group]
+```
+
+At a fixed loop iteration, adjacent active lanes are 64 bytes apart. The 16
+lanes therefore reach four resource pairs, with four different addresses per
+pair. The candidate transposes the temporary combined histogram in UB, or
+changes the reduction traversal so adjacent lanes read adjacent 8-byte ranges,
+while leaving the GM histogram layout, threshold tie rule, shard offsets,
+compaction order, kernel count, and 256-thread launch unchanged.
+
+Source tests must prove complete coverage of all 256 buckets and no duplicate
+or missing contribution, plus conflict-free per-instruction resource mapping.
+Run tied-threshold and near-threshold accuracy in addition to the full workflow.
+Because Select Low is only about 7.4 us, retain A15.3 only if both paired runs
+improve Select Low by at least 3% without regressing the selected workflow by
+more than 0.25% or any neighboring stage by more than 1.0 us.
+
+`BasicInfo`, `Default`, and `InstrTimeline` do not directly prove an individual
+SIMT UB subbank conflict. The keep/revert decision therefore comes from the
+controlled layout A/B with unchanged work and output. If attribution remains
+ambiguous, use the official `clock()`-style operator-local microbenchmark; do
+not infer the official transpose example's 36.6% gain for these mixed
+Cube/SIMT kernels.
+
 ### W0: Workflow-Level Cleanup
 
 Keep dependency materialization and helper launches visible in raw profiles.
