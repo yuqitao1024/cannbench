@@ -2336,6 +2336,160 @@ implementation. Build, accuracy, and raw profile artifacts are preserved at:
 /tmp/cannbench-dsa-v2-t3-low-controller-u5Agxd/
 ```
 
+### A12: Canonical QK/PV Shared-Latent Reuse
+
+T3 leaves the selected workflow at 249.697001 us, still 61.034 us above the
+188.663 us target for 0.90x vLLM-Ascend performance. Further reducer and launch
+micro-optimization cannot close that gap. The next experiment therefore
+returns to the largest remaining component, the 118.403000 us canonical Sparse
+Attention fused kernel, and changes one data-lifetime decision without changing
+the public operator contract.
+
+The semantic opportunity is exact for DeepSeek V3.2. Sparse Attention receives
+one BF16 `shared_kv` tensor with row width 576. QK consumes all 576 dimensions,
+while PV consumes `shared_kv[..., 0:512]`. The retained canonical path currently
+packs dimensions 0 through 511 for QK, discards those packed tiles after MMAD,
+then reads the same BF16 values from GM again in eight Value Pack calls per
+logical task before applying the retained 16-by-16 transposes. Across the 32
+P4/Head64 logical tasks, the second read accounts for 16 MiB of logical
+selected-KV traffic. Cache behavior may reduce physical DRAM traffic, so 16 MiB
+is a work count and optimization hypothesis, not a measured bandwidth claim.
+
+The current T2/A10 instruction trace gives the performance boundary for this
+experiment. Each AIV lane executes two outer256 tiles. Their mean critical
+intervals are 26.478 us from first Key Pack to Softmax, 5.314 us from Softmax
+to first Value Pack, and 17.966 us from first Value Pack to the next outer tile
+or output. Both outer tiles total 99.515 us per lane on average inside a roughly
+118 us fused kernel. A12 must remove material Value preparation work, not merely
+rename a buffer or infer a gain from source-level bytes.
+
+Three architectures were considered:
+
+1. Keep selected256 and preserve the 512-dimension latent in L1. One 128-row
+   compute subtile needs 131,072 bytes for the latent. Keeping Query, full
+   outer256 Score/Probability, and PV live around it exceeds the proven L1
+   budget or requires repeated Query eviction and replay. This is not the first
+   experiment because A11 already showed that three Query replays can consume
+   most of a larger-tile gain.
+2. Pack the selected latent into a new GM workspace once and share it between
+   the two Head64 groups. This could remove head-group duplication, but it adds
+   a kernel, a multi-megabyte workspace, and a new workflow ownership boundary.
+   It cannot distinguish latent reuse from workspace and launch effects.
+3. Return only the canonical outer tile to selected128, keep its two QK gather
+   slots, and retain the first 512 packed dimensions in UB until PV. This uses
+   existing task ownership and handshakes, adds no launch or GM workspace, and
+   isolates whether eliminating the second GM Value Pack is profitable. This
+   is the selected A12 experiment.
+
+The target CANN 9.2.0 Tensor API exposes MMAD routing only for an NZ left
+operand and ZN right operand; `MmadTrait` has no public transpose-B switch.
+A12 therefore does not reinterpret the cached QK operand as a PV operand. It
+keeps the retained `asc_transpose` conversion but changes its source from a
+new GM-loaded row-major staging tile to the already packed QK tile in UB.
+
+For canonical selected128, each AIV subblock owns 64 selected rows. It caches
+two 64-by-256 BF16 QK planes, one for dimensions 0 through 255 and one for
+dimensions 256 through 511. The QK key layout orders 16-by-16 tiles by
+`dimension_block * 4 + row_block`; each tile contains the row-major staging
+order already consumed by the retained transpose. PV writes the converted tile
+to `row_block * 16 + dimension_block`. Each 256-dimension Value half therefore
+executes the same 64 transpose calls per AIV subblock as the retained path while
+removing its preceding GM Value Pack VF.
+
+Dimensions 512 through 575 are QK-only and use an 8,192-byte UB rope scratch.
+They are never added to the latent cache. Query remains persistent in L1 for
+all four outer128 tiles, so A12 adds no Query replay. The existing per-row
+`int32` KV offsets remain the source of invalid-row masking and address
+ownership. Generic decode, P2, prefill, V1, and every noncanonical shape keep
+the current selected64 QK/PV paths byte-for-byte.
+
+The source-visible capacity worksheet per mixed task is:
+
+```text
+L1 QK = Query 73,728 + two Key slots 131,072 + Score128 32,768
+       = 237,568 bytes
+L1 PV = Query 73,728 + Probability128 16,384 + Value256 65,536
+        + PV256 65,536
+       = 221,184 bytes
+L1 maximum = 237,568 bytes
+
+UB persistent = max/sum/scale 384 + running output 65,536
+                + 64 row offsets 256
+              = 66,176 bytes
+UB QK = persistent 66,176 + cached latent512 65,536
+        + rope64 scratch 8,192 + Score half 16,384
+      = 156,288 bytes
+UB PV = persistent 66,176 + cached latent512 65,536
+        + transpose output 32,768 + PV result 32,768
+      = 197,248 bytes
+UB maximum = 197,248 bytes
+
+L0A maximum = 65,536 bytes
+L0B maximum = 65,536 bytes
+L0C maximum = 65,536 bytes
+```
+
+The UB maximum is 23,936 bytes below the tested 216 KiB limit. The L1 and
+L0 maxima are identical to the compiler-accepted A9 selected128 schedule.
+These calculations are design evidence only; both production and
+`--cce-res-usage` builds must confirm the effective allocation and zero Stack.
+
+The AIV ownership sequence for each outer128 tile is:
+
+1. Key Prepare computes 64 signed row offsets and writes dimensions 0:256
+   directly into latent plane zero before publishing QK slot zero.
+2. Key Fast writes dimensions 256:512 into latent plane one and publishes the
+   alternating QK slot. The AIC consumes the existing QK256 rounds.
+3. Key Fast writes dimensions 512:576 into rope scratch and publishes the next
+   slot. The final QK MMAD and Score copy retain current semantics.
+4. After Softmax publishes Probability, cached Value preparation waits for the
+   existing PV slot, transposes the requested cached plane into the current UB
+   Value buffer, copies it to the one canonical L1 Value slot, and publishes
+   the existing ready event.
+5. PV MMAD and Output Update remain unchanged. The second Value half repeats
+   step 4, after which the latent planes may be overwritten by the next outer
+   tile.
+
+No new flag ID, cross-core primitive, Basic API dependency, kernel, operator
+argument, output, workspace, or public-layer branch is introduced. The
+existing gather-slot request/ready protocol remains the only AIC/AIV ownership
+boundary. In particular, the next outer tile cannot overwrite cached latent
+until the final PV consumer has requested reuse.
+
+Source-contract tests must first fail on the retained A10 source and then lock:
+
+- canonical selected128 with two QK slots and one PV slot;
+- two persistent 256-dimension UB latent planes and a separate 64-dimension
+  rope scratch;
+- canonical QK 0:512 packing into the cache and 512:576 into rope scratch;
+- cached tile remapping from dimension-major QK order to row-major PV order;
+- no canonical call to `head64_fused_value_pack_fast_vf`;
+- unchanged generic Value Pack, selected64, two-slot, and fallback dispatch;
+- the L1, UB, L0A, L0B, and L0C maxima above.
+
+Device validation uses five fresh canonical processes with seeds 7 through 11
+at `atol=rtol=0.05`, covering negative, out-of-range, valid-past, and
+causal-future indices, plus one explicit noncanonical P2 process. Every run
+must report zero output and LSE mismatches. Production and resource builds must
+target CANN 9.2.0, `dav-3510`, and `-O3`; every changed VF must report zero
+Stack and no material register regression.
+
+Because A12 is an architectural candidate for the 0.90x target rather than a
+small cleanup, its retention gate is deliberately higher than T3. Collect an
+alternating fresh baseline/candidate pair twice through CannBench `BasicInfo`.
+Retain A12 only if both candidate runs improve the complete selected workflow
+by at least 3% and Sparse Attention fused by at least 8%, with unchanged
+Indexer and Combine boundaries. Against the current 249.697001 us checkpoint,
+the workflow threshold is 242.206091 us. A stable gain below 3% is recorded as
+useful negative evidence but does not justify the added canonical schedule.
+`Default` or `InstrTimeline` is collected only after BasicInfo retention, to
+attribute the removed Value Pack and remaining critical path.
+
+If A12 passes, the next independent architecture experiment may share packed
+latent work across Head64 groups. If it fails, restore A10 and move directly to
+threshold-driven Sparse Attention; do not combine GM workspace, head-group
+remapping, and UB latent reuse in one un-attributable candidate.
+
 ### W0: Workflow-Level Cleanup
 
 Keep dependency materialization and helper launches visible in raw profiles.
