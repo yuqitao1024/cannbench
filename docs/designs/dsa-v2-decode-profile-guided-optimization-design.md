@@ -3277,6 +3277,36 @@ both paired runs improve the fused Sparse Attention kernel by at least 1% and
 the selected workflow by at least 0.5%, with Indexer and Combine within 1.0 us.
 Restore failed subcandidates before testing the next mapping.
 
+The first read-side candidate padded adjacent 16-column FP32 Score NZ blocks by
+64 bytes while copying L1 to UB. The AIV consumer used the matching padded NZ
+offset; PV remained unmodified so the experiment attributed only Score reads.
+The 15 gaps added 960 bytes to the QK UB stage. Address-mapping tests showed the
+32 Score reads changing from eight resources with four accesses each to 16
+resources with two accesses each. The focused source test passed, the complete
+local suite passed with 203 tests and 13 device skips, and the production
+`dav-3510` release compiled successfully.
+
+The candidate is rejected. Two clean CannBench `BasicInfo` V3.2 decode runs on
+Ascend 950PR/CANN 9.2.0 passed with `max_abs_error = 0` and
+`max_rel_error = 0`, but the fused Sparse kernel measured 117.877 and
+118.708 us versus the retained NZ2DN baseline's 118.885 and 118.271 us. The
+candidate mean improved by only 0.24%, below the 1% gate, and the second run
+regressed. Complete workflow latency was 222.967 and 223.007 us versus 222.939
+and 221.560 us; the candidate mean regressed by 0.33% instead of improving by
+0.5%. Score NZ read conflict is therefore not a material bottleneck at this
+boundary, or its reduced serialization is offset by the padded-copy/addressing
+cost. PV padding was not tested after Score failed its independent gate. The
+production source is restored and `published/` remains unchanged.
+
+```text
+rejected source commit: 803ae9d
+candidate archive: /tmp/a15-sparse-score-controller/cannbench-dsa-v2-a15-sparse-score-803ae9d.tar.gz
+candidate archive SHA-256: c45c0918a03e813fe935db511235f29443b014ee23be8b2e4e4cb8751973e9d5
+candidate run 1: /tmp/a15-sparse-score-r1/
+candidate run 2: /tmp/a15-sparse-score-r2/
+remote evidence: /root/cannbench-dsa-v2-a15-sparse-score-803ae9d/.cannbench-runs/
+```
+
 #### A15.3: Conflict-Free Top-K Low-Threshold Group Reduction
 
 The retained low-byte reducer assigns one of 16 groups to each of 16 active
