@@ -15,8 +15,9 @@ all eight selected-token tiles. The canonical Context-shard distributed
 histogram Top-K chain is retained on top of QK256 after reducing the complete
 Top-K boundary from about 82 us to 56.8-57.3 us. Pairwise PV coarsening,
 2048-thread Key/Value Pack widening, adjacent-value grouped loads, and Value
-Pack synchronization contraction were rejected after device measurement. The
-parallel low-byte reducer and shard-offset schedule is retained after cutting
+Pack synchronization contraction, and canonical QK/PV shared-latent reuse were
+rejected after device measurement. The parallel low-byte reducer and shard-
+offset schedule is retained after cutting
 that kernel from 28.904 us to 14.423-14.444 us. T3 low-byte grouped threshold
 selection is retained after reducing its reducer from 14.945 us to 7.494-7.600
 us. The current published V2 decode workflow checkpoint is now T3 at 249.697
@@ -2489,6 +2490,70 @@ If A12 passes, the next independent architecture experiment may share packed
 latent work across Head64 groups. If it fails, restore A10 and move directly to
 threshold-driven Sparse Attention; do not combine GM workspace, head-group
 remapping, and UB latent reuse in one un-attributable candidate.
+
+A12 was implemented as candidate commit `b0a425b` and rejected after target-
+device validation. The release archive, fused source, production/resource fused
+ELF, and evidence archive SHA-256 values are respectively:
+
+```text
+12e8a8a571df8114cd52283355b54b996bce6f64c89ca0f04b55cb89457521fe
+f16a90289d88fc2fe2aa02f481887d96af67c47de04c01771c6814bf06fbbc74
+85d5fde3359d6e6d5875fb4c4c8533afb1f522e51d8aff96933958e26f3a8a01
+aa63a411a88b110bd1a05fa1237d0c965233cab4df7b52acd8f7b2abad0ef85a
+```
+
+Both CANN 9.2.0 `-O3`, `dav-3510` builds completed on Ascend 950PR. The
+validated capacity maxima were 237,568 bytes in L1, 197,248 bytes in UB, and
+65,536 bytes in each L0 buffer. Changed canonical Key Prepare, Key Fast, and
+Softmax VFs used 20, 14, and 32 registers respectively, all with zero Stack.
+The retained generic Value Pack used 30 registers and zero Stack. No resource
+or spill gate failed.
+
+Five fresh canonical decode processes, seeds 7 through 11, and one explicit
+generic P2 process passed against the torch oracle at `atol=rtol=0.05`. Every
+canonical process covered negative, out-of-range, valid-past, and causal-future
+indices. All six processes reported zero output and LSE mismatches. Canonical
+maximum absolute output error ranged from 0.0078125 to 0.009765625, and maximum
+absolute LSE error ranged from 0.009243965 to 0.009402275.
+
+Performance used four clean processes at 1650 MHz in the predeclared
+baseline-1, candidate-1, baseline-2, candidate-2 order. Every process loaded the
+same retained T3 Lightning Indexer; only the A10 or A12 Sparse Attention package
+changed. CannBench `BasicInfo` selected the dependency Indexer launches, fused
+Sparse Attention, and Combine, and excluded only the materialization Cast:
+
+| Boundary | Baseline 1 | Candidate 1 | Baseline 2 | Candidate 2 |
+| --- | ---: | ---: | ---: | ---: |
+| Dependency Indexer | 119.460998 us | 118.903997 us | 119.055998 us | 119.536001 us |
+| Sparse Attention fused | 109.165001 us | 109.184998 us | 108.765999 us | 110.016998 us |
+| Combine | 11.648000 us | 12.004000 us | 12.178000 us | 11.986000 us |
+| Selected workflow | 240.273999 us | 240.092995 us | 239.999997 us | 241.538999 us |
+| Excluded Cast | 3.469000 us | 3.422000 us | 3.572000 us | 3.620000 us |
+
+Candidate 1 improved its paired workflow by only 0.075332% while its fused
+kernel regressed by 0.018318%. Candidate 2 regressed its paired workflow by
+0.641251% and its fused kernel by 1.150175%. Both candidate workflow values are
+below the absolute 242.206091 us ceiling, but neither pair approaches the
+required 3% workflow gain, and neither fused result approaches the required 8%
+gain. A12 therefore fails both paired retention gates and is not retained.
+
+The result supports, but does not prove, the hypothesis that the repeated GM
+Value read was already largely absorbed by cache while returning from outer256
+to outer128 doubled phase and outer-loop overhead. A12 also retained the
+transpose itself, changing only its source. `BasicInfo` cannot independently
+quantify physical DRAM traffic, so no stronger bandwidth conclusion is drawn.
+Because A12 failed the timing gate, no `Default` or `InstrTimeline` profile was
+collected. `published/` remains unchanged, and production remains A10 Sparse
+Attention plus the later retained Lightning Indexer improvements.
+
+Raw build, resource, accuracy, and four-process `BasicInfo` evidence is retained
+at:
+
+```text
+/root/cannbench-dsa-v2-a12-shared-latent-f16a9028/
+/root/cannbench-dsa-v2-a12-shared-latent-f16a9028-evidence.tar.gz
+/tmp/cannbench-dsa-v2-a12-shared-latent-f16a9028-controller/
+```
 
 ### W0: Workflow-Level Cleanup
 
