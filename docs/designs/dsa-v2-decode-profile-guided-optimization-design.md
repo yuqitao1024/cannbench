@@ -3137,30 +3137,44 @@ The first-head and second-head loads are separate instructions with the same
 eight-way pattern. A14.2 did not test this issue because it paired values only
 after both scalar UB loads.
 
-The candidate changes only the physical Score row stride from 32 to 36 BF16
+The first candidate changed the physical Score row stride from 32 to 36 BF16
 elements. A 72-byte stride advances by nine subbank units; `gcd(9, 32) = 1`, so
-the 32 head rows cover all 32 resource pairs. The Fixpipe `dstStride`, both
-slot sizes, `LocalTensor` capacities, slot offsets, and postprocess address
-calculation change together. Logical Score values, context tile size, two-slot
-pipeline, BF16 rounding, FP32 warp reduction, output workspace, launch count,
-and dispatch remain unchanged. The two padded slots add only 1,024 UB bytes.
+the 32 head rows cover all 32 resource pairs. Source-contract tests confirmed
+that Fixpipe and the SIMT consumer used the same padded stride and that the two
+slots did not overlap logically. The focused source suite passed 19 tests and
+the complete Lightning Indexer suite passed 113 tests with 23 device skips.
+The production `dav-3510` release also compiled successfully.
 
-Source-contract tests must first fail on stride 32 and then prove:
+The candidate is rejected before performance measurement. The two unpadded
+slots already occupy the complete per-sub-AIV shared Score region:
 
-- the logical context tile remains 32 while the physical row stride is 36;
-- both Fixpipe and both postprocess loads use the physical stride;
-- slot byte and entry calculations include padding and do not overlap;
-- the 32 lane addresses cover all 32 bank-group/subbank resources;
-- canonical decode dispatch, fallback radix paths, prefill, and V1 are unchanged.
+```text
+2 slots * 64 heads * 32 contexts * 2 bytes = 8 KiB
+```
 
-Build with production `-O3` for `dav-3510`, require zero Stack and no material
-register increase in the postprocess VF, and run the full Indexer accuracy
-matrix plus complete V3.2 decode accuracy. Measure two fresh-process CannBench
-`BasicInfo` baseline/candidate pairs. Retain A15.1 only if both pairs improve
-the Score kernel by at least 2% and the selected workflow by at least 0.5%,
-while all radix stages, Sparse Attention, and Combine stay within 1.0 us of
-their paired baselines. These gates are lower than an algorithmic candidate
-because padding removes a hardware serialization without adding work.
+Stride 36 requires 9 KiB. On the target Ascend 950PR/CANN 9.2.0 device, the
+first CannBench V3.2 decode run trapped with error 341, `The address for VEC to
+access UB is out of bounds`. This agrees with the earlier mixed-kernel result
+documented in `lightning-indexer-context-sharded-decode-design.md`: offsets at
+or above 8 KiB are not visible to the sub-AIV even if the source declares a
+larger `LocalTensor`. The extra 1 KiB is therefore not available from this
+shared region, and increasing the launch's dynamic-UB argument would address a
+different resource.
+
+No latency result or `published/` update is valid for this candidate. The
+production source and its tests are restored to the 8 KiB stride-32 layout.
+Future Score conflict work must preserve the 8 KiB physical capacity, for
+example by an in-place permutation that Fixpipe can produce without an extra
+conversion; otherwise its conversion cost must be included in the same fused
+kernel measurement. The exact rejected source/archive evidence is retained at:
+
+```text
+candidate source commit: a4769cc
+candidate archive: /tmp/a15-candidate-controller/cannbench-dsa-v2-a15-score-pad-a4769cc.tar.gz
+candidate archive SHA-256: f5413e97b3f55cc3d8733554592f9ac2720743f68fbdb911e9065de38882a528
+remote run: /root/cannbench-dsa-v2-a15-score-pad-a4769cc/.cannbench-runs/
+local failure summary: /tmp/a15-candidate-smoke/
+```
 
 #### A15.2: Sparse Attention NZ And Staging Accesses
 
