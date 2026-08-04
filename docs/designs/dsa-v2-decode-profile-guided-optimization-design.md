@@ -3300,6 +3300,29 @@ Because Select Low is only about 7.4 us, retain A15.3 only if both paired runs
 improve Select Low by at least 3% without regressing the selected workflow by
 more than 0.25% or any neighboring stage by more than 1.0 us.
 
+The tested traversal assigned all 256 threads one contiguous histogram bucket
+each, then reduced every 16-bucket group with four 16-lane `asc_shfl_down`
+steps. This replaced the 16 active lanes' 16 strided UB loads with one
+contiguous load per thread and register shuffles. The source suite passed 19
+tests, the production package compiled, and the V3.2 decode workflow passed
+with zero output error.
+
+The candidate is rejected. Its two Select Low samples were 7.872 and 8.165 us,
+versus 7.748 and 7.735 us in the retained NZ2DN runs: regressions of 1.6% and
+5.6%, not a 3% improvement. The candidate workflow was 222.341 us, also not
+better than the retained 221.560 us result. Four shuffle instructions and
+activating all 256 threads cost more than the removed four-way strided reads in
+this small reducer. The second performance run was skipped after both samples
+in the first complete workflow failed the local gate, and production source was
+restored.
+
+```text
+rejected source commit: cb5ee88
+candidate archive: /tmp/a15-select-low-controller/cannbench-dsa-v2-a15-select-low-cb5ee88.tar.gz
+candidate archive SHA-256: 9d8ce96eea133e8aa71d6a862c57ef8a690c877d5bdb11e3107fa12b743553b1
+candidate run: /tmp/a15-select-low-r1/
+```
+
 `BasicInfo`, `Default`, and `InstrTimeline` do not directly prove an individual
 SIMT UB subbank conflict. The keep/revert decision therefore comes from the
 controlled layout A/B with unchanged work and output. If attribution remains
