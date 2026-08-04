@@ -17,13 +17,15 @@ Top-K boundary from about 82 us to 56.8-57.3 us. Pairwise PV coarsening,
 2048-thread Key/Value Pack widening, adjacent-value grouped loads, and Value
 Pack synchronization contraction, and canonical QK/PV shared-latent reuse were
 rejected after device measurement. The parallel low-byte reducer and shard-
-offset schedule is retained after cutting
-that kernel from 28.904 us to 14.423-14.444 us. T3 low-byte grouped threshold
-selection is retained after reducing its reducer from 14.945 us to 7.494-7.600
-us. The current published V2 decode workflow checkpoint is now T3 at 249.697
-us; its two validation measurements are 250.964 and 249.697 us. Against the
+offset schedule is retained after cutting that kernel from 28.904 us to
+14.423-14.444 us. T3 low-byte grouped threshold selection is retained after
+reducing its reducer from 14.945 us to 7.494-7.600 us. The current published V2
+decode workflow checkpoint is now T3 at 249.697 us; its two validation
+measurements are 250.964 and 249.697 us. Against the
 matching published vLLM-Ascend workflow at 169.797 us, the published SIMT V2
-workflow has 1.471x its latency and 0.680x its performance.
+workflow has 1.471x its latency and 0.680x its performance. A13.1 shard-major
+balanced compaction is the next approved experiment; its context-monotonic and
+bitmap-driven continuations remain gated on a positive A13.1 device result.
 
 The 2x point is an intermediate checkpoint, not the completion target. The
 target is at least 0.90x vLLM-Ascend performance under the same selected-kernel
@@ -2554,6 +2556,191 @@ at:
 /root/cannbench-dsa-v2-a12-shared-latent-f16a9028-evidence.tar.gz
 /tmp/cannbench-dsa-v2-a12-shared-latent-f16a9028-controller/
 ```
+
+### A13: Threshold-Driven Context-Local Sparse Attention
+
+A12 establishes that removing the second logical GM Value read inside one
+Head64 task does not reduce the retained boundary. The next hypothesis is not
+another latent lifetime change. It is that the current Top-K output order makes
+each balanced P4 Sparse Attention task gather selected KV rows from too many
+context regions, weakening locality across its QK and PV phases and across the
+two Head64 groups.
+
+This is an unproven locality hypothesis. `BasicInfo` shows only latency, and the
+A12 result is evidence that source-level bytes do not establish physical DRAM
+traffic. A13 therefore begins with an indices-layout-only discriminator before
+adding a workflow-private metadata contract. If changing only the existing
+compact layout does not improve Sparse Attention, do not proceed to the more
+complex bitmap path.
+
+#### A13.1: Shard-Major Balanced Compaction
+
+The retained T3 compact kernel receives one block per `(row, context_shard)`.
+Each block classifies its 2,048 score keys as greater than, equal to, or below
+the selected 16-bit threshold. Its current output layout is class-major:
+
+```text
+all score_key > threshold candidates across all shards
+then the deterministic quota of score_key == threshold candidates
+```
+
+The output is semantically unordered, but each consecutive 512-index P4 slice
+can span several context shards. A13.1 changes only this layout to shard-major:
+
+```text
+all selected candidates from shard 0
+all selected candidates from shard 1
+...
+all selected candidates from shard 15
+```
+
+Within one shard, candidates greater than threshold retain their current
+thread/rank order and precede the retained equal-threshold candidates. The
+equal predicate is unchanged. Therefore the exact selected index set, including
+the deterministic threshold-tie subset, remains identical to T3; only its
+permutation changes.
+
+The low reducer expands its internal shard descriptor from two to four
+`uint32` words:
+
+```text
+greater_prefix  exclusive number of greater candidates in prior shards
+equal_prefix    exclusive number of equal candidates in prior shards
+selected_prefix exclusive number of selected candidates in prior shards
+greater_count   number of greater candidates in this shard
+```
+
+For shard `s`, define:
+
+```text
+equal_take_s = clamp(equal_needed - equal_prefix_s, 0, equal_count_s)
+selected_count_s = greater_count_s + equal_take_s
+selected_prefix_s = sum(selected_count_j, j < s)
+```
+
+The reducer already owns every per-shard greater/equal count and the global
+`equal_needed` value, so these fields add no score pass and no kernel. The
+descriptor grows from 512 to 1,024 bytes for the complete four-row canonical
+case, an increase of 512 GM bytes.
+
+The compact block retains its existing packed greater/equal prefix scan and
+selection predicate. It changes only the final destinations:
+
+```text
+greater_slot = selected_prefix_s
+             + thread_greater_prefix + local_greater_rank
+
+equal_slot   = selected_prefix_s + greater_count_s
+             + thread_equal_prefix + local_equal_rank
+```
+
+An equal candidate is written only when its unchanged global equal rank is
+below `equal_needed`. The final descriptor invariant is:
+
+```text
+selected_prefix_last + selected_count_last == 2048
+```
+
+The public Indexer result remains `int32 [B,Q,2048]`. The Sparse Attention
+signature, A10 outer256/subtile128 schedule, P4 partition count, fixed 512
+selected tokens per partition, task count, Combine layout, and published data
+contract remain unchanged. No new kernel, launch, score read, public output,
+workspace tensor, Basic API dependency, or public-layer branch is introduced.
+Only the exact canonical `B=2, Q=2, C=32768, K=2048, shards=16` distributed
+path expands the existing descriptor tensor; all fallback paths remain byte-
+for-byte unchanged.
+
+This preserves balance even when all selected positions fall in one context
+shard. The four P4 tasks still consume consecutive 512-entry output slices.
+Shard-major ordering changes which selected rows belong to each task, not the
+number of rows assigned to it. The intended gain is that a slice covers fewer
+context regions, allowing the existing QK and PV gathers and the concurrent
+Head64 groups to access a narrower shared-KV address range. This mechanism must
+be established by device latency; it is not assumed from the permutation.
+
+Source-contract and reference tests must first fail on T3 and then prove:
+
+- the four-word shard descriptor and its 1,024-byte canonical allocation;
+- exclusive selected prefixes for empty, concentrated, and mixed shards;
+- exact preservation of the T3 selected index set and tie subset;
+- shard-major output regions with no overlap, hole, or duplicate;
+- exactly 2,048 valid output slots and fixed 512-entry P4 slices;
+- unchanged noncanonical distributed, single-block radix, prefill, V1, and
+  standalone Sparse Attention paths;
+- absence of a new launch, public output, or Basic API dependency.
+
+Device correctness covers canonical random seeds, all-selected-in-one-shard,
+empty shards, threshold ties crossing a shard boundary, negative scores,
+masked tails, causal-future positions, repeated stability, and an explicit
+noncanonical fallback. Indexer validation compares the exact unordered index
+set with T3. Full DSA validation compares output and LSE with the existing torch
+oracle at `atol=rtol=0.05`; the changed permutation and P4 membership may change
+FP32 accumulation order, so bitwise Sparse Attention output identity is not a
+requirement.
+
+Performance uses two alternating clean baseline/candidate pairs through
+CannBench `BasicInfo`. Record Score, every radix stage, Compaction, dependency
+Indexer, Sparse Attention fused, Combine, selected workflow, and excluded Cast.
+Retain A13.1 only if both pairs satisfy all of these gates:
+
+- Sparse Attention fused improves by at least 2%;
+- the complete selected workflow improves by at least 1%;
+- Compaction regresses by no more than 1.0 us;
+- no other individual Indexer stage regresses by more than 1.0 us;
+- Combine regresses by no more than 1.0 us.
+
+The current T3 Compaction reference is 6.821-6.837 us. The paired A12 baselines
+showed 108.765999-109.165001 us for fused Sparse Attention and
+239.999997-240.273999 us for the selected workflow, but A13 retention uses
+fresh paired baselines rather than mixing those historical processes. Collect
+`Default` or `InstrTimeline` only after the BasicInfo gate passes, to determine
+whether the Key/Value gather interval changed.
+
+If A13.1 fails, restore T3 output ordering, record the negative result here, and
+close A13.2/A13.3 unless later profiles provide a different locality mechanism.
+Do not attribute a failure to GM bandwidth without detailed memory evidence.
+
+#### A13.2: Fully Context-Monotonic Indices (Conditional)
+
+A13.2 is considered only after A13.1 passes and the remaining Sparse Attention
+gap still justifies more compact work. It orders selected indices monotonically
+by context position inside each shard instead of preserving T3 thread/rank
+order. Preserving the exact T3 tie subset requires first computing the existing
+selection predicate, then a second prefix or selected-bit scan in context
+order. That extra synchronization can regress the roughly 6.8 us compact
+kernel, so A13.2 is a separate candidate with the same correctness and paired
+performance gates. Do not combine it with a new Attention interface.
+
+#### A13.3: Workflow-Private Selection Bitmap (Conditional)
+
+A13.3 is considered only if A13.1 or A13.2 demonstrates that context-local
+ordering materially improves Sparse Attention. The canonical `dsa_decode`
+workflow would then replace its indices dependency with:
+
+```text
+selection_bitmap [4, 32768 bits] = 16 KiB
+P4 partition descriptors          < 1 KiB
+```
+
+The bitmap encodes the already resolved exact Top-2048 set. It does not expose
+the 256 KiB BF16 score tensor, high/low histograms, or radix scratch to Sparse
+Attention. Because Indexer and Attention remain separate launches, this private
+state necessarily resides in GM; passing a tensor handle does not make UB or L1
+persistent across kernels.
+
+The workflow-local fast path belongs to the `dsa_decode` plugin. Standalone
+`lightning_indexer` continues to return indices, standalone `sparse_attention`
+continues to consume indices, and CUDA-library, vLLM-Ascend, prefill,
+noncanonical, and V1 paths retain their current contracts. Each canonical P4
+task must still consume exactly 512 selected positions. The design must prove
+that bitmap traversal is not repeated materially across the two Head64 groups
+or AIV subblocks before implementation; otherwise a 32 KiB indices tensor has
+merely been replaced by duplicated scanning.
+
+A13.3 requires its own capacity worksheet, workflow-private binding contract,
+operator-local profile selection, direct fallback, and retention gate. It is
+not authorized by A13.1 design approval alone. A positive A13.1/A13.2 device
+result is the prerequisite for writing that detailed design.
 
 ### W0: Workflow-Level Cleanup
 
