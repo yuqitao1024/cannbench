@@ -1,0 +1,24 @@
+{
+  "backend": "ascend",
+  "device_name": "Ascend950PR_9589",
+  "op": "softmax",
+  "dtype": "float16",
+  "case": {
+    "case_id": "convbert_attention",
+    "family": "attention",
+    "source_kind": "real_model",
+    "source_project": "TritonBench",
+    "source_model": "YituTechConvBert",
+    "source_file": "hf_train/YituTechConvBert_train.json",
+    "source_op": "aten._softmax.default",
+    "payload": {
+      "dimensions": [
+        16,
+        6,
+        512,
+        512
+      ],
+      "dim": -1
+    }
+  }
+}

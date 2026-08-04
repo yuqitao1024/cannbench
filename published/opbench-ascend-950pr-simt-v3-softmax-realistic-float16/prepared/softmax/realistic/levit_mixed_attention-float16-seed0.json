@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "op": "softmax",
+  "dtype": "float16",
+  "dataset": "realistic",
+  "seed": 0,
+  "case": {
+    "case_id": "levit_mixed_attention",
+    "family": "vision_attention",
+    "source_kind": "real_model",
+    "source_project": "TritonBench",
+    "source_model": "levit_128",
+    "source_file": "timm_train/levit_128_train.json",
+    "source_op": "aten._softmax.default",
+    "payload": {
+      "dimensions": [
+        1024,
+        8,
+        49,
+        196
+      ],
+      "dim": -1
+    }
+  },
+  "input_bindings": {}
+}

@@ -1,0 +1,24 @@
+{
+  "backend": "ascend",
+  "device_name": "Ascend950PR_9589",
+  "op": "softmax",
+  "dtype": "float16",
+  "case": {
+    "case_id": "electra_attention",
+    "family": "attention",
+    "source_kind": "real_model",
+    "source_project": "TritonBench",
+    "source_model": "ElectraForCausalLM",
+    "source_file": "hf_train/ElectraForCausalLM_train.json",
+    "source_op": "aten._softmax.default",
+    "payload": {
+      "dimensions": [
+        32,
+        4,
+        512,
+        512
+      ],
+      "dim": -1
+    }
+  }
+}

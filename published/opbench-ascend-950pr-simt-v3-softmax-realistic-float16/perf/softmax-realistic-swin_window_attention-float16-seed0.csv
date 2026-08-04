@@ -1,0 +1,2 @@
+backend,device_name,op,dtype,case_id,family,payload,source_model
+ascend,Ascend950PR_9589,softmax,float16,swin_window_attention,vision_attention,"dimensions=256x16x49x49, dim=-1",swin_base_patch4_window7_224

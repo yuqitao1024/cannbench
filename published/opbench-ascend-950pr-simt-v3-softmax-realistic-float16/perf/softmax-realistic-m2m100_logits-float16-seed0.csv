@@ -1,0 +1,2 @@
+backend,device_name,op,dtype,case_id,family,payload,source_model
+ascend,Ascend950PR_9589,softmax,float16,m2m100_logits,lm_logits,"dimensions=2048x128112, dim=1",M2M100ForConditionalGeneration

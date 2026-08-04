@@ -331,7 +331,7 @@ def test_ascend_softmax_v3_fast_path_uses_large_row_recompute_for_logits_scale_d
     source = _read_v3_simt_source("row_fast.asc")
 
     assert "inline bool use_large_row_recompute_row_softmax_fast(int64_t dim_size)" in source
-    assert "kMaxWholeRowElements = kFp16Path ? 32768 : 16384" in source
+    assert "kMaxWholeRowElements = kFp16Path ? 51200 : 16384" in source
     assert "return dim_size >= 8192 && dim_size <= kMaxWholeRowElements;" in source
     assert "row_softmax_fast_large_row_recompute_impl" in source
     assert "row_softmax_fast_large_row_recompute_kernel" in source
@@ -367,6 +367,7 @@ def test_ascend_softmax_v3_fast_path_uses_large_row_recompute_for_logits_scale_d
     assert "kPipelinePhysicalGridXLimit = 64" in source
     assert "<<<pipeline_grid_x, 0, acl_stream>>>" in source
     assert "32768>(" in source
+    assert "51200>(" in source
     assert "16384>(" in source
 
 
@@ -390,19 +391,25 @@ def test_ascend_softmax_v3_fast_path_uses_large_row_gmem_workspace_for_very_larg
     assert "row_inv_sum.mutable_data_ptr<float>()" in spatial_source
 
 
-def test_ascend_softmax_v3_fp16_50k_rows_pipeline_ub_stats_before_write():
-    source = _read_v3_simt_source("row_fast.asc")
+def test_ascend_softmax_v3_fp16_50k_rows_use_single_inplace_ub_pipeline():
+    row_fast_source = _read_v3_simt_source("row_fast.asc")
+    spatial_source = _read_v3_simt_source("spatial_softmax.asc")
 
-    assert "use_large_row_ub_stats_row_softmax_fast" in source
-    assert "dim_size > 32768 && dim_size <= 51200" in source
-    assert "row_softmax_fast_large_ub_stats_vf" in source
-    assert "row_softmax_fast_large_ub_stats_pipeline_kernel<51200>" in source
-    assert "kStatsPhysicalGridXLimit = 64" in source
-    assert "<<<stats_grid_x, 0, acl_stream>>>" in source
-    assert "__ubuf__ __fp16 row_tile_ub[2][kTileElements];" in source
-    assert "asc_copy_gm2ub_align(" in source
-    assert "row_max[row] = max_input;" in source
-    assert "row_inv_sum[row] = inv_sum;" in source
+    assert "kMaxWholeRowElements = kFp16Path ? 51200 : 16384" in row_fast_source
+    assert "kMaxWholeRowElements = kFp16Path ? 51200 : 16384" in spatial_source
+    assert "launch_row_fast_large_inplace_pipeline_forward_kernel<" in row_fast_source
+    assert "51200>(" in row_fast_source
+    assert "if (dim_size <= 32768)" in row_fast_source
+    fused_vf_start = row_fast_source.index("row_softmax_fast_large_row_forward_vf")
+    fused_vf_end = row_fast_source.index(
+        "row_softmax_fast_large_row_recompute_impl", fused_vf_start
+    )
+    fused_vf_source = row_fast_source[fused_vf_start:fused_vf_end]
+    assert "reinterpret_cast<__ubuf__ const half2*>(input_ub)" in fused_vf_source
+    assert "reinterpret_cast<__ubuf__ half2*>(output_ub)" in fused_vf_source
+    assert "__floats2half2_rn(" in fused_vf_source
+    assert "row_softmax_fast_large_ub_stats_vf" not in row_fast_source
+    assert "row_softmax_fast_large_ub_stats_pipeline_kernel" not in row_fast_source
 
 
 def test_ascend_softmax_v3_fp16_huge_rows_use_generic_tiled_online_stats():

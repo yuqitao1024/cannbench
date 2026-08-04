@@ -1,0 +1,23 @@
+{
+  "backend": "ascend",
+  "device_name": "Ascend950PR_9589",
+  "op": "softmax",
+  "dtype": "float16",
+  "case": {
+    "case_id": "speech_transformer_attention",
+    "family": "attention",
+    "source_kind": "real_model",
+    "source_project": "TritonBench",
+    "source_model": "speech_transformer",
+    "source_file": "torchbench_train/speech_transformer_train.json",
+    "source_op": "aten._softmax.default",
+    "payload": {
+      "dimensions": [
+        80,
+        204,
+        204
+      ],
+      "dim": 2
+    }
+  }
+}

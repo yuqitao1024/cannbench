@@ -1,0 +1,2 @@
+backend,device_name,op,dtype,case_id,family,payload,source_model
+ascend,Ascend950PR_9589,softmax,float16,opt_logits,lm_logits,"dimensions=4094x50272, dim=1",OPTForCausalLM

@@ -1,0 +1,2 @@
+backend,device_name,op,dtype,case_id,family,payload,source_model
+ascend,Ascend950PR_9589,softmax,float16,deberta_attention,attention,"dimensions=2x24x512x512, dim=-1",DebertaV2ForMaskedLM

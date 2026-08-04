@@ -1,0 +1,2 @@
+backend,device_name,op,dtype,case_id,family,payload,source_model
+ascend,Ascend950PR_9589,softmax,float16,layoutlm_attention,attention,"dimensions=16x12x512x512, dim=-1",LayoutLMForMaskedLM

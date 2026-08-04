@@ -1,0 +1,2 @@
+backend,device_name,op,dtype,case_id,family,payload,source_model
+ascend,Ascend950PR_9589,softmax,float16,convbert_local_kernel,local_attention,"dimensions=49152x9x1, dim=1",YituTechConvBert

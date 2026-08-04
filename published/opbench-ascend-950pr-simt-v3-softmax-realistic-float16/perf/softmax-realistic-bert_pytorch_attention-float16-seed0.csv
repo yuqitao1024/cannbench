@@ -1,0 +1,2 @@
+backend,device_name,op,dtype,case_id,family,payload,source_model
+ascend,Ascend950PR_9589,softmax,float16,bert_pytorch_attention,attention,"dimensions=16x12x128x128, dim=-1",BERT_pytorch
