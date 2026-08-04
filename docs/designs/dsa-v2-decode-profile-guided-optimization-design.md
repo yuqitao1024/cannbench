@@ -3207,6 +3207,47 @@ regress, with each Top-K stage, Sparse Attention, and Combine within 1.0 us of
 the paired baseline. A hardware fault, accuracy difference, or failure of the
 paired gate restores the row-major source before A15.2/A15.3.
 
+The NZ2DN candidate is retained. The focused source suite passed 19 tests and
+the complete Lightning Indexer suite passed 113 tests with 23 device skips.
+The production `dav-3510` package compiled successfully, and both clean
+CannBench workflow runs passed with `max_abs_error = 0` and
+`max_rel_error = 0` at 1,650 MHz.
+
+| Selected stage (us) | Restored baseline | NZ2DN run 1 | NZ2DN run 2 |
+| --- | ---: | ---: | ---: |
+| Score | 83.477 | 56.292 | 56.853 |
+| High histogram | 5.103 | 5.087 | 5.000 |
+| Select high | 10.434 | 10.616 | 10.575 |
+| Low histogram | 5.137 | 4.881 | 4.894 |
+| Select low | 7.635 | 7.748 | 7.735 |
+| Compaction | 7.298 | 6.971 | 6.803 |
+| Sparse Attention fused | 118.299 | 118.885 | 118.271 |
+| Combine | 11.929 | 11.618 | 12.071 |
+| Workflow | 249.368 | 222.939 | 221.560 |
+
+The Score kernel improved by 32.57% and 31.89%; the complete selected workflow
+improved by 10.60% and 11.15%. All neighboring selected stages remained within
+1.0 us of the live baseline. The result demonstrates that the retained
+row-major Score access was materially serialized: an inline capacity-neutral
+layout conversion is much cheaper than the repeated eight-way UB conflict.
+
+One intermediate repetition reused the default remote run name and produced an
+invalid 446.237 us aggregate because its parser saw both the old and new OPPROF
+directories. Its newest individual kernels were normal, but that aggregate is
+excluded. The accepted second run used a unique run name and a clean profile
+directory. Future repeated remote collections must use unique run names or a
+fresh release work directory.
+
+```text
+candidate source commit: 422064f
+candidate archive: /tmp/a15-column-controller/cannbench-dsa-v2-a15-column-422064f.tar.gz
+candidate archive SHA-256: afcc59fd23bfe0a8a50ff1bc21610687c58b7a0eb5d267f05969a0c1bf00de29
+baseline run: /tmp/a15-column-baseline1/
+candidate run 1: /tmp/a15-column-smoke/
+candidate run 2: /tmp/a15-column-candidate2-fresh/
+remote candidate run 2: /root/cannbench-dsa-v2-a15-column-422064f/.cannbench-runs/opbench-ascend-950pr-simt-v2-dsa_decode-realistic-bfloat16-a15-column-r2/
+```
+
 #### A15.2: Sparse Attention NZ And Staging Accesses
 
 The canonical fused Sparse Attention SIMT stages contain several fixed aliases:
