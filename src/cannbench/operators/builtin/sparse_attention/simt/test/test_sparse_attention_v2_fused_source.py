@@ -227,7 +227,7 @@ def test_v2_fused_canonical_qk256_preserves_query_and_value256():
     assert "int32_t current_k" in prepare_pack
     assert "dim < static_cast<uint32_t>(current_k)" in prepare_pack
     assert "int32_t current_k" in fast_pack
-    assert "dim < static_cast<uint32_t>(current_k)" in fast_pack
+    assert "pair_index < static_cast<uint32_t>(current_k) / 2U" in fast_pack
     prepare_call = aiv[aiv.index("asc_vf_call<head64_fused_key_pack_prepare_vf>") :]
     fast_call = aiv[aiv.index("asc_vf_call<head64_fused_key_pack_fast_vf>") :]
     normalized_prepare_call = " ".join(prepare_call.split())
@@ -465,6 +465,32 @@ def test_v2_fused_pv_nz_blocks_use_64b_ub_gaps():
     assert max(
         padded_resources.count(resource) for resource in set(padded_resources)
     ) == 2
+
+
+def test_v2_fused_key_fast_uses_aligned_bf16x2_loads_and_stores():
+    source = _v2_fused_source()
+    prepare = " ".join(
+        _function_definition(source, "head64_fused_key_pack_prepare_vf(").split()
+    )
+    fast = " ".join(
+        _function_definition(source, "head64_fused_key_pack_fast_vf(").split()
+    )
+
+    for contract in (
+        "reinterpret_cast<__gm__ const bfloat16x2_t*>(kv_batch)",
+        "reinterpret_cast<__ubuf__ bfloat16x2_t*>(packed_keys)",
+        "pair_index = lane",
+        "pair_index < static_cast<uint32_t>(current_k) / 2U",
+        "pair_index += 32",
+        "dim = 2U * pair_index",
+        "packed_key_pairs[packed_offset / 2U]",
+        "kv_batch_pairs[(row_offset + dimension_start + dim) / 2U]",
+        "zero_pair",
+    ):
+        assert contract in fast
+
+    assert "bfloat16x2_t" not in prepare
+    assert "packed_keys[packed_offset]" in prepare
 
 
 def test_v2_fused_selected256_reuses_single_slot_only_after_l0b_copy():
