@@ -359,6 +359,8 @@ def test_v2_decode_accuracy_covers_reduction_order_boundaries():
 
     assert '"near_threshold"' in source
     assert '"negative_scores"' in source
+    assert "expected_tied_indices" in source
+    assert "tied_threshold selected index set differs from T3" in source
 
 
 def test_v2_prefill_accuracy_covers_tail_and_reduction_order_boundaries():

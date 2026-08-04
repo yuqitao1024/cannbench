@@ -24,8 +24,10 @@ decode workflow checkpoint is now T3 at 249.697 us; its two validation
 measurements are 250.964 and 249.697 us. Against the
 matching published vLLM-Ascend workflow at 169.797 us, the published SIMT V2
 workflow has 1.471x its latency and 0.680x its performance. A13.1 shard-major
-balanced compaction is the next approved experiment; its context-monotonic and
-bitmap-driven continuations remain gated on a positive A13.1 device result.
+balanced compaction preserved accuracy but failed both paired device-performance
+gates and is rejected. Production retains T3 class-major compaction. A13.2
+context-monotonic ordering and A13.3 bitmap-driven metadata are closed unless
+new profile evidence establishes a different locality mechanism.
 
 The 2x point is an intermediate checkpoint, not the completion target. The
 target is at least 0.90x vLLM-Ascend performance under the same selected-kernel
@@ -2700,7 +2702,82 @@ If A13.1 fails, restore T3 output ordering, record the negative result here, and
 close A13.2/A13.3 unless later profiles provide a different locality mechanism.
 Do not attribute a failure to GM bandwidth without detailed memory evidence.
 
-#### A13.2: Fully Context-Monotonic Indices (Conditional)
+##### A13.1 Device Result: Rejected
+
+A13.1 was built and measured on Ascend 950PR at a stable 1,650 MHz. It used the
+CannBench `bench` subcommand with the default `BasicInfo` metric set and the
+alternating process order `baseline1 -> candidate1 -> baseline2 -> candidate2`.
+The exact T3 baseline and A13.1 candidate source hashes were:
+
+```text
+T3 baseline:     17d008cf5b79a046e3e19fd8c6b76358c572db93fafb7394cab221352b7d3be0
+A13.1 candidate: c8061e39e7c9fb6de202c6a360071b29909b9e7d03cff56fca5136674aa9dd6d
+```
+
+The corresponding distributed Top-K ELF hashes were:
+
+```text
+T3 baseline:     1385d86afb34aa5912ef0d5d1cc24dbe67a0ee17f5388e656322fc278861d6f2
+A13.1 candidate: eb8571b59697e0c3e928c3c6811c7f8105ab92d8427e9f3874b2b60c082fadbe
+```
+
+The candidate passed five repeated canonical runs for random, masked-tail,
+tied-threshold, near-threshold, and negative-score cases. Every case preserved
+the unordered score multiset and a stable selected set; tied-threshold also
+preserved the exact T3 subset `0..2047`. The noncanonical V2 `B=3, Q=2` case
+returned unique, valid indices with the same score multiset. The complete
+Sparse Attention decode oracle reported zero output and LSE mismatches at
+`atol=rtol=0.05`; its maximum absolute differences were 0.0078125 for output
+and 0.0092831 for LSE.
+
+Paired `BasicInfo` measurements were:
+
+| Boundary (us) | Baseline 1 | Candidate 1 | Baseline 2 | Candidate 2 |
+| --- | ---: | ---: | ---: | ---: |
+| Score | 83.160 | 83.551 | 83.272 | 83.616 |
+| High histogram | 5.154 | 5.720 | 5.132 | 5.623 |
+| Select high | 11.093 | 11.002 | 10.706 | 10.502 |
+| Low histogram | 5.472 | 5.524 | 5.158 | 5.122 |
+| Select low / descriptor | 7.763 | 7.732 | 7.542 | 7.742 |
+| Compaction | 6.065 | 6.612 | 6.843 | 6.603 |
+| Indexer | 118.707 | 120.141 | 118.653 | 119.208 |
+| Sparse Attention fused | 118.411 | 118.189 | 118.151 | 118.894 |
+| Combine | 12.215 | 11.791 | 11.965 | 11.881 |
+| Attention selected | 130.626 | 129.980 | 130.116 | 130.775 |
+| Workflow | 249.333 | 250.121 | 248.769 | 249.983 |
+| Excluded Cast | 3.463 | 3.474 | 3.490 | 3.568 |
+
+Sparse Attention fused improved by only 0.187% in pair 1 and regressed by
+0.629% in pair 2, below the required 2% improvement in both pairs. The complete
+workflow regressed by 0.316% and 0.488%, below the required 1% improvement.
+Indexer also regressed by 1.434 us and 0.555 us. Compaction, all other
+individual Indexer stages, and Combine remained within their absolute
+regression limits, but passing those secondary limits cannot override the two
+failed end-to-end gates.
+
+A13.1 is therefore rejected and its production changes were restored to T3.
+The result does not support the hypothesis that shard-major permutation alone
+improves the retained Sparse Attention path. No `Default` or `InstrTimeline`
+profile was collected after the `BasicInfo` rejection, and `published/` was not
+updated. A13.2 and A13.3 are closed unless new profile evidence identifies a
+different locality mechanism.
+
+Raw build, accuracy, and four-process `BasicInfo` evidence is retained at:
+
+```text
+/root/cannbench-dsa-v2-a13-shard-major-c8061e39/
+/root/cannbench-dsa-v2-a13-baseline-t3-17d008cf/
+/root/cannbench-dsa-v2-a13-shard-major-c8061e39-evidence.tar.gz
+/tmp/cannbench-dsa-v2-a13-shard-major-c8061e39-controller/
+```
+
+The evidence archive SHA-256 is:
+
+```text
+136f1b336a23b7ef736d3d6f1a6038af752ebfac4328685735782015187c319d
+```
+
+#### A13.2: Fully Context-Monotonic Indices (Closed)
 
 A13.2 is considered only after A13.1 passes and the remaining Sparse Attention
 gap still justifies more compact work. It orders selected indices monotonically
@@ -2711,7 +2788,7 @@ order. That extra synchronization can regress the roughly 6.8 us compact
 kernel, so A13.2 is a separate candidate with the same correctness and paired
 performance gates. Do not combine it with a new Attention interface.
 
-#### A13.3: Workflow-Private Selection Bitmap (Conditional)
+#### A13.3: Workflow-Private Selection Bitmap (Closed)
 
 A13.3 is considered only if A13.1 or A13.2 demonstrates that context-local
 ordering materially improves Sparse Attention. The canonical `dsa_decode`

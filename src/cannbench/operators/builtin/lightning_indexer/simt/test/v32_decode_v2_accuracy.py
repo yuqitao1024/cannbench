@@ -128,6 +128,14 @@ def run_accuracy(*, seed: int, repeats: int):
         stable_set = all(torch.equal(index_sets[0], item) for item in index_sets[1:])
         if not stable_set:
             raise RuntimeError(f"{case_name} selected index set is unstable")
+        if case_name == "tied_threshold":
+            expected_tied_indices = torch.arange(
+                2048, device=query.device, dtype=torch.int32
+            ).reshape(1, 1, -1).expand_as(index_sets[0])
+            if not torch.equal(index_sets[0], expected_tied_indices):
+                raise RuntimeError(
+                    "tied_threshold selected index set differs from T3"
+                )
         results[case_name] = {
             "repeats": repeats,
             "score_multiset_match": True,
