@@ -2903,6 +2903,72 @@ within 1.0 us of their paired baselines. Collect `Default` or `InstrTimeline`
 only after the `BasicInfo` gate passes. A failed candidate is restored to the
 scalar A10/A6 Value staging source, recorded here, and not published.
 
+##### A14.1 Device Result: Rejected
+
+The native-pair candidate compiled on the Ascend 950PR target with CANN 9.2.0,
+`dav-3510`, and `-O3`. The changed
+`head64_fused_value_pack_fast_vf` used 18 registers per thread and zero Stack,
+compared with 13 registers and zero Stack for the scalar baseline. The extra
+five registers remain below the 32-register residency threshold for the
+retained 1024-thread launch, but are a negative resource change.
+
+The exact source and package evidence is:
+
+```text
+scalar source SHA-256:    43b7813e830aa1ba1d9550b917fe8e18dc64721f766c0d294694561b45c7303b
+candidate source SHA-256: 318199d13a40f7552a5d6312e14023318ee0ed432fa54c15023f2cb1bd41e993
+candidate release SHA-256: ce9443c58fc3c4b8b04777edc950375c922845b0b7174ec4c03df5f054203a18
+scalar fused ELF SHA-256: f5e7fd00c4cfab5737fbf69a850e690dff56d5b9c27e7a0b5871dd557f762174
+candidate fused ELF SHA-256: e405df927ed1c0037419639585debce1677d43213b5b8db45414a94d9a2e50c3
+```
+
+Five fresh canonical Sparse Attention processes with seeds 7 through 11 all
+passed at `atol=rtol=0.05`, with zero output and LSE mismatches. Output maximum
+absolute error ranged from 0.0078125 to 0.009765625 and LSE maximum absolute
+error from about 0.00924 to 0.00940. The explicit P2/selected64 generic case
+also passed with zero mismatches, output maximum absolute error 0.0146484375,
+and LSE maximum absolute error 0.014977455139160156. An earlier reduced harness
+failed in the NPU reference `logsumexp` with `Format only support ND` before the
+custom kernel launched; it is not a candidate correctness failure.
+
+The canonical V3.2 decode case
+`deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048` was then measured in four
+fresh CannBench `BasicInfo` processes in the order baseline 1, candidate 1,
+baseline 2, candidate 2. Device frequency was 1650 MHz. Times are microseconds:
+
+| Boundary | Baseline 1 | Candidate 1 | Baseline 2 | Candidate 2 |
+| --- | ---: | ---: | ---: | ---: |
+| Score | 82.968 | 83.643 | 83.154 | 83.594 |
+| High histogram | 5.767 | 5.722 | 5.733 | 5.718 |
+| Select high | 11.035 | 10.930 | 10.939 | 11.048 |
+| Low histogram | 5.675 | 5.413 | 5.638 | 5.273 |
+| Select low | 7.676 | 7.471 | 7.419 | 7.762 |
+| Compaction | 6.700 | 7.454 | 6.702 | 6.540 |
+| Sparse Attention fused | 118.189 | 119.252 | 118.596 | 118.471 |
+| Combine | 12.250 | 12.496 | 11.764 | 11.981 |
+| Excluded Cast | 3.521 | 3.460 | 3.492 | 3.566 |
+| Workflow | 250.260 | 252.381 | 249.945 | 250.387 |
+
+The fused Sparse Attention kernel regressed by 1.063 us (0.90%) in pair 1 and
+improved by only 0.125 us (0.11%) in pair 2, failing the required 2% gain in
+both pairs. The selected workflow regressed by 2.121 us (0.85%) and 0.442 us
+(0.18%), failing its required 1% gain. The pair-1 standalone Compaction row
+increased by 0.754 us but stayed within its 1.0 us guard; other neighboring
+stages did not explain a hidden workflow gain. CannBench workflow aggregation
+used the dependency replay copies of the Indexer stages, not the first
+standalone copies shown above.
+
+A14.1 is therefore rejected and the production source is restored to scalar
+A6 Value staging. No `Default` or `InstrTimeline` profile was collected after
+the failed `BasicInfo` gate, and `published/` is unchanged. Raw evidence is
+retained at:
+
+```text
+/root/cannbench-dsa-v2-a13-baseline-t3-17d008cf/
+/root/cannbench-dsa-v2-a14-value-pair-4a52ccbe/
+/root/cannbench-dsa-v2-a14-value-pair-4a52ccbe.tar.gz
+```
+
 #### A14.2: Native BF16x2 Lightning Indexer Score Arithmetic
 
 The retained decode score postprocess maps one warp to one context position.
@@ -2963,6 +3029,80 @@ workflow by at least 1%, while every radix stage, Sparse Attention, and Combine
 remain within 1.0 us of their paired baselines. A failed candidate is restored
 to the scalar score arithmetic, recorded here, and not published. Detailed
 metrics are collected only after the `BasicInfo` gate passes.
+
+##### A14.2 Device Result: Rejected
+
+The register-pair candidate compiled successfully on Ascend 950PR with CANN
+9.2.0, `dav-3510`, and production `-O3`. Separate `--cce-res-usage` builds
+reported 16 registers per thread and zero Stack for
+`lightning_indexer_context_sharded_postprocess_vf` in both the scalar baseline
+and pair candidate. The source, release, and changed device ELF evidence is:
+
+```text
+scalar source SHA-256:    b966fea9acd3c2d77b649e4b2d21ca5320fec91de0dc27a04f2ad469ca3ee1a6
+candidate source SHA-256: 766e731ebb7bf61bce8718dde2bb743e002577346e872b79ff3f46bbb0687bae
+candidate release SHA-256: 9460a102bbcbf85a91f01ed11d5a5bb13b7196214f12fe54a029df0e1cae4288
+scalar Score ELF SHA-256: 9c7ad364aa57345326106dc14f911fc5b0da93e978eec007ef99ae347e64a83b
+candidate Score ELF SHA-256: f6e1405fd482fb52d47d59e179204a8a0991627255588ab7b6f0967e789e7673
+```
+
+Five fresh Indexer processes with seeds 7 through 11 each ran five repeats of
+canonical, masked-tail, tied-threshold, near-threshold, and negative-weight
+inputs. Every run preserved the exact unordered Top-K score multiset, a stable
+unique valid index set, and the deterministic tied subset `0..2047`. A separate
+`B=1,Q=1,C=32768` process ran five repeats through the non-distributed radix
+fallback with the same result. The complete DSA decode composition then used
+candidate Indexer output as scalar Sparse Attention input. At
+`atol=rtol=0.05`, all 262,144 output values and 512 LSE values passed with zero
+mismatches; maximum absolute errors were 0.009765625 and 0.0099859238.
+
+The exact V3.2 decode case was measured in four fresh CannBench `BasicInfo`
+processes at 1650 MHz in the order baseline 1, candidate 1, baseline 2,
+candidate 2. The workflow rows below use the dependency replay captured with
+Sparse Attention because those are the rows summed into the workflow. Times
+are microseconds:
+
+| Boundary | Baseline 1 | Candidate 1 | Baseline 2 | Candidate 2 |
+| --- | ---: | ---: | ---: | ---: |
+| Score replay | 83.311 | 83.265 | 83.071 | 83.499 |
+| High histogram replay | 5.786 | 5.672 | 5.639 | 5.657 |
+| Select high replay | 10.849 | 10.465 | 10.747 | 10.672 |
+| Low histogram replay | 5.032 | 5.149 | 5.207 | 5.611 |
+| Select low replay | 7.408 | 7.503 | 7.407 | 7.507 |
+| Compaction replay | 6.780 | 6.403 | 6.835 | 6.593 |
+| Sparse Attention fused | 118.289 | 118.214 | 118.765 | 118.360 |
+| Combine | 11.844 | 11.871 | 12.151 | 12.192 |
+| Excluded Cast | 3.447 | 3.541 | 3.521 | 3.474 |
+| Workflow | 250.154 | 249.942 | 249.327 | 249.298 |
+
+The independently profiled Score rows were 83.338 versus 83.741 us in pair 1
+and 83.504 versus 82.782 us in pair 2. The candidate therefore regressed by
+0.48% in the first pair and improved by only 0.86% in the second, far below the
+required 3% gain in both. Replay Score improved by only 0.06% in pair 1 and
+regressed by 0.52% in pair 2. Workflow improvement was only 0.085% and 0.012%,
+far below 1%. All neighboring stages stayed inside the 1.0 us guard, so they do
+not hide an attributable pair-arithmetic gain.
+
+A14.2 is rejected and the production source is restored to scalar ReLU and
+multiply arithmetic. On this exact source and toolchain, explicit register
+pairs neither reduced register pressure nor produced a stable Score latency
+gain over the compiler's scalar lowering. No `Default` or `InstrTimeline` run
+was collected after the failed `BasicInfo` gate, and `published/` is unchanged.
+Raw evidence is retained at:
+
+```text
+/root/cannbench-dsa-v2-a13-baseline-t3-17d008cf/
+/root/cannbench-dsa-v2-a14-score-pair-766e731e/
+/root/cannbench-dsa-v2-a14-score-pair-766e731e.tar.gz
+/root/cannbench-dsa-v2-a14-score-pair-766e731e-evidence.tar.gz
+/tmp/a14-score-controller/cannbench-dsa-v2-a14-score-pair-766e731e-evidence.tar.gz
+```
+
+The evidence archive SHA-256 is:
+
+```text
+7006397f01dd055269bbecee1a1d8685441da4415946e571f34eb698d19f2ad9
+```
 
 ### W0: Workflow-Level Cleanup
 
