@@ -3307,6 +3307,74 @@ candidate run 2: /tmp/a15-sparse-score-r2/
 remote evidence: /root/cannbench-dsa-v2-a15-sparse-score-803ae9d/.cannbench-runs/
 ```
 
+##### A15.2b: Remaining UB-Conflict Isolation Matrix
+
+The remaining canonical decode conflict candidates were tested independently
+from `origin/main` revision `e67c541`. Each candidate has its own feature
+branch, worktree, release archive, remote release directory, unique CannBench
+run name, and local raw result tree. No candidate was stacked on another one.
+The fresh two-run retained baseline at 1,650 MHz was:
+
+| Boundary | Run 1 (us) | Run 2 (us) | Mean (us) |
+| --- | ---: | ---: | ---: |
+| Indexer selected kernels | 92.538 | 92.217 | 92.378 |
+| Sparse Attention selected kernels | 131.792 | 130.009 | 130.901 |
+| Sparse Attention fused | 119.370 | 118.564 | 118.967 |
+| Workflow | 224.330 | 222.226 | 223.278 |
+
+All measured candidates passed the complete workflow with
+`max_abs_error = 0` and `max_rel_error = 0`. Positive percentages below mean
+lower latency relative to the fresh baseline mean. One run was sufficient for
+an obvious regression or a change below the local gate; a second run was used
+for the near-gate PV result.
+
+| ID | Isolated change | Target mean (us) | Target delta | Workflow mean (us) | Workflow delta | Decision |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| U1 | Direct BF16x2 loads from the retained column-major Indexer Score UB | 94.898 Indexer | -2.73% | 225.671 | -1.07% | Reject |
+| U2 | Add 64-byte gaps between adjacent FP32 PV NZ blocks | 129.938 Sparse | +0.74% | 221.710 | +0.70% | Borderline; reject by 1% Sparse gate |
+| U3 | Write Query staging in physical NZ order | 132.509 Sparse | -1.23% | 224.093 | -0.37% | Reject |
+| U4 | Write Key Prepare and Key Fast staging in physical NZ order | 130.521 Sparse | +0.29% | 223.729 | -0.20% | Reject |
+| U5 | Stage Softmax probability row-major and transpose to NZ | 131.354 Sparse | -0.35% | 223.535 | -0.12% | Reject |
+| U6 | Write canonical Value staging in physical NZ order | 139.208 Sparse | -6.35% | 231.863 | -3.85% | Reject |
+
+U2 increased the PV result view by only 15 64-byte gaps, or 960 bytes. The
+existing QK maximum still covered the enlarged PV layout, so the kernel's
+dynamic UB request did not need to approach the 224 KiB device limit. Its first
+production build found a declaration-order error: the new block-count constant
+referenced `kHead64FusedMaxValueTile` before that constant was declared. A RED
+source-order regression test reproduced the issue, and commit `7c0d446` moved
+only that declaration before rebuilding. The corrected production archive
+compiled and both workflow runs passed. Its stable 0.70% workflow gain is real
+but the changed Sparse boundary improved by only 0.74%, below the predefined 1%
+retention gate; keep the branch as evidence rather than production code unless
+the retention policy is intentionally relaxed.
+
+The physical-order Query, Key, Probability, and Value writes show why conflict
+count alone is not a sufficient objective. Their extra index arithmetic,
+changed store pattern, or explicit transpose costs offset the predicted
+subbank-distribution improvement. Value remapping is especially harmful and
+must not be combined with a future winner without new isolated evidence.
+
+```text
+baseline runs: /tmp/dsa-v2-overnight-baseline-r1/
+               /tmp/dsa-v2-overnight-baseline-r2/
+U1 branch: perf/dsa-v2-a15-indexer-score-paired-load @ ab2b3cc
+U2 branch: perf/dsa-v2-a15-pv-nz-padding @ 7c0d446
+U3 branch: perf/dsa-v2-a15-query-pack-remap @ ff04e4b
+U4 branch: perf/dsa-v2-a15-key-pack-remap @ 5841825
+U5 branch: perf/dsa-v2-a15-probability-pack-remap @ bcfec95
+U6 branch: perf/dsa-v2-a15-value-staging-remap @ d3dd0ed
+candidate archives: /tmp/dsa-v2-overnight-candidates/
+candidate runs: /tmp/dsa-v2-u1-indexer-score-paired-r1/
+                /tmp/dsa-v2-u2-pv-nz-padding-r1-fixed/
+                /tmp/dsa-v2-u2-pv-nz-padding-r2/
+                /tmp/dsa-v2-u3-query-remap-r1/
+                /tmp/dsa-v2-u4-key-remap-r1/
+                /tmp/dsa-v2-u5-probability-remap-r1/
+                /tmp/dsa-v2-u6-value-remap-r1/
+remote releases: /root/cannbench-dsa-v2-u*/
+```
+
 #### A15.3: Conflict-Free Top-K Low-Threshold Group Reduction
 
 The retained low-byte reducer assigns one of 16 groups to each of 16 active
@@ -3351,6 +3419,57 @@ rejected source commit: cb5ee88
 candidate archive: /tmp/a15-select-low-controller/cannbench-dsa-v2-a15-select-low-cb5ee88.tar.gz
 candidate archive SHA-256: 9d8ce96eea133e8aa71d6a862c57ef8a690c877d5bdb11e3107fa12b743553b1
 candidate run: /tmp/a15-select-low-r1/
+```
+
+### A16: Per-VF Native BF16x2 Isolation
+
+The earlier A14 experiment was not an exhaustive conversion of every SIMT VF.
+It independently tested only:
+
+- `head64_fused_value_pack_fast_vf`, using native BF16 pairs for canonical
+  Value staging; and
+- `lightning_indexer_context_sharded_postprocess_vf`, retaining scalar loads
+  but using BF16 pair register arithmetic for ReLU and weighting.
+
+Both were rejected. The remaining applicable canonical decode BF16 boundaries
+were therefore tested one VF at a time from the same `e67c541` baseline. The
+four new candidates preserve FP32 accumulation and exponentiation; they change
+only adjacent BF16 memory operations at the named VF boundary.
+
+| ID | Isolated VF boundary | Sparse mean (us) | Sparse delta | Workflow mean (us) | Workflow delta | Decision |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| B1 | Query Pack adjacent pair loads/stores | 131.202 | -0.23% | 222.855 | +0.19% | Reject; workflow change is neighboring-stage noise |
+| B2 | Initial Key Prepare adjacent pair loads/stores | 130.367 | +0.41% | 223.899 | -0.28% | Reject |
+| B3 | Later Key Fast adjacent pair loads/stores | 127.849 | +2.33% | 220.334 | +1.32% | Retain candidate |
+| B4 | FP32-preserving Softmax probability pair stores | 130.814 | +0.07% | 223.029 | +0.11% | Reject as noise |
+
+B3 passed two clean runs with zero workflow error. Sparse selected-kernel time
+was 127.284 and 128.414 us, while workflow time was 220.829 and 219.838 us. The
+fused kernel itself measured 115.336 and 116.473 us, a 2.57% mean improvement
+from the 118.967 us fresh baseline. Both the Sparse and workflow means clear the
+1% and 0.5% retention gates, so B3 is the only candidate in this matrix worth
+integrating and retesting on top of the retained production path.
+
+The other canonical decode SIMT VFs are not BF16x2 candidates at their current
+boundaries. The five distributed Top-K VFs operate on integer histogram,
+offset, or index data. Softmax state initialization, output init/update/write,
+and P4 Combine operate on FP32 state. Converting those VFs to BF16 pairs would
+change the numerical/storage contract rather than vectorize an existing BF16
+operation. Together with A14 and A16, all applicable canonical decode SIMT VF
+boundaries have now been assessed independently.
+
+```text
+B1 branch: perf/dsa-v2-a16-query-pack-bf16x2 @ 5cac009
+B2 branch: perf/dsa-v2-a16-key-prepare-bf16x2 @ ab40534
+B3 branch: perf/dsa-v2-a16-key-fast-bf16x2 @ 4f350f4
+B4 branch: perf/dsa-v2-a16-softmax-probability-bf16x2 @ 8b635bb
+candidate archives: /tmp/dsa-v2-overnight-candidates/
+candidate runs: /tmp/dsa-v2-b1-query-pair-r1/
+                /tmp/dsa-v2-b2-key-prepare-pair-r1/
+                /tmp/dsa-v2-b3-key-fast-pair-r1/
+                /tmp/dsa-v2-b3-key-fast-pair-r2/
+                /tmp/dsa-v2-b4-probability-pair-r1/
+remote releases: /root/cannbench-dsa-v2-b*/
 ```
 
 `BasicInfo`, `Default`, and `InstrTimeline` do not directly prove an individual
