@@ -3331,7 +3331,7 @@ for the near-gate PV result.
 | ID | Isolated change | Target mean (us) | Target delta | Workflow mean (us) | Workflow delta | Decision |
 | --- | --- | ---: | ---: | ---: | ---: | --- |
 | U1 | Direct BF16x2 loads from the retained column-major Indexer Score UB | 94.898 Indexer | -2.73% | 225.671 | -1.07% | Reject |
-| U2 | Add 64-byte gaps between adjacent FP32 PV NZ blocks | 129.938 Sparse | +0.74% | 221.710 | +0.70% | Borderline; reject by 1% Sparse gate |
+| U2 | Add 64-byte gaps between adjacent FP32 PV NZ blocks | 129.938 Sparse | +0.74% | 221.710 | +0.70% | Retain after combined U2+B3 validation |
 | U3 | Write Query staging in physical NZ order | 132.509 Sparse | -1.23% | 224.093 | -0.37% | Reject |
 | U4 | Write Key Prepare and Key Fast staging in physical NZ order | 130.521 Sparse | +0.29% | 223.729 | -0.20% | Reject |
 | U5 | Stage Softmax probability row-major and transpose to NZ | 131.354 Sparse | -0.35% | 223.535 | -0.12% | Reject |
@@ -3344,10 +3344,11 @@ production build found a declaration-order error: the new block-count constant
 referenced `kHead64FusedMaxValueTile` before that constant was declared. A RED
 source-order regression test reproduced the issue, and commit `7c0d446` moved
 only that declaration before rebuilding. The corrected production archive
-compiled and both workflow runs passed. Its stable 0.70% workflow gain is real
-but the changed Sparse boundary improved by only 0.74%, below the predefined 1%
-retention gate; keep the branch as evidence rather than production code unless
-the retention policy is intentionally relaxed.
+compiled and both workflow runs passed. Its stable 0.70% workflow gain is real,
+although the changed Sparse boundary improved by only 0.74%, below the original
+predefined 1% retention gate. U2 was subsequently retained by an explicit
+relaxed-gate decision and validated again in the combined U2+B3 package
+described in A16.1.
 
 The physical-order Query, Key, Probability, and Value writes show why conflict
 count alone is not a sufficient objective. Their extra index arithmetic,
@@ -3440,15 +3441,15 @@ only adjacent BF16 memory operations at the named VF boundary.
 | --- | --- | ---: | ---: | ---: | ---: | --- |
 | B1 | Query Pack adjacent pair loads/stores | 131.202 | -0.23% | 222.855 | +0.19% | Reject; workflow change is neighboring-stage noise |
 | B2 | Initial Key Prepare adjacent pair loads/stores | 130.367 | +0.41% | 223.899 | -0.28% | Reject |
-| B3 | Later Key Fast adjacent pair loads/stores | 127.849 | +2.33% | 220.334 | +1.32% | Retain candidate |
+| B3 | Later Key Fast adjacent pair loads/stores | 127.849 | +2.33% | 220.334 | +1.32% | Retain |
 | B4 | FP32-preserving Softmax probability pair stores | 130.814 | +0.07% | 223.029 | +0.11% | Reject as noise |
 
 B3 passed two clean runs with zero workflow error. Sparse selected-kernel time
 was 127.284 and 128.414 us, while workflow time was 220.829 and 219.838 us. The
 fused kernel itself measured 115.336 and 116.473 us, a 2.57% mean improvement
 from the 118.967 us fresh baseline. Both the Sparse and workflow means clear the
-1% and 0.5% retention gates, so B3 is the only candidate in this matrix worth
-integrating and retesting on top of the retained production path.
+1% and 0.5% retention gates, so B3 is the only candidate in this matrix retained
+in production. Its combined validation with U2 is recorded in A16.1.
 
 The other canonical decode SIMT VFs are not BF16x2 candidates at their current
 boundaries. The five distributed Top-K VFs operate on integer histogram,
@@ -3470,6 +3471,40 @@ candidate runs: /tmp/dsa-v2-b1-query-pair-r1/
                 /tmp/dsa-v2-b3-key-fast-pair-r2/
                 /tmp/dsa-v2-b4-probability-pair-r1/
 remote releases: /root/cannbench-dsa-v2-b*/
+```
+
+#### A16.1: Combined U2+B3 Integration Result
+
+U2 was squashed into production commit `6ae6d72`, and B3 was integrated as the
+independent following commit `ad20c71`. The combined package was rebuilt from
+`ad20c71` and measured twice with CannBench `BasicInfo` on the same 950PR,
+CANN 9.2.0, 1,650 MHz device and V3.2 decode workflow case used by the fresh
+`e67c541` baseline. No manual `msopprof` options were added. Both runs completed
+with `failure_count = 0`, `max_abs_error = 0`, and `max_rel_error = 0`.
+
+| Boundary | Baseline mean (us) | Combined run 1 (us) | Combined run 2 (us) | Combined mean (us) | Delta |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Indexer selected kernels | 92.378 | 93.192 | 93.595 | 93.394 | -1.10% |
+| Sparse Attention selected kernels | 130.901 | 126.635 | 126.927 | 126.781 | +3.15% |
+| Sparse Attention fused | 118.967 | 114.650 | 114.752 | 114.701 | +3.59% |
+| Workflow | 223.278 | 219.827 | 220.522 | 220.175 | +1.39% |
+
+The workflow run-to-run spread is 0.695 us, or 0.32% of the combined mean, and
+the fused-kernel spread is 0.102 us. The combined sparse boundary is 0.84%
+faster than the standalone B3 mean, while the combined workflow is only 0.07%
+faster than standalone B3 because the unchanged Indexer samples were 1.10%
+slower than the baseline mean. The effects are therefore not additive at the
+workflow boundary, but the combined package preserves a stable 1.39% end-to-end
+gain and a 3.15% gain in the code boundary changed by U2 and B3. Retain both
+commits; do not use the standalone U2 and B3 workflow percentages as an
+additive estimate.
+
+```text
+combined archive: /tmp/dsa-v2-u2-b3-combined-ad20c71/cannbench-dsa-v2-u2-b3-combined-ad20c71.tar.gz
+combined archive SHA-256: 25f07fd8c7325e9bbae803a3b4c52ee7b695827ca8e16eb379f50142508f6b18
+combined run 1: /tmp/dsa-v2-u2-b3-combined-ad20c71-r1/
+combined run 2: /tmp/dsa-v2-u2-b3-combined-ad20c71-r2/
+remote evidence: /root/cannbench-dsa-v2-u2-b3-combined-ad20c71/.cannbench-runs/
 ```
 
 `BasicInfo`, `Default`, and `InstrTimeline` do not directly prove an individual
