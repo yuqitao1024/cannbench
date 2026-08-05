@@ -3781,6 +3781,132 @@ Raw evidence is preserved at:
 The local evidence archive SHA-256 is
 `34e6ab4fdc28eff24454fca94642fe14f4bc66a629ba2f08355833433a274119`.
 
+### A18: Canonical Indexer 32 KiB Key Packets With Two L1 Slots
+
+A17 leaves Lightning Indexer as the next independent target. The retained
+canonical score kernel is about 56-57 us and performs 64 context iterations per
+physical AIC: each iteration copies one 32-by-128 BF16 Key tile from GM to L1,
+copies it from L1 to L0B, runs the unchanged 128-by-32 MMAD, and publishes one
+32-context BF16 Score tile to the existing two-slot AIC/AIV pipeline. Although
+the Score slots overlap Cube production with Vector postprocess, the Key path
+still uses one 8 KiB L1 buffer and serializes every GM-to-L1 transfer with its
+following L1-to-L0B transfer.
+
+Three implementations were considered:
+
+1. Enlarge only the GM-to-L1 packet to 128 contexts. This reduces 64 Key
+   transfers to 16 but leaves a single L1 slot, so MTE2 still waits for the
+   current packet's four L1-to-L0B consumers before loading the next packet.
+2. Keep 32-context packets and add a second 8 KiB L1 slot. This exposes overlap
+   but retains 64 small GM-to-L1 transfers and their instruction/event cost.
+3. Use two 128-context L1 slots. Each 32 KiB packet is sliced into four unchanged
+   32-context Tensor API views for L0B, while MTE2 prefetches the next packet
+   into the alternate slot. This combines fewer transfers with exposed
+   copy/compute overlap and is selected.
+
+The experiment changes only the exact canonical predicate already used by the
+distributed decode path: batch 2, query count 2, context count 32768, head count
+64, head dimension 128, top-k 2048, and 16 context shards. The existing launch
+wrapper selects a dedicated optimized kernel for that predicate. Other BF16
+decode shapes keep the retained context-sharded kernel byte-for-byte; prefill,
+V1, dispatch contracts, output type and order, radix stages, and public
+interfaces are unchanged.
+
+#### A18.1: Tiling, Capacity, And Work Ownership
+
+Each canonical physical AIC still owns one query atom and one 2048-context
+shard. The compute and AIV mapping remain:
+
+```text
+32 physical AIC tasks
+  -> 16 Key packets per task
+  -> 4 MMAD/Score subtiles per packet
+  -> 32 contexts per subtile
+  -> one 32-lane warp reduces 64 heads for each context
+```
+
+The only layout change is the L1 Key staging extent. A packet is a Tensor API
+ZN view with logical shape `[128, 128]` (head dimension by contexts). Four
+`Slice(MakeCoord(0, subtile_start), MakeShape(128, 32))` views feed the retained
+ZN `[128, 32]` L0B tensor. MMAD `m=128`, `n=32`, `k=128`, the two-query L0C
+offset, column-major BF16 Fixpipe output, head reduction order, and Score slot
+addresses remain unchanged.
+
+The maximum simultaneously live storage is:
+
+```text
+L1 Query                         32,768 bytes
+L1 Key packet slot 0             32,768 bytes
+L1 Key packet slot 1             32,768 bytes
+L1 total                         98,304 bytes
+
+L0A Query                        32,768 bytes
+L0B Key compute subtile           8,192 bytes
+L0C Score                        16,384 bytes
+shared Score UB, two BF16 slots   8,192 bytes
+```
+
+Weights and reduced Scores remain direct GM operands of the existing AIV VF and
+add no L1 or UB allocation. The L1 total is below the platform budget and does
+not change the UB/DCache contract. Production and `--cce-res-usage` builds must
+still confirm zero new Stack and acceptable VF registers.
+
+#### A18.2: Two-Direction Slot Protocol
+
+The optimized AIC uses only the already included C synchronization API for the
+new L1 ownership protocol. Event IDs 0 and 1 identify the two slots, but ready
+and free use distinct pipeline directions:
+
+```text
+MTE1 -> MTE2: slot is free for the next GM-to-L1 packet
+MTE2 -> MTE1: packet is ready for L1-to-L0B consumption
+```
+
+Both slots start owned by MTE2. Packet 0 is loaded before the loop. For packet
+`p`, MTE1 first waits for the current slot's ready event, MTE2 then starts packet
+`p+1` in the alternate free slot, and MTE1 consumes four 32-context slices from
+the current slot. The fourth L1-to-L0B copy publishes the current slot free.
+The final packet has no following producer and needs no terminal free event.
+The existing MTE1-to-MMAD dependency still prevents L0B reuse before MMAD, and
+the existing two-direction Score ready/free protocol remains independent.
+
+Validate the protocol in increasing order: one packet, two packets, first slot
+reuse, all 16 packets, both queries, and all 32 physical tasks. A hang is a
+synchronization failure; a runtime parameter error or memory exception is
+classified separately before changing events.
+
+#### A18.3: Tests And Retention Gate
+
+The source-contract test must fail on the retained source before implementation
+and then lock:
+
+- a 128-context, 32 KiB Key packet and two physical L1 slots;
+- four 32-context Tensor API slices per packet with unchanged L0B/MMAD shape;
+- separate `MTE1 -> MTE2` free and `MTE2 -> MTE1` ready directions for both
+  slots, prefetch of the next slot, and release only after the last slice;
+- selection of the optimized kernel only for canonical batch 2, query 2, shard
+  count 16 decode;
+- the retained generic kernel, AIV Score protocol, launch geometry, and public
+  wrapper signature.
+
+Run the focused source suite, the complete local suite with temporary files
+outside `/tmp`, production `-O3` and resource builds for `dav-3510`, canonical
+V2 seeds 7 and 19 plus a repeated seed, one noncanonical V2 case, and the V1
+decode regression at `atol=rtol=0.05`. Performance uses two alternating clean-
+process CannBench `dsa_decode` `BasicInfo` pairs. Record every Indexer stage,
+Sparse Attention, Combine, selected workflow, and excluded materialization
+Cast. Retain only if both pairs pass correctness and:
+
+- the complete Indexer improves by at least 1%;
+- the selected workflow improves by at least 1%;
+- Sparse Attention and Combine each remain within 1.0 us of their paired
+  baselines.
+
+If the combined implementation misses the gate, restore it before optionally
+isolating packet-only or two-slot-only variants. Do not publish or collect
+`Default`/`InstrTimeline` for a rejected candidate. A retained candidate is
+documented, integrated, and published before selecting the next optimization.
+
 ### W0: Workflow-Level Cleanup
 
 Keep dependency materialization and helper launches visible in raw profiles.
