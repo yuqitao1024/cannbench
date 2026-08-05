@@ -3688,6 +3688,99 @@ Vector critical path shortened. A retained A17 is integrated and published
 before starting the independent Lightning Indexer L1 large-packet ping-pong
 experiment; a rejected A17 does not block that Indexer experiment.
 
+#### A17.5: Device Result - Rejected
+
+A17 was built and measured on Ascend 950PR (`Ascend950PR_9589`) with CANN
+9.2.0, Bisheng 15.0.5, Python 3.11.15, torch 2.10.0, torch-npu 2.10.0,
+`dav-3510`, and production `-O3`. The retained and candidate source and fused
+ELF hashes were:
+
+```text
+retained source:     715a5f061795dff53149033d1358b676e818db80d838e6df3bb950415e0a1506
+candidate source:    fce9624e18a60ebaba1103efd5aaf9de998a571cb12a5a1c159d2251425b3096
+retained fused ELF:  fe8bd03958496c504ed628f2ba23d559b9a5f8b29731d7682a9b1db40d05e800
+candidate fused ELF: 8e117b21d140384a9c4848e17fbd0ca478c9f6f25cdd527c367194401605deb2
+resource fused ELF:  57a4e5986e89eb4c00749e42565d30471e3d9605e2554180c8b46cae713e3323
+```
+
+The production and `--cce-res-usage` builds both completed. The changed fused
+translation unit reported zero Stack for every VF. The largest reported VF
+was Softmax at 32 registers; Key/Value pack VFs used 17-30 registers, Query
+pack used 16, Output Write used 24, and the remaining VFs used 7-11. Thus the
+candidate passed the resource gate, but resource feasibility did not predict
+an end-to-end gain.
+
+Clean-process device correctness passed at `atol=rtol=0.05`:
+
+- canonical V2 seed 7 passed all 262,144 output and 512 LSE values with maximum
+  absolute errors 0.0078125 and 0.0092831;
+- canonical V2 seed 19 passed with maximum absolute errors 0.009765625 and
+  0.0092297;
+- repeating canonical seed 7 produced the same zero-mismatch result;
+- the explicit noncanonical V2 Q4/P1 path passed all validated rows and heads
+  with maximum absolute errors 0.0078125 and 0.0092869;
+- the retained V1 canonical regression passed with maximum absolute errors
+  0.0302734375 and 0.0475636.
+
+The canonical inputs use a repeating 257-element deterministic value pattern
+with negative values and seed variation. Each validated row also included one
+negative index, one out-of-range index, and, where applicable, one causal
+future index. This exercised repeated/equal-valued inputs, masked boundaries,
+invalid indices, negative-valued arithmetic, and repeated stability. The first
+noncanonical attempt used P4 and was rejected by the existing host contract
+(`head64 prefill requires selected_partitions=1`) before device launch; the
+valid P1 rerun above is the recorded generic-path result.
+
+Two alternating clean-process CannBench `BasicInfo` pairs then ran in the
+predeclared order. Every valid run reported `failure_count=0`, workflow
+accuracy passed, and current/rated frequency was 1,650 MHz. Times are
+microseconds; Indexer rows are the separately selected component used by the
+published workflow aggregation, while Cast remains excluded.
+
+| Boundary | Baseline 1 | Candidate 1 | Baseline 2 | Candidate 2 |
+| --- | ---: | ---: | ---: | ---: |
+| Score | 56.333 | 56.908 | 56.350 | 56.764 |
+| High histogram | 5.235 | 5.538 | 5.610 | 5.512 |
+| Select high | 10.443 | 10.945 | 11.018 | 10.974 |
+| Low histogram | 5.143 | 5.436 | 5.357 | 5.077 |
+| Select low / offsets | 7.647 | 7.525 | 7.533 | 7.466 |
+| Compaction | 6.363 | 6.263 | 6.420 | 6.055 |
+| Indexer selected | 91.164 | 92.615 | 92.288 | 91.848 |
+| Sparse Attention fused | 114.160 | 113.164 | 114.548 | 113.619 |
+| Combine | 11.973 | 12.236 | 12.131 | 12.399 |
+| Attention selected | 126.133 | 125.400 | 126.679 | 126.018 |
+| Workflow | 217.297 | 218.015 | 218.967 | 217.866 |
+| Excluded Cast | 3.435 | 3.585 | 3.435 | 3.471 |
+
+The fused kernel improved by 0.996 us (`0.872%`) and 0.929 us (`0.811%`),
+below the required 1% in both pairs. The complete workflow regressed by
+0.718 us (`0.330%`) in pair 1 and improved by only 1.101 us (`0.503%`) in
+pair 2, also below 1% in both pairs. Pair-1 Indexer movement was a 1.451 us
+regression and exceeded its 1.0 us guard; pair-2 Indexer movement was a
+0.440 us improvement. Combine regressed by 0.263 us and 0.268 us, within its
+absolute guard. The removed L1 Score staging therefore produced a small local
+fused-kernel reduction, but not a stable or large enough workflow reduction.
+
+A17 is rejected. The candidate source and its dedicated direct-delivery test
+were restored to the retained L1 Score path, no `Default` or `InstrTimeline`
+profile was collected, and `published/` was not updated. The independent
+Lightning Indexer large-packet and two-slot L1 experiment remains the next
+optimization.
+
+Raw evidence is preserved at:
+
+```text
+/root/cannbench-a17-controller/runs/a17-direct-score-baseline-1r3/
+/root/cannbench-a17-controller/runs/a17-direct-score-candidate-1/
+/root/cannbench-a17-controller/runs/a17-direct-score-baseline-2/
+/root/cannbench-a17-controller/runs/a17-direct-score-candidate-2/
+/root/cannbench-a17-direct-score-evidence-20260805.tar.gz
+/home/y00621698/cannbench-dsa-v2-a17-direct-score-20260805/
+```
+
+The local evidence archive SHA-256 is
+`34e6ab4fdc28eff24454fca94642fe14f4bc66a629ba2f08355833433a274119`.
+
 ### W0: Workflow-Level Cleanup
 
 Keep dependency materialization and helper launches visible in raw profiles.
