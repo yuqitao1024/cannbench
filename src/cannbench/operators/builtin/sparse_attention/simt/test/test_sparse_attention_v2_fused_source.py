@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 
@@ -188,7 +189,7 @@ def test_v2_fused_canonical_value256_reuses_phase_local_l1():
     assert "kHead64FusedL1PvBytes" in source
     assert "kHead64FusedL1Bytes = kHead64FusedL1PvBytes" in source
     assert "kHead64FusedL1KeysOffset" not in source
-    assert aiv.count("kHead64FusedL1QkKeysOffset") == 1
+    assert aiv.count("kHead64FusedL1QkKeysOffset") == 2
     assert aic.count("kHead64FusedL1QkKeysOffset") == 1
 
 
@@ -518,6 +519,63 @@ def test_v2_fused_selected256_reuses_single_slot_only_after_l0b_copy():
 
     assert qk_copy < qk_copy_done < qk_single_slot_reuse
     assert pv_copy < pv_copy_done < pv_single_slot_reuse
+
+
+def test_v2_fused_canonical_cross_tile_qk_lookahead_contract():
+    source = _v2_fused_source()
+    aiv = _function_definition(source, "sparse_attention_head64_fused_aiv(")
+    aic = _function_definition(source, "sparse_attention_head64_fused_aic(")
+
+    assert "kHead64FusedCanonicalQkLookahead = true" in source
+    assert (
+        "kHead64FusedUbQkKeysOffset = kHead64FusedUbPvBytes" in source
+    )
+    assert (
+        "static_assert(kHead64FusedUbQkKeysOffset >= "
+        "kHead64FusedUbPvBytes)" in " ".join(source.split())
+    )
+    assert "static_assert(kHead64FusedUbBytes == 198464)" in source
+
+    aiv_prefetch = aiv.index("const bool prefetch_next_qk")
+    aiv_publish = aiv.index("head64_aiv_publish_gather_slot(0);", aiv_prefetch)
+    aiv_marks_prefetched = aiv.index(
+        "prefetched_first_qk = true;", aiv_publish
+    )
+    aiv_update = aiv.index(
+        "asc_vf_call<head64_fused_output_update_vf>", aiv_marks_prefetched
+    )
+    aiv_consume = aiv.index("const bool consume_prefetched_first_qk")
+    assert aiv_prefetch < aiv_publish < aiv_marks_prefetched < aiv_update
+    assert aiv_consume < aiv_prefetch
+    assert "if (!consume_prefetched_first_qk)" in aiv
+
+    aic_delayed_wait = aic.index("if (pending_output_update)")
+    aic_score_copy = aic.index("asc_copy_l12ub_sync(", aic_delayed_wait)
+    aic_defer = aic.index("const bool defer_final_update_wait")
+    aic_pending = aic.index("pending_output_update = true;", aic_defer)
+    aic_pv_publish = aic.rindex(
+        "AscendC::CrossCoreSetFlag<2, PIPE_MTE2>(kAicToAivReady);",
+        0,
+        aic_defer,
+    )
+    assert aic_delayed_wait < aic_score_copy
+    assert aic_pv_publish < aic_defer < aic_pending
+
+    flag_constants = {
+        name: int(value)
+        for name, value in re.findall(
+            r"constexpr uint8_t (k(?:Aic|Aiv)ToAi[cv][A-Za-z0-9]*) = (\d+);",
+            source,
+        )
+    }
+    assert flag_constants == {
+        "kAivToAicReady": 8,
+        "kAicToAivReady": 9,
+        "kAicToAivGatherSlot0": 0,
+        "kAicToAivGatherSlot1": 1,
+        "kAivToAicGatherSlot0": 2,
+        "kAivToAicGatherSlot1": 3,
+    }
 
 
 def test_v2_canonical_p4_combine_reuses_partition_weights_across_dimensions():
