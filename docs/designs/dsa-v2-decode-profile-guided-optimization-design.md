@@ -3974,6 +3974,97 @@ Raw evidence is preserved at:
   runs/a18-key-packet-candidate-2-clean/
 ```
 
+### A19: Canonical P4 Cross-Tile QK Lookahead
+
+The vLLM-Ascend comparison identifies cross-selected-tile scheduling as the
+largest structural difference in Sparse Attention, but changing directly to
+P1 plus a three-slot selected128 pipeline would also change task parallelism,
+Combine traffic, tile count, and several live-memory contracts. A19 is the
+smaller discriminator requested on 2026-08-06: retain canonical P4,
+selected256/compute128, QK256, Value256, all arithmetic, all gather counts,
+partial output, Combine, launch geometry, and public signatures. Change only
+the boundary between the two selected256 outer tiles owned by each task.
+
+#### A19.1: Schedule And Ownership
+
+The retained outer-tile schedule is:
+
+```text
+tile 0: QK -> softmax -> PV[0] -> update[0] -> PV[1] -> update[1]
+tile 1: QK -> softmax -> PV[0] -> update[0] -> PV[1] -> update[1]
+```
+
+Each canonical P4 task has exactly two outer tiles. A19 overlaps only the
+second tile's first QK round with the first tile's final output update:
+
+```text
+AIC: publish PV0[1] -> request/gather QK1[0] -> MMAD QK1[0] -> QK1[1..]
+AIV: wait PV0[1] -> gather/publish QK1[0] -> update0[1] -> QK1[1..]
+```
+
+The first QK packet acts as a one-packet lookahead. The next AIV outer-loop
+iteration recognizes that packet as already published and does not gather it
+again. AIC does not wait for the final tile-0 update immediately after
+publishing PV. It consumes the existing `kAivToAicReady` occurrence before
+copying tile-1 scores into UB, which is the first operation allowed to reuse
+the old PV result region. The first value update in each tile and the final
+task update keep their retained waits.
+
+A19 adds no cross-core event ID and no Basic API dependency. It reorders the
+existing `kAivToAicReady` occurrence and continues to use the existing gather
+slot ready/free protocol. The generic, P2, prefill, V1, and noncanonical V2
+paths remain byte-for-byte scheduled by the retained branch.
+
+#### A19.2: Capacity Worksheet
+
+The lookahead Key pack must not overwrite the final PV result while AIV still
+consumes it. Move only the canonical QK Key UB scratch after the maximum PV
+region; keep the QK scores at their current offset because AIC waits for the
+previous update before copying scores to UB.
+
+```text
+persistent state                           66,432 B
+PV result region ends at                  165,696 B
+lookahead QK Key scratch                    32,768 B
+new maximum UB                            198,464 B
+toolchain-tested usable UB                229,376 B
+remaining margin                           30,912 B
+
+L1 remains unchanged                      237,568 B
+L0A/L0B/L0C remain unchanged
+```
+
+Compile-time assertions must prove that the lookahead Key scratch starts at or
+after the PV result end and that the unchanged scores region ends within the
+declared UB allocation. The production and resource builds remain the final
+authority for the effective request.
+
+#### A19.3: Tests And Retention Gate
+
+The source-contract test must first fail on the retained source and then lock:
+
+- canonical-only one-packet lookahead state on both AIC and AIV;
+- the QK Key scratch is disjoint from the live PV result;
+- AIV publishes the first next-tile Key packet before the previous output
+  update, then skips that packet in the next outer iteration;
+- AIC skips only the intermediate final-update wait and consumes it before the
+  next score copy;
+- unchanged generic scheduling, gather count, arithmetic, launch geometry,
+  wrapper signature, and absence of new cross-core flag IDs.
+
+Run the focused source suite, production `-O3` and `--cce-res-usage` builds for
+`dav-3510`, canonical seeds 7 and 19 plus a repeated seed, one noncanonical V2
+case, and the V1 decode regression at `atol=rtol=0.05`. Performance uses two
+alternating clean-process CannBench `dsa_decode` `BasicInfo` pairs. Record every
+Indexer stage, Sparse Attention fused kernel, Combine, selected workflow, and
+excluded materialization Cast.
+
+Retain A19 only if both pairs preserve correctness, improve the fused Sparse
+Attention kernel by at least 1%, and do not regress the selected workflow.
+Collect `InstrTimeline` only after the `BasicInfo` gate passes, to verify that
+the final tile-0 update overlaps the first tile-1 QK interval. A failed
+candidate is restored and recorded here without updating `published/`.
+
 ### W0: Workflow-Level Cleanup
 
 Keep dependency materialization and helper launches visible in raw profiles.
