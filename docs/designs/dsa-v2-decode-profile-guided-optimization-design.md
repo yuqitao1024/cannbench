@@ -3514,6 +3514,180 @@ ambiguous, use the official `clock()`-style operator-local microbenchmark; do
 not infer the official transpose example's 36.6% gain for these mixed
 Cube/SIMT kernels.
 
+### A17: Direct QK Score Delivery From L0C To AIV UB
+
+The complete all-metrics decode profile collected on 2026-08-05 changes the
+next priority. In the canonical BF16 V3.2 case, the retained SIMT V2 Indexer is
+already faster than the vLLM-Ascend dependency boundary, while Sparse
+Attention remains about 54.6 us slower. The retained fused Attention kernel
+spends only about 6.9 us on Cube but about 84-86 us on its recorded Vector
+critical path. Matrix-compute changes that only shorten MMAD therefore have a
+small ceiling; the next experiment instead shortens the score handoff that
+blocks Softmax.
+
+The retained canonical path delivers every 64-by-128 FP32 QK subtile through
+two copy stages:
+
+```text
+L0C --Fixpipe--> L1 Score NZ
+L1 Score NZ --MTE2, split by subblock--> two 32-row AIV Score UB views
+```
+
+For one outer selected256 tile, the AIC repeats the first stage for two
+selected128 compute subtiles, then replays the complete 64-by-256 L1 Score
+buffer into both AIV subblocks before publishing `kAicToAivReady`. The AIV
+cannot start Softmax until this complete chain finishes. The score values are
+not reused by Cube after this handoff, so L1 is staging rather than persistent
+state.
+
+Three alternatives were considered:
+
+1. Copy each QK result directly from L0C to the two AIV UB views with the C API
+   `asc_copy_l0c2ub`. This removes L1 Score staging and its MTE2 replay without
+   changing MMAD, Softmax, output order, or public contracts. This is selected.
+2. Apply the same direct delivery to PV results first. PV uses the retained
+   64-byte gaps between adjacent FP32 NZ blocks, so direct Fixpipe delivery
+   must first prove that its destination-stride controls preserve that layout.
+   It is a separate follow-up, not part of A17.
+3. Delete `V -> MTE3` or cross-core waits. Those waits currently protect UB to
+   L1 producers, gather-slot reuse, and output publication. Removing them does
+   not eliminate data movement and has a higher race or hang risk, so it is
+   rejected as the first experiment.
+
+#### A17.1: Canonical Data Layout And Ownership
+
+A17 changes only the exact canonical predicate already selected by
+`head64_fused_is_canonical_v32_decode`. The generic V2 path, P2, prefill, V1,
+and every noncanonical shape keep the existing L0C-to-L1-to-UB path.
+
+Each 64-by-128 L0C subtile remains FP32 NZ. `asc_copy_l0c2ub` uses dual
+destination mode to split the 64 head rows into two 32-row AIV destinations.
+For `selected_subtile_start` equal to 0 or 128, each subblock destination begins
+at:
+
+```text
+ub_scores_buf + selected_subtile_start * 32
+```
+
+The resulting per-AIV physical view is unchanged:
+
+```text
+FP32 NZ [32 heads, 256 selected rows]
+```
+
+Consequently `head64_fused_nz_offset`, `head64_fused_softmax_vf`, the Softmax
+reduction order, BF16 probability output, QK256, selected256 outer tiling,
+selected128 compute subtiles, P4 ownership, 1024-thread launch, and all output
+semantics remain byte-for-byte unchanged. A17 does not introduce a second
+Score buffer, a new kernel, a GM workspace, an operator argument, or a public
+layer branch.
+
+The current source at repository revision `40034f5` has SHA-256
+`715a5f061795dff53149033d1358b676e818db80d838e6df3bb950415e0a1506`.
+That exact source is the predeclared baseline for the first A17 paired run.
+
+#### A17.2: Synchronization Protocol
+
+For each selected128 subtile, the AIC keeps the existing `M -> FIX` dependency
+before consuming L0C. It then issues `asc_copy_l0c2ub` directly to both AIV
+subblocks. L0C may be reused by the next MMAD only after the Fixpipe consumer
+has accepted the current result. After the second direct copy completes, the
+AIC publishes the existing `kAicToAivReady` event from `PIPE_FIX`; both AIVs
+retain their existing `CrossCoreWaitFlag<2, PIPE_V>` before Softmax.
+
+This is the same producer-to-consumer pipeline direction used by the installed
+CANN 9.2 examples for Fixpipe-to-Vector delivery. A17 changes the producer
+pipeline associated with the existing event from MTE2 to Fixpipe; it does not
+allocate a new flag ID or add a Basic API dependency. The current AIV-to-AIC
+probability event and every QK/PV gather-slot ready/free event remain
+unchanged.
+
+The one-tile ownership proof is:
+
+```text
+AIC MMAD produces L0C subtile 0
+AIC Fixpipe writes both AIV UB halves at selected offset 0
+AIC releases L0C and produces subtile 1
+AIC Fixpipe writes both AIV UB halves at selected offset 128
+AIC PIPE_FIX publishes kAicToAivReady
+AIV PIPE_V consumes the complete unchanged 32-by-256 Score view
+```
+
+There is one logical task per physical AIC in the canonical case, so no next
+task can overwrite Score UB before the current Softmax consumes the ready
+event. If the direct-copy API cannot express the exact dual-destination NZ
+stride on `dav-3510`, A17 is rejected rather than adding an intermediate
+transpose or a new Basic API path.
+
+#### A17.3: Capacity And Expected Mechanism
+
+The canonical QK phase currently uses:
+
+```text
+L1 Query          73,728 bytes
+L1 Key slot       65,536 bytes
+L1 Score staging  65,536 bytes
+QK L1 total      204,800 bytes
+```
+
+A17 reduces the QK-phase L1 live set to 139,264 bytes. The operator-wide L1
+maximum remains the existing 237,568-byte PV phase, so this is not presented as
+a capacity optimization and does not authorize larger tiles. Per-AIV UB stays
+at the retained QK maximum of 168,832 bytes because the same 32-by-256 Score
+view remains live. L0A, L0B, and L0C remain 65,536 bytes each. Production and
+`--cce-res-usage` builds must confirm unchanged launch resources and zero new
+Stack.
+
+The expected mechanism is removal of two kinds of work per selected256 tile:
+
+- two L0C-to-L1 Score writes whose only consumer is the following UB copy;
+- one complete two-destination L1-to-UB Score replay before Softmax.
+
+The profile does not isolate those operations as a standalone BasicInfo row,
+so no percentage is predicted. A17 succeeds only if the complete fused and
+workflow boundaries improve on the device.
+
+#### A17.4: Tests And Retention Gate
+
+TDD source-contract tests must first fail on the retained source and then lock:
+
+- direct canonical `asc_copy_l0c2ub` delivery with dual AIV destinations;
+- destination offsets for selected subtiles 0 and 128 in the unchanged
+  32-by-256 FP32 NZ view;
+- `PIPE_FIX` publication only after both direct copies;
+- no canonical use of the L1 Score staging region, L0C-to-L1 Score copy, or
+  L1-to-UB Score replay; the compile-time workspace remains available to the
+  unchanged generic path;
+- unchanged generic L1 Score path and unchanged PV padded path;
+- unchanged Softmax layout, canonical predicate, public interface, and launch
+  geometry;
+- the L1, UB, and L0 capacity values above.
+
+Run the focused source suite before and after implementation, followed by the
+complete local test suite. Target-device validation uses CANN 9.2.0, `-O3`,
+`dav-3510`, and clean processes. It covers canonical random, masked-tail,
+tied-threshold, negative-score, invalid-index, and repeated-stability cases,
+plus one explicit noncanonical V2 case and the existing V1 regression. Output
+and LSE must meet the retained torch-oracle tolerance `atol=rtol=0.05` with no
+new mismatch.
+
+Performance uses two alternating fresh baseline/candidate pairs through the
+CannBench `dsa_decode` `BasicInfo` workflow. Record every Indexer stage, fused
+Sparse Attention, Combine, the complete selected workflow, and the excluded
+materialization Cast. Retain A17 only if both pairs satisfy all gates:
+
+- fused Sparse Attention improves by at least 1%;
+- the complete selected workflow improves by at least 1%;
+- Indexer and Combine each remain within 1.0 us of their paired baselines;
+- both runs pass complete workflow accuracy.
+
+If either paired workflow misses the 1% gate, restore the retained source and
+record A17 as a negative result. Collect `Default` or `InstrTimeline` only
+after `BasicInfo` retention, to verify that the score-handoff interval and
+Vector critical path shortened. A retained A17 is integrated and published
+before starting the independent Lightning Indexer L1 large-packet ping-pong
+experiment; a rejected A17 does not block that Indexer experiment.
+
 ### W0: Workflow-Level Cleanup
 
 Keep dependency materialization and helper launches visible in raw profiles.
