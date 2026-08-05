@@ -7,6 +7,7 @@
 - [Define Work Ownership](#define-work-ownership)
 - [Choose Traversal By Measurement](#choose-traversal-by-measurement)
 - [Align Copies And Handle Tails](#align-copies-and-handle-tails)
+- [Audit UB Bank Conflicts](#audit-ub-bank-conflicts)
 - [Design Pipeline Ownership](#design-pipeline-ownership)
 - [Debug Memory And Synchronization Together](#debug-memory-and-synchronization-together)
 
@@ -114,6 +115,30 @@ instruction schedule or memory pattern.
   infinity for a maximum, only when those values may enter computation.
 - Verify byte offsets after dtype conversion and layout packing.
 
+## Audit UB Bank Conflicts
+
+Analyze one warp and one emitted memory instruction at a time. On the tested
+950PR model, the useful reasoning unit was the bank-group/subbank address, not
+just the bank number. Same-address reads can merge; different addresses mapped
+to the same resource serialize.
+
+For every suspicious loop:
+
+1. Write the byte address reached by lane `l` for one unrolled instruction.
+2. Reduce it to the documented bank-group/subbank mapping for the target.
+3. Count different addresses per resource; do not count inactive lanes or
+   separate instructions as one conflict.
+4. Compare a capacity-neutral traversal/layout first.
+5. Include transpose, padding, remap arithmetic, and changed store order in the
+   measured boundary.
+
+Do not assume that fewer predicted conflicts means lower latency. Recorded
+experiments found a large gain when Fixpipe emitted a capacity-neutral
+column-major producer layout, but several physical-order staging writes, a
+shuffle-based reducer, and several padding schemes were neutral or slower. See
+[observed-optimization-results.md](observed-optimization-results.md) before
+choosing a remediation.
+
 ## Design Pipeline Ownership
 
 For each buffer, name its producer, consumer, lifetime, and reuse point. In a
@@ -129,6 +154,18 @@ Use the narrowest synchronization scope that proves correctness:
 
 Do not use a flag or barrier as a substitute for unclear ownership. Extra
 synchronization can hide a race while destroying overlap.
+
+For a two-slot producer/consumer pipeline, use distinct ready and free state in
+each direction. State initial ownership, the first reuse that must wait, and
+whether the terminal release has a consumer. Reusing the same flag IDs for both
+directions caused a recorded device hang. Validate one tile, two tiles, first
+slot reuse, full tile count, and multi-query behavior in that order.
+
+Double buffering is useful only when the launch gives each physical worker
+multiple items and there is exposed copy/compute overlap. A two-slot source
+array with one logical row per physical block is not a pipeline. Conversely,
+for very short rows the event and VF overhead can exceed the saved direct-GM
+traffic. Benchmark the actual trip count per block.
 
 ## Debug Memory And Synchronization Together
 

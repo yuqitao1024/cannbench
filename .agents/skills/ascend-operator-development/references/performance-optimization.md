@@ -18,6 +18,12 @@ radix selection, and bounded merge strategies. Do not default to a full bitonic
 sort of `current_topk + new_candidates` for every chunk without measuring its
 total comparison count and padding cost.
 
+The observed many-query case in
+[observed-optimization-results.md](observed-optimization-results.md) is a useful
+scale check: a repeated padded bitonic merge made Top-K and synchronization
+dominate the workflow by orders of magnitude. Consult that reference before
+spending time on launch geometry around an asymptotically poor boundary.
+
 ## Split Workloads By Behavior
 
 Prefill and decode often require different paths:
@@ -71,6 +77,28 @@ Test an unfused twin to separate algorithmic benefit from compiler side effects.
 Measure both main-kernel time and total operator time. A faster kernel can lose
 overall if it adds packing, initialization, or merge launches.
 
+Do not equate legal resource occupancy with useful parallelism. In the recorded
+950PR experiments, removing a spill was latency-neutral, 2048-thread variants
+could pass register and Stack gates yet regress, and a 32-block by 512-thread
+geometry beat 64 blocks by 256 threads for one fixed small workload. Use
+resource analysis to reject impossible candidates, then benchmark the feasible
+ones for the actual shape.
+
+## Treat Layout As Part Of The Algorithm
+
+For UB-resident stages, derive the address pattern for one emitted instruction,
+not only the logical tensor layout. Check whether active lanes reach the same
+bank-group/subbank at different addresses. Prefer a capacity-neutral producer
+layout or inline format conversion when it removes repeated conflicts. Padding,
+physical-order writes, packed accesses, and shuffle-based traversal can all cost
+more than the conflict they remove.
+
+Measure the conversion, transpose, padding, or remap inside the changed kernel
+boundary. Recorded fused-workflow experiments include both a large win from
+inline NZ-to-column-major output and several regressions from otherwise
+plausible padding/remap schemes; see
+[observed-optimization-results.md](observed-optimization-results.md).
+
 ## Treat Source-Level Scheduling As A Hypothesis
 
 Loop unrolling, manual load grouping, and hand ordering can improve or regress
@@ -89,6 +117,13 @@ loop: compiler loop | pragma unroll | manual expansion
 Keep work, data, outputs, warmup, and toolchain identical. Run the full matrix
 more than once; do not conclude from one short microsecond-scale sample.
 
+Apply the same rule to packed scalar types. `half2` or `bfloat16x2_t` helps only
+when the generated path reduces useful loads, stores, conversions, or arithmetic
+at a measured bottleneck. It can be neutral or slower when values are unpacked
+immediately for FP32 math, when the original access was already conflict-free,
+or when register lifetime and tail handling grow. Test each VF boundary
+independently before propagating a packed type through an operator.
+
 ## Preserve Comparison Fairness
 
 Match semantics, inputs, dtype, layout, workspace accounting, output materialization,
@@ -98,3 +133,7 @@ until the boundary is normalized and disclosed.
 
 Accept an optimization only after correctness, repeated performance, and the
 full supported case set remain valid.
+
+For prior real-device outcomes and their exact applicability boundaries, use
+[observed-optimization-results.md](observed-optimization-results.md). Never add
+percentages from separate experiments to predict a combined workflow gain.

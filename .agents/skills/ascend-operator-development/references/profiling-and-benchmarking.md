@@ -53,6 +53,13 @@ Do not divide a selected total by an unrelated global launch count. A staged
 implementation may require summing several differently named kernels; a fused
 implementation may use one. Validate aggregation against the raw timeline.
 
+When one operator call emits separate profiler files or replay groups, decide
+explicitly whether they are stages of the same call or repeated samples. Sum
+stages per call before computing a distribution across calls. One recorded
+multi-stage row reduction averaged `stats` and `write` as if they were repeated
+samples, materially underreporting the operator and creating a false regression
+when the aggregation was later corrected.
+
 ## Separate Application And Profiler Warmup
 
 Understand which component actually emits launches:
@@ -83,6 +90,9 @@ command because option names and availability can change.
 - Recollect suspicious results in a new process and, when practical, a second run.
 - Avoid setting unusual warmup or compiler flags solely to make collection work
   without documenting the altered behavior.
+- Use a unique run name or a clean output directory for every collection. If a
+  parser discovers both old and new profiler directories, discard the aggregate
+  and rebuild it from an auditable clean tree.
 
 For very short kernels, enlarge work or repeat inside a controlled harness, then
 divide only when each repetition performs identical independent work.
@@ -101,6 +111,13 @@ Confirm both paths use the same:
 
 An orders-of-magnitude gap warrants a boundary audit before an architectural
 explanation.
+
+Prove package provenance for both sides. Resolve the source root inserted by
+the loader, the imported extension path, and a source or binary hash in the
+same process that runs the benchmark. `PYTHONPATH` alone is insufficient when
+the framework prepends an operator-local directory or an earlier import has
+already populated the module cache. Re-run in a fresh process after replacing
+an extension.
 
 ## Interpret Profiles Conservatively
 

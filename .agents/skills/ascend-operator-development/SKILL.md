@@ -58,6 +58,11 @@ operator, a major rewrite, remote-device iteration, or completion criteria.
 - For slow kernels, excessive launches, poor algorithms, fusion decisions,
   reductions, Top-K, prefill/decode specialization, or microbenchmarks, read
   [performance-optimization.md](references/performance-optimization.md).
+- Before estimating the benefit of a familiar optimization, or when deciding
+  whether to retry a previously tested idea, read
+  [observed-optimization-results.md](references/observed-optimization-results.md).
+  It records scenario-bound gains, regressions, and no-gain experiments from
+  prior real-device work. Use it as prior evidence, not as a portable promise.
 - For kernel attribution, timing boundaries, launch aggregation, warmup,
   metric-set selection, variance, or baseline fairness, read
   [profiling-and-benchmarking.md](references/profiling-and-benchmarking.md).
