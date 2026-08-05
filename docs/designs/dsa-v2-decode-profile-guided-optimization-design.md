@@ -3865,8 +3865,9 @@ MTE2 -> MTE1: packet is ready for L1-to-L0B consumption
 Both slots start owned by MTE2. Packet 0 is loaded before the loop. For packet
 `p`, MTE1 first waits for the current slot's ready event, MTE2 then starts packet
 `p+1` in the alternate free slot, and MTE1 consumes four 32-context slices from
-the current slot. The fourth L1-to-L0B copy publishes the current slot free.
-The final packet has no following producer and needs no terminal free event.
+the current slot. The fourth L1-to-L0B copy publishes the current slot free only
+when packet `p+2` will reuse it. The last packet in each slot has no following
+producer for that slot and needs no terminal free event.
 The existing MTE1-to-MMAD dependency still prevents L0B reuse before MMAD, and
 the existing two-direction Score ready/free protocol remains independent.
 
@@ -3906,6 +3907,72 @@ If the combined implementation misses the gate, restore it before optionally
 isolating packet-only or two-slot-only variants. Do not publish or collect
 `Default`/`InstrTimeline` for a rejected candidate. A retained candidate is
 documented, integrated, and published before selecting the next optimization.
+
+#### A18.4: Measured Result And Rejection
+
+The implementation passed production and resource builds for `dav-3510`. The
+changed Score VF used 15 registers and zero Stack bytes. Correctness passed the
+five-case V2 suite for seeds 7 and 19 with three repeats, a noncanonical V2
+batch-1/query-4 case through the retained generic path, and the canonical V1
+decode regression. These checks establish that the slot ownership protocol is
+functional; they do not establish a performance gain.
+
+Two clean-process alternating `BasicInfo` pairs were collected on Ascend 950PR
+at 1650 MHz. Times are microseconds. `Indexer` is the sum of Score, both radix
+histograms, both selection stages, and Compaction. `Attention` is Sparse fused
+plus Combine. `Workflow` is Indexer plus Attention. Cast is input
+materialization and remains outside the selected workflow boundary.
+
+| Pair 1 boundary | Retained | A18 | A18 delta |
+| --- | ---: | ---: | ---: |
+| Score | 55.936 | 58.360 | +2.424 (+4.33%) |
+| High histogram | 4.990 | 5.619 | +0.629 (+12.61%) |
+| Select high | 11.016 | 11.080 | +0.064 (+0.58%) |
+| Low histogram | 5.693 | 5.055 | -0.638 (-11.21%) |
+| Select low | 7.849 | 7.735 | -0.114 (-1.45%) |
+| Compaction | 6.519 | 6.779 | +0.260 (+3.99%) |
+| Indexer | 92.003 | 94.628 | +2.625 (+2.85%) |
+| Sparse Attention fused | 115.338 | 114.715 | -0.623 (-0.54%) |
+| Combine | 12.051 | 12.069 | +0.018 (+0.15%) |
+| Attention | 127.389 | 126.784 | -0.605 (-0.47%) |
+| Workflow | 219.392 | 221.412 | +2.020 (+0.92%) |
+| Excluded Cast | 3.292 | 3.335 | +0.043 |
+
+| Pair 2 boundary | Retained | A18 | A18 delta |
+| --- | ---: | ---: | ---: |
+| Score | 56.619 | 58.542 | +1.923 (+3.40%) |
+| High histogram | 5.099 | 5.750 | +0.651 (+12.77%) |
+| Select high | 10.997 | 10.678 | -0.319 (-2.90%) |
+| Low histogram | 5.382 | 5.483 | +0.101 (+1.88%) |
+| Select low | 7.787 | 7.903 | +0.116 (+1.49%) |
+| Compaction | 6.709 | 6.699 | -0.010 (-0.15%) |
+| Indexer | 92.593 | 95.055 | +2.462 (+2.66%) |
+| Sparse Attention fused | 114.594 | 114.929 | +0.335 (+0.29%) |
+| Combine | 11.655 | 12.249 | +0.594 (+5.10%) |
+| Attention | 126.249 | 127.178 | +0.929 (+0.74%) |
+| Workflow | 218.842 | 222.233 | +3.391 (+1.55%) |
+| Excluded Cast | 3.338 | 3.353 | +0.015 |
+
+A18 is rejected. The intended reduction from 64 small GM-to-L1 copies to 16
+larger copies and the added alternate slot did not reduce the Score boundary;
+Score instead regressed by 1.923-2.424 us in both clean pairs. `BasicInfo`
+cannot distinguish whether the larger copy shape, sliced L1 consumption, or
+the extra ownership protocol dominates, so no narrower causal claim is made.
+The stable kernel and workflow regressions are already sufficient to miss both
+1% retention gates. Do not retry this exact combined 128-context/two-slot
+mapping without new pipeline evidence. The candidate implementation and its
+source-contract test were restored, and no published data or
+`Default`/`InstrTimeline` profile is produced for this rejected experiment.
+
+Raw evidence is preserved at:
+
+```text
+/home/y00621698/cannbench-dsa-v2-a18-indexer-key-pingpong-20260805/
+  runs/a18-key-packet-baseline-1-clean/
+  runs/a18-key-packet-candidate-1-clean/
+  runs/a18-key-packet-baseline-2-clean/
+  runs/a18-key-packet-candidate-2-clean/
+```
 
 ### W0: Workflow-Level Cleanup
 
