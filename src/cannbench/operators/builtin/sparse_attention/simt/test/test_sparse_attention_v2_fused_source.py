@@ -409,6 +409,64 @@ def test_v2_fused_selected256_assembles_scores_then_accumulates_pv_subtiles():
     assert "pv_params.cmatrixInitVal = selected_subtile_start == 0" in aic
 
 
+def test_v2_fused_pv_nz_blocks_use_64b_ub_gaps():
+    source = _v2_fused_source()
+    output_update = _function_definition(source, "head64_fused_output_update_vf(")
+    aic = _function_definition(source, "sparse_attention_head64_fused_aic(")
+    normalized_aic = " ".join(aic.split())
+
+    for contract in (
+        "kHead64FusedPvBlockGapBytes = 64",
+        "kHead64FusedPvBlockGapElements = 16",
+        "kHead64FusedMaxValueBlocks - 1",
+        "head64_fused_pv_nz_offset(",
+    ):
+        assert contract in source
+
+    assert source.index("kHead64FusedMaxValueTile =") < source.index(
+        "kHead64FusedMaxValueBlocks ="
+    )
+
+    assert output_update.count("head64_fused_pv_nz_offset(") == 1
+    assert "ub_pv_buf, l1_pv_buf, false, value_blocks, 64, 64, 2" in (
+        normalized_aic
+    )
+    assert (
+        "ub_pv_buf, l1_pv_buf + 32 * 16, true, "
+        "value_blocks, 64, 64, 2"
+    ) in normalized_aic
+    assert "ub_scores_buf, l1_scores_buf, false, selected_blocks, 64, 64, 0" in (
+        normalized_aic
+    )
+
+    row = 0
+    row_count = 32
+    columns = range(32)
+
+    def nz_offset(column: int, block_gap_elements: int) -> int:
+        return (
+            (column // 16) * (16 * row_count + block_gap_elements)
+            + (row // 16) * 16 * 16
+            + (row % 16) * 16
+            + column % 16
+        )
+
+    retained_resources = [
+        (nz_offset(column, 0) * 4 // 8) % 32 for column in columns
+    ]
+    padded_resources = [
+        (nz_offset(column, 16) * 4 // 8) % 32 for column in columns
+    ]
+    assert len(set(retained_resources)) == 8
+    assert max(
+        retained_resources.count(resource) for resource in set(retained_resources)
+    ) == 4
+    assert len(set(padded_resources)) == 16
+    assert max(
+        padded_resources.count(resource) for resource in set(padded_resources)
+    ) == 2
+
+
 def test_v2_fused_selected256_reuses_single_slot_only_after_l0b_copy():
     aic = _function_definition(
         _v2_fused_source(), "sparse_attention_head64_fused_aic("
