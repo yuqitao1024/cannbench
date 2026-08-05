@@ -116,12 +116,13 @@ def test_v2_fused_first_key_pack_prepares_offsets_for_all_value_tiles():
     assert prepare < later_key < first_value < next_value
 
 
-def test_v2_fused_canonical_value_pack_stages_row_major_tiles_then_transposes():
+def test_v2_fused_canonical_value_pack_transposes_while_loading_l0b():
     source = _v2_fused_source()
     fast_vf = _function_definition(source, "head64_fused_value_pack_fast_vf(")
     fast_slot = _function_definition(
         source, "head64_fused_gather_value_fast_slot("
     )
+    aic = _function_definition(source, "sparse_attention_head64_fused_aic(")
 
     assert "kHead64FusedUbValueStagingOffset" in source
     assert (
@@ -133,12 +134,17 @@ def test_v2_fused_canonical_value_pack_stages_row_major_tiles_then_transposes():
     assert "tile_index * 16U * 16U + row_in_tile * 16U + dim_in_tile" in fast_vf
     assert "packed_offset" not in fast_vf
     assert "asc_vf_call<head64_fused_value_pack_fast_vf>" in fast_slot
-    assert fast_slot.count("asc_transpose(") == 1
-    assert "static_cast<uint32_t>(selected_subtile_half) / 16U" in fast_slot
-    assert "for (uint32_t dim_block = 0; dim_block < 16; ++dim_block)" in fast_slot
-    assert "reinterpret_cast<__ubuf__ uint16_t*>" in fast_slot
-    assert fast_slot.count("asc_sync_notify(PIPE_V, PIPE_MTE3, EVENT_ID0);") == 2
-    assert fast_slot.count("asc_sync_wait(PIPE_V, PIPE_MTE3, EVENT_ID0);") == 2
+    assert "asc_transpose(" not in fast_slot
+    assert "asc_copy_ub2l1(" in fast_slot
+    assert "selected_subtile_half * kHead64FusedCanonicalValueTile" in fast_slot
+    assert "sizeof(bfloat16_t)" in fast_slot
+    assert fast_slot.count("asc_sync_notify(PIPE_V, PIPE_MTE3, EVENT_ID0);") == 1
+    assert fast_slot.count("asc_sync_wait(PIPE_V, PIPE_MTE3, EVENT_ID0);") == 1
+
+    assert "if (use_canonical_decode_pack)" in aic
+    assert "asc_copy_l12l0b_trans(" in aic
+    assert "kHead64FusedCanonicalValueFractals" in aic
+    assert "Copy(copy_l1_to_l0b, l0_values, l1_values_subtile);" in aic
 
 
 def test_v2_fused_canonical_value256_reuses_phase_local_l1():
@@ -164,7 +170,7 @@ def test_v2_fused_canonical_value256_reuses_phase_local_l1():
 
     assert "dim < kHead64FusedCanonicalValueTile" in fast_pack
     assert "row_block * 16U + dim_block" in fast_pack
-    assert "dim_block < 16" in fast_slot
+    assert "dim_block = dim / 16U" in fast_pack
     assert "kHead64FusedCanonicalValueTile" in fast_slot
 
     assert "kHead64FusedL1PersistentQueryOffset = 0" in source
@@ -367,13 +373,10 @@ def test_v2_fused_selected256_packs_64_rows_per_streaming_subtile():
 
     assert "int32_t selected_subtile_half" in gather_value
     assert (
-        "row_block < static_cast<uint32_t>(selected_subtile_half) / 16U"
+        "selected_subtile_half * kHead64FusedCanonicalValueTile"
         in gather_value
     )
-    assert (
-        "MakeShape(selected_subtile_half, kHead64FusedCanonicalValueTile)"
-        in gather_value
-    )
+    assert "sizeof(bfloat16_t)" in gather_value
 
     assert (
         "selected_begin = "
