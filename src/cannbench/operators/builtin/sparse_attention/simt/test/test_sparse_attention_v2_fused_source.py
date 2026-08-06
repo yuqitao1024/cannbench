@@ -51,6 +51,29 @@ def test_v2_fused_uses_all_1024_threads_and_32_warps():
     assert "warp + kHead64FusedActiveWarps" not in source
 
 
+def test_v2_fused_mixed_kernel_owns_shared_l1_and_ub_workspaces():
+    source = _v2_fused_source()
+    kernel = _function_definition(source, "sparse_attention_head64_fused_kernel(")
+    aiv = _function_definition(source, "sparse_attention_head64_fused_aiv(")
+    aic = _function_definition(source, "sparse_attention_head64_fused_aic(")
+
+    assert (
+        "__global__ __mix__(1, 2) void sparse_attention_head64_fused_kernel("
+        in source
+    )
+    assert "asc_init();" in kernel
+    assert "__cbuf__ uint8_t l1_workspace[kHead64FusedL1Bytes];" in kernel
+    assert "__ubuf__ uint8_t ub_workspace[kHead64FusedUbBytes];" in kernel
+    assert "if ASC_IS_AIC" in kernel
+    assert "if ASC_IS_AIV" in kernel
+
+    for helper in (aiv, aic):
+        assert "__cbuf__ uint8_t* l1_workspace" in helper
+        assert "__ubuf__ uint8_t* ub_workspace" in helper
+        assert "__cbuf__ uint8_t l1_workspace[kHead64FusedL1Bytes];" not in helper
+        assert "__ubuf__ uint8_t ub_workspace[kHead64FusedUbBytes];" not in helper
+
+
 def test_v2_fused_waits_for_output_update_before_pv_release():
     aiv = _function_definition(
         _v2_fused_source(), "sparse_attention_head64_fused_aiv("
