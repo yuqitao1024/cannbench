@@ -21,6 +21,15 @@ def _v2_head64_source() -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _v2_host_source() -> str:
+    path = (
+        Path(__file__).parents[1]
+        / "v2/aten_dsa_sparse_attention_v2/csrc/sparse_attention.asc"
+    )
+    assert path.is_file(), f"missing V2 sparse attention host source: {path}"
+    return path.read_text(encoding="utf-8")
+
+
 def _function_definition(source: str, start_marker: str) -> str:
     start = source.index(start_marker)
     while True:
@@ -186,7 +195,7 @@ def test_v2_fused_canonical_value256_reuses_phase_local_l1():
     assert "kHead64FusedL1PvValuesOffset" in source
     assert "kHead64FusedL1PvPvOffset" in source
     assert "kHead64FusedL1PvBytes" in source
-    assert "kHead64FusedL1Bytes = kHead64FusedL1PvBytes" in source
+    assert "kHead64FusedLegacyL1Bytes = kHead64FusedL1PvBytes" in source
     assert "kHead64FusedL1KeysOffset" not in source
     assert aiv.count("kHead64FusedL1QkKeysOffset") == 1
     assert aic.count("kHead64FusedL1QkKeysOffset") == 1
@@ -210,7 +219,7 @@ def test_v2_fused_canonical_qk256_preserves_query_and_value256():
         "kHead64FusedL1PvProbabilitiesOffset =\n"
         "    kHead64FusedL1PersistentQueryBytes"
     ) in source
-    assert "kHead64FusedL1Bytes = kHead64FusedL1PvBytes" in source
+    assert "kHead64FusedLegacyL1Bytes = kHead64FusedL1PvBytes" in source
     assert (
         "kHead64FusedMaxQkTile * kHead64FusedMaxSelectedSubtileHalf * "
         "sizeof(bfloat16_t)"
@@ -316,7 +325,7 @@ def test_v2_fused_selected256_streaming_uses_phase_local_memory_ownership():
         "kHead64FusedL1QkKeyStorageBytes" in source
     )
     assert "kHead64FusedL1PvValueStorageBytes" in source
-    assert "kHead64FusedL1Bytes = kHead64FusedL1PvBytes" in source
+    assert "kHead64FusedLegacyL1Bytes = kHead64FusedL1PvBytes" in source
     assert "static_assert(kHead64FusedL1PvBytes >= kHead64FusedL1QkBytes)" in source
 
     assert "kHead64FusedUbPersistentBytes" in source
@@ -549,3 +558,224 @@ def test_v2_canonical_p4_combine_reuses_partition_weights_across_dimensions():
     assert "__expf" not in fast_vf[dimension_loop:]
     assert "asc_vf_call<head64_combine_p4_vf>" in kernel
     assert "asc_vf_call<head64_combine_vf>" in kernel
+
+
+def test_v2_vllm_decode_uses_p1_direct_output_and_eight_head64_tasks():
+    host = _v2_host_source()
+    fused = _v2_fused_source()
+    predicate = _function_definition(
+        fused, "head64_fused_is_vllm_rolling_decode("
+    )
+    normalized_predicate = " ".join(predicate.split())
+
+    assert "auto_head64_decode ? 1" in " ".join(host.split())
+    assert "selected_partitions == 1" in normalized_predicate
+    assert "plan.used_core_num == 8" in normalized_predicate
+    assert "plan.task_count == 8" in normalized_predicate
+    assert "plan.output_mode == kHead64OutputDirectBfloat16" in normalized_predicate
+
+
+def test_v2_vllm_decode_uses_selected128_three_slot_rolling_schedule():
+    source = _v2_fused_source()
+    aiv = _function_definition(
+        source, "sparse_attention_head64_fused_vllm_aiv("
+    )
+    aic = _function_definition(
+        source, "sparse_attention_head64_fused_vllm_aic("
+    )
+
+    assert "kHead64FusedVllmSelectedTile = 128" in source
+    assert "kHead64FusedVllmRollingSlots = 3" in source
+    assert "tile_count + kHead64FusedVllmRollingSlots - 1" in aiv
+    assert "tile_count + kHead64FusedVllmRollingSlots - 1" in aic
+    for stage in ("gather_tile", "softmax_tile", "update_tile"):
+        assert stage in aiv
+    for stage in ("qk_tile", "pv_tile"):
+        assert stage in aic
+    assert "% kHead64FusedVllmRollingSlots" in aiv
+    assert "% kHead64FusedVllmRollingSlots" in aic
+
+
+def test_v2_vllm_gather_and_softmax_read_indices_from_gm():
+    source = _v2_fused_source()
+    gather = _function_definition(
+        source, "head64_fused_vllm_gather_kv_tile("
+    )
+    softmax = _function_definition(
+        source, "head64_fused_vllm_softmax_vf("
+    )
+    aiv = _function_definition(
+        source, "sparse_attention_head64_fused_vllm_aiv("
+    )
+
+    assert "asc_vf_call<head64_fused_key_pack_prepare_vf>" in gather
+    assert "asc_vf_call<head64_fused_key_pack_fast_vf>" in gather
+    assert "head64_fused_vllm_key_pack_prepare_vf" not in gather
+    assert "__gm__ const int32_t* indices" in softmax
+    assert "indices[indices_row + selected_start + selected]" in softmax
+    assert "asc_vf_call<head64_fused_vllm_softmax_vf>" in aiv
+    assert "indices," in aiv
+    assert "selected_start," in aiv
+
+
+def test_v2_vllm_decode_keeps_two_aivs_symmetric_and_crosscore_mode2():
+    source = _v2_fused_source()
+    kernel = _function_definition(
+        source, "sparse_attention_head64_fused_mix12_restored_kernel("
+    )
+    aiv = _function_definition(
+        source, "sparse_attention_head64_fused_vllm_aiv("
+    )
+
+    assert kernel.count("sparse_attention_head64_fused_vllm_aiv(") == 1
+    assert "AscendC::GetSubBlockIdx()" in aiv
+    assert "head_begin = static_cast<int32_t>(subblock_index) * 32" in aiv
+    assert "selected_begin = static_cast<int32_t>(subblock_index) * 64" in aiv
+    assert "CrossCoreSetFlag<4" not in source
+    assert "CrossCoreWaitFlag<4" not in source
+    assert "CrossCoreSetFlag<2" in source
+    assert "CrossCoreWaitFlag<2" in source
+
+
+def test_v2_vllm_decode_reuses_three_l1_kv_slots_and_probability_tails():
+    source = _v2_fused_source()
+    aiv = _function_definition(
+        source, "sparse_attention_head64_fused_vllm_aiv("
+    )
+    aic = _function_definition(
+        source, "sparse_attention_head64_fused_vllm_aic("
+    )
+
+    assert "kHead64FusedVllmL1QueryBytes = 73728" in source
+    assert "kHead64FusedVllmL1KvSlotBytes = 147456" in source
+    assert "kHead64FusedVllmL1Bytes = 516096" in source
+    assert "kHead64FusedVllmL1ProbabilityOffset = 131072" in source
+    assert "static_assert(kHead64FusedVllmL1Bytes <= 512 * 1024)" in source
+    assert "head64_fused_vllm_gather_kv_tile" in aiv
+    assert "kHead64FusedVllmGmTaskBytes" not in source
+    assert "__gm__ uint8_t* gm_workspace" not in aiv
+    assert "__gm__ uint8_t* gm_workspace" not in aic
+    assert "kHead64FusedVllmL1ProbabilityOffset" in aiv
+    assert "MakeFrameLayout<NZLayoutPtn, bfloat16_t>(128, 576)" in aic
+    assert "Copy(copy_gm_to_l1, l1_kv, gm_kv)" not in aic
+    assert "MakeFrameLayout<ZNLayoutPtn, bfloat16_t>(current_k, 128)" in aic
+    assert "k_start * kHead64FusedVllmSelectedTile" in aic
+    assert "MakeShape(128, kHead64FusedVllmValueTile)" in aic
+
+
+def test_v2_vllm_decode_delivers_qk_and_pv_directly_to_both_aiv_ubs():
+    source = _v2_fused_source()
+    aic = _function_definition(
+        source, "sparse_attention_head64_fused_vllm_aic("
+    )
+
+    assert aic.count("asc_copy_l0c2ub(") >= 2
+    assert "kHead64FusedVllmUbScoresOffset" in aic
+    assert "kHead64FusedVllmUbPvOffset" in aic
+    assert aic.count("kHead64FusedVllmDualDstCtl") >= 2
+    assert "head64_copy_l0c_to_l1_nz(" not in aic
+
+
+def test_v2_vllm_decode_uses_explicit_strided_half_copies():
+    source = _v2_fused_source()
+    gather = _function_definition(
+        source, "head64_fused_vllm_gather_kv_tile("
+    )
+    aiv = _function_definition(
+        source, "sparse_attention_head64_fused_vllm_aiv("
+    )
+
+    for helper in (
+        "head64_vllm_copy_query_half_ub_to_l1(",
+        "head64_vllm_copy_probability_half_ub_to_l1(",
+    ):
+        definition = _function_definition(source, helper)
+        assert "asc_copy_ub2l1(" in definition
+    kv_copy = _function_definition(
+        source, "head64_vllm_copy_kv_half_ub_to_l1("
+    )
+    assert "asc_copy_ub2l1(" in kv_copy
+    assert "head64_vllm_copy_kv_half_ub_to_l1(" in gather
+    assert "asc_sync_notify(PIPE_MTE3, PIPE_V, EVENT_ID0)" in gather
+    assert "asc_sync_wait(PIPE_MTE3, PIPE_V, EVENT_ID0)" in gather
+    assert "head64_vllm_copy_query_half_ub_to_l1(" in aiv
+    assert "head64_vllm_copy_probability_half_ub_to_l1(" in aiv
+
+
+def test_v2_vllm_workspaces_are_top_level_with_dynamic_ub_base_zero():
+    source = _v2_fused_source()
+    kernel = _function_definition(
+        source, "sparse_attention_head64_fused_mix12_restored_kernel("
+    )
+    aiv = _function_definition(
+        source, "sparse_attention_head64_fused_vllm_aiv("
+    )
+    aic = _function_definition(
+        source, "sparse_attention_head64_fused_vllm_aic("
+    )
+    launcher = _function_definition(
+        source,
+        "launch_sparse_attention_head64_fused_hd576_bf16_v2_rolling_restored(",
+    )
+
+    assert "__cbuf__ uint8_t l1_workspace[kHead64FusedL1Bytes]" in kernel
+    assert "reinterpret_cast<__ubuf__ uint8_t*>(0)" in kernel
+    assert "__cbuf__ uint8_t l1_workspace[" not in aiv
+    assert "__ubuf__ uint8_t ub_workspace[" not in aiv
+    assert "__cbuf__ uint8_t l1_workspace[" not in aic
+    assert "__ubuf__ uint8_t ub_workspace[" not in aic
+    assert "kHead64FusedDynamicUbBytes" in launcher
+    assert "static_assert(kHead64FusedDynamicUbBytes <= 216 * 1024)" in source
+
+
+def test_v2_vllm_mixed_launch_expands_pairs_and_decodes_aiv_block_id():
+    source = _v2_fused_source()
+    host_source = _v2_host_source()
+    aiv = _function_definition(
+        source, "sparse_attention_head64_fused_vllm_aiv("
+    )
+    launcher = _function_definition(
+        source,
+        "launch_sparse_attention_head64_fused_hd576_bf16_v2_rolling_restored(",
+    )
+    normalized_aiv = " ".join(aiv.split())
+    normalized_launcher = " ".join(launcher.split())
+
+    assert "kHead64FusedTaskRatio = 2" in source
+    assert "GetBlockIdx() / AscendC::GetTaskRatio()" in normalized_aiv
+    assert (
+        "static_cast<uint32_t>(plan->used_core_num) * "
+        "kHead64FusedTaskRatio"
+    ) in normalized_launcher
+    assert (
+        "launch_sparse_attention_head64_fused_hd576_bf16_v2_rolling_restored("
+        in host_source
+    )
+
+
+def test_v2_vllm_source_documents_exact_l1_and_ub_byte_layouts():
+    source = _v2_fused_source()
+    aiv = _function_definition(
+        source, "sparse_attention_head64_fused_vllm_aiv("
+    )
+    aic = _function_definition(
+        source, "sparse_attention_head64_fused_vllm_aic("
+    )
+
+    for marker in (
+        "VLLM-ROLLING L1 layout",
+        "[0, 73728)",
+        "[73728, 221184)",
+        "[221184, 368640)",
+        "[368640, 516096)",
+    ):
+        assert marker in aic
+    for marker in (
+        "VLLM-ROLLING AIV UB layout",
+        "running max",
+        "running output",
+        "KV gather staging",
+        "QK scores",
+        "PV result",
+    ):
+        assert marker in aiv
