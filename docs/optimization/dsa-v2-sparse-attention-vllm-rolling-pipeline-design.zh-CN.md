@@ -287,3 +287,91 @@ InstrTimeline 后曾尝试 E0：为三个 slot 缓存完整 128-row offset，让
 读取 GM indices。该实验把 UB 增到 `161920 B`，但破坏精度，已完整撤销。定位过程
 还证明当前设备缓存以 host launcher 为关键标识之一；后续每个真实设备 A/B 都应
 使用唯一 launcher，并保留二进制 hash 和导入路径。
+
+## 13. 跨 Head64 组共享 KV gather
+
+### 13.1 重复边界
+
+P=1 rolling 的 task 编号以 `head_group` 为最内层维度，因此相邻两个 task：
+
+```text
+logical task 2p      heads [0, 64)
+logical task 2p + 1  heads [64, 128)
+```
+
+对应同一个 `(batch, query_token)`，并读取完全相同的 indices 和 KV 行。现有实现中
+两个 Head64 task 各由两个 AIV gather 64 行，导致每个 selected128 tile 被完整
+gather 两次。canonical case 有 4 个 `(batch, query_token)` pair 和 16 个 tile，
+完整 tile gather 数量为 `4 x 16 x 2 = 128`；去重后应为 `4 x 16 = 64`。
+
+### 13.2 四 AIV quarter 映射
+
+保留 8 个 AIC，不把两个 Head64 的 Cube 计算串到一个 AIC。相邻两个 AIC 的四个
+AIV 共同产生一份 selected128 KV tile：
+
+```text
+pair_id = logical_task / 2
+quarter = head_group * 2 + subblock_index
+
+quarter 0  Head64-0 AIV0  selected rows [0, 32)
+quarter 1  Head64-0 AIV1  selected rows [32, 64)
+quarter 2  Head64-1 AIV0  selected rows [64, 96)
+quarter 3  Head64-1 AIV1  selected rows [96, 128)
+```
+
+每个 producer 仍使用 SIMT VF 从原始 KV 离散 gather 到本地 UB，但只处理 32 行，
+再用 C API 将该 quarter 写入共享 GM slot 的 ZN 布局。四个 quarter ready 后，每个
+Head64 task 的 AIV0/AIV1 分别用 C API 从共享 GM 读取 `[0, 64)` 和 `[64, 128)`，
+写入本 AIC 的 L1 slot。这样 Cube 侧仍只通过现有 mode 2 CrossCore flag 与直属
+两个 AIV 交互，不增加跨 AIC 的 Basic API 同步。
+
+### 13.3 共享 GM 布局
+
+沿用 host 已申请的 16 MiB byte workspace。前 512 B 保存计数器，数据区按
+`pair -> rolling slot` 排列：
+
+```text
+[0, 512)          ready/consumed counters，4 pairs x 3 slots x 2 uint32
+[512, 147968)     pair 0 slot 0，128 x 576 BF16
+[147968, 295424)  pair 0 slot 1，128 x 576 BF16
+[295424, 442880)  pair 0 slot 2，128 x 576 BF16
+...               pair 1..3 使用相同的三槽步长
+```
+
+数据总量为：
+
+```text
+512 + 4 x 3 x 128 x 576 x 2 = 1769984 B
+```
+
+小于 16 MiB。共享 GM slot 与本地 L1 slot 使用相同的 `K-block x selected-block`
+ZN 物理顺序；quarter 写和 half 读均使用二维 stride copy，不增加 transpose VF。
+
+### 13.4 三槽计数协议
+
+新同步只使用 SIMT API 的 GM atomic 和 thread fence。每个 `(pair, slot)` 有
+`ready_count` 与 `consumed_count` 两个单调计数器，host 在 fused kernel launch 前
+用 `aclrtMemsetAsync` 清零 512 B counter 区。tile 对某个 slot 的代际为
+`generation = tile_index / 3`：
+
+```text
+producer 等待 consumed_count == 4 * generation
+4 个 producer 写完各自 quarter 后 ready_count += 1
+consumer 等待 ready_count == 4 * (generation + 1)
+4 个 consumer 完成本地 GM -> UB -> L1 后 consumed_count += 1
+```
+
+发布计数前必须保证数据写完成；观察 ready 后才允许读取共享 slot；发布 consumed
+前必须保证本地 L1 写完成。计数器不回绕、不重置 slot，因此避免同一 flag ID 在
+rolling 复用中的 ABA 问题。现有 AIC/AIV 内部 CrossCore mode 2 协议保持不变。
+
+### 13.5 验证门槛
+
+首先用源码契约测试固定 pair/quarter 映射、三槽 workspace、host memset、SIMT
+atomic/fence 和二维 stride copy；随后在 dav-3510 fresh process 中验证 all ones、
+seed 7、seed 19。精度通过后才采 BasicInfo、PipeTimeline 和 InstrTimeline。
+
+性能验收比较完整同步边界，包含 host memset。主要判据是 P=1 rolling fused kernel
+相对 `230.933 us` 是否下降，以及完整 Sparse Attention 是否接近或优于 main 的
+`105.744 us`；同时核对 InstrTimeline 中离散 gather VF 总次数是否从 128 个完整
+tile 等价工作量下降到 64 个。
