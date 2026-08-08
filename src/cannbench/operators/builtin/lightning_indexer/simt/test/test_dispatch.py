@@ -65,6 +65,15 @@ def test_simt_module_name_registers_version_isolated_v2():
     assert _simt_module_name(None) == "aten_dsa_lightning_indexer"
     assert _simt_module_name("v1") == "aten_dsa_lightning_indexer"
     assert _simt_module_name("v2") == "aten_dsa_lightning_indexer_v2"
+    assert _simt_module_name("vllm") == "aten_dsa_lightning_indexer"
+
+
+def test_vllm_workflow_alias_delegates_to_v1_indexer_install():
+    install_script = Path(__file__).parents[1] / "vllm" / "install.sh"
+
+    assert install_script.is_file()
+    source = install_script.read_text(encoding="utf-8")
+    assert 'exec "${SCRIPT_DIR}/../v1/install.sh" "$@"' in source
 
 
 def test_v2_project_has_independent_python_package():

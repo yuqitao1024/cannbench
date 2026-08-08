@@ -165,6 +165,14 @@ def _merge_metrics(target: dict[str, float | int], current) -> None:
     target["numel"] += current["numel"]
 
 
+def split_attention_result(result):
+    if isinstance(result, tuple):
+        if len(result) < 2:
+            return result[0], None
+        return result[0], result[1]
+    return result, None
+
+
 def _chunked_reference_metrics(
     torch,
     case,
@@ -183,7 +191,7 @@ def _chunked_reference_metrics(
         "max_rel_error": 0.0,
         "numel": 0,
     }
-    lse_metrics = dict(output_metrics)
+    lse_metrics = None if actual_lse is None else dict(output_metrics)
     query_rows = validation_query_rows(case.query_tokens, phase=case.phase)
     head_chunk = 8
     scale = float(case.softmax_scale)
@@ -245,20 +253,21 @@ def _chunked_reference_metrics(
                         rtol=rtol,
                     ),
                 )
-                _merge_metrics(
-                    lse_metrics,
-                    _compare_chunk(
-                        torch,
-                        actual_lse[
-                            batch_index,
-                            query_index,
-                            head_start:head_end,
-                        ],
-                        expected_lse,
-                        atol=atol,
-                        rtol=rtol,
-                    ),
-                )
+                if lse_metrics is not None:
+                    _merge_metrics(
+                        lse_metrics,
+                        _compare_chunk(
+                            torch,
+                            actual_lse[
+                                batch_index,
+                                query_index,
+                                head_start:head_end,
+                            ],
+                            expected_lse,
+                            atol=atol,
+                            rtol=rtol,
+                        ),
+                    )
     return query_rows, output_metrics, lse_metrics
 
 
@@ -272,10 +281,16 @@ def run_case(
     query_tokens: int | None = None,
     runtime_only: bool = False,
 ):
+    def log_stage(stage: str) -> None:
+        print(f"[v32-accuracy] {stage}", flush=True)
+
+    log_stage("importing torch and torch_npu")
     import torch
     import torch_npu  # noqa: F401
 
-    if implementation_version == "v2":
+    if implementation_version == "vllm":
+        from aten_dsa_sparse_attention_vllm import ops
+    elif implementation_version == "v2":
         from aten_dsa_sparse_attention_v2 import ops
     else:
         from aten_dsa_sparse_attention import ops
@@ -285,6 +300,7 @@ def run_case(
     if query_tokens is not None:
         case = resize_prefill_case(case, query_tokens)
     device = torch.device("npu")
+    log_stage("allocating query")
     query = torch.empty(
         (
             case.batch,
@@ -295,6 +311,7 @@ def run_case(
         dtype=torch.bfloat16,
         device=device,
     )
+    log_stage("allocating shared_kv")
     shared_kv = torch.empty(
         (
             case.batch,
@@ -305,8 +322,11 @@ def run_case(
         dtype=torch.bfloat16,
         device=device,
     )
+    log_stage("filling query")
     _fill_deterministic(torch, query, seed=seed + 1, nonnegative=False)
+    log_stage("filling shared_kv")
     _fill_deterministic(torch, shared_kv, seed=seed + 2, nonnegative=False)
+    log_stage("building sparse indices")
     indices = _build_indices(
         torch,
         case,
@@ -314,10 +334,12 @@ def run_case(
         device=device,
         inject_causal_boundaries=not runtime_only,
     )
+    log_stage("synchronizing inputs")
     torch.npu.synchronize()
 
+    log_stage("calling sparse attention")
     started = time.monotonic()
-    output, lse = ops.sparse_attention_forward(
+    attention_result = ops.sparse_attention_forward(
         query,
         shared_kv,
         indices,
@@ -326,8 +348,11 @@ def run_case(
         family="family_hd576",
         causal=case.causal,
     )
+    output, lse = split_attention_result(attention_result)
+    log_stage("synchronizing sparse attention outputs")
     torch.npu.synchronize()
     kernel_wall_seconds = time.monotonic() - started
+    log_stage("sparse attention completed")
 
     common_result = {
         "case_id": case.case_id,
@@ -357,7 +382,10 @@ def run_case(
     )
     passed = (
         output_metrics["mismatch_count"] == 0
-        and lse_metrics["mismatch_count"] == 0
+        and (
+            lse_metrics is None
+            or lse_metrics["mismatch_count"] == 0
+        )
     )
     causal_index_categories = {}
     if case.causal:
@@ -385,7 +413,14 @@ def run_case(
         "atol": atol,
         "rtol": rtol,
         "output": output_metrics,
-        "lse": lse_metrics,
+        "lse": (
+            lse_metrics
+            if lse_metrics is not None
+            else {
+                "validation": "unavailable",
+                "reason": "copied vLLM-Ascend 0.18.0 ABI returns output only",
+            }
+        ),
         "passed": passed,
     }
 
@@ -396,7 +431,7 @@ def main(argv: list[str] | None = None) -> int:
         "--phase", choices=("decode", "prefill", "both"), default="both"
     )
     parser.add_argument(
-        "--implementation-version", choices=("v1", "v2"), default="v1"
+        "--implementation-version", choices=("v1", "v2", "vllm"), default="v1"
     )
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--atol", type=float, default=0.05)

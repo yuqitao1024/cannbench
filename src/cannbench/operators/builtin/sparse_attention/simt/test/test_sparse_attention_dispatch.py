@@ -102,6 +102,48 @@ def test_simt_module_name_registers_version_isolated_v2():
     assert _simt_module_name(None) == "aten_dsa_sparse_attention"
     assert _simt_module_name("v1") == "aten_dsa_sparse_attention"
     assert _simt_module_name("v2") == "aten_dsa_sparse_attention_v2"
+    assert _simt_module_name("vllm") == "aten_dsa_sparse_attention_vllm"
+
+
+def test_vllm_project_has_copied_mla_source_and_independent_python_package():
+    project_dir = Path(__file__).parents[1] / "vllm"
+    source_dir = (
+        project_dir
+        / "vendor"
+        / "vllm_ascend_a5b0ce"
+        / "csrc"
+        / "attention"
+        / "sparse_flash_attention"
+        / "op_kernel"
+    )
+    arch35_dir = source_dir / "arch35"
+
+    assert (project_dir / "install.sh").is_file()
+    assert (project_dir / "setup.py").is_file()
+    assert (
+        project_dir / "aten_dsa_sparse_attention_vllm" / "__init__.py"
+    ).is_file()
+    assert (project_dir / "vendor" / "PROVENANCE.md").is_file()
+    assert (source_dir / "sparse_flash_attention.cpp").is_file()
+    assert (source_dir / "sparse_flash_attention_common.h").is_file()
+    assert (source_dir / "sparse_flash_attention_template_tiling_key.h").is_file()
+    assert (arch35_dir / "sparse_flash_attention_kernel_mla.h").is_file()
+    assert (arch35_dir / "sparse_flash_attention_service_cube_mla.h").is_file()
+    assert (arch35_dir / "sparse_flash_attention_service_vector_mla.h").is_file()
+
+
+def test_vllm_project_vendors_reproducible_ascend950_operator_project():
+    project_dir = Path(__file__).parents[1] / "vllm"
+    vendor_dir = project_dir / "vendor" / "vllm_ascend_a5b0ce"
+    operator_dir = vendor_dir / "csrc" / "attention" / "sparse_flash_attention"
+
+    assert (vendor_dir / "csrc" / "build.sh").is_file()
+    assert (operator_dir / "op_kernel" / "sparse_flash_attention.cpp").is_file()
+    op_def = operator_dir / "op_host" / "sparse_flash_attention_def.cpp"
+    assert op_def.is_file()
+    assert 'AddConfig("ascend950", aicore_config)' in op_def.read_text(
+        encoding="utf-8"
+    )
 
 
 def test_v2_project_has_independent_python_package():
@@ -166,6 +208,107 @@ def test_build_simt_callable_requires_loaded_module():
         match="sparse_attention SIMT implementation module is not loaded",
     ):
         _build_simt_callable(ctx)
+
+
+def test_build_simt_callable_routes_vllm_version_to_v32_adapter(monkeypatch):
+    captured = {}
+    expected = object()
+
+    def fake_builder(ctx):
+        captured["ctx"] = ctx
+        return expected
+
+    monkeypatch.setattr(
+        sparse_attention,
+        "build_vllm_simt_callable",
+        fake_builder,
+        raising=False,
+    )
+    request = OperatorBenchmarkRequest(
+        backend="ascend",
+        op="sparse_attention",
+        dtype="bfloat16",
+        dataset="realistic_decode",
+        case_id="deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048",
+        implementation="simt",
+        implementation_version="vllm",
+    )
+    ctx = TorchOperatorContext(
+        backend=SimpleNamespace(),
+        torch=SimpleNamespace(),
+        request=request,
+        case=get_sparse_attention_case(request.dataset, request.case_id),
+        device="npu",
+        dtype="bfloat16",
+        implementation_module=SimpleNamespace(ops=SimpleNamespace()),
+    )
+
+    assert _build_simt_callable(ctx) is expected
+    assert captured["ctx"] is ctx
+
+
+def test_vllm_simt_adapter_uses_copied_three_output_lse_abi(monkeypatch):
+    import cannbench.operators.builtin.sparse_attention.external as external
+
+    captured = {}
+    expected = object()
+    attention_op = lambda **kwargs: kwargs
+
+    def fake_builder(ctx, *, attention_op, return_lse=True):
+        captured.update(
+            ctx=ctx,
+            attention_op=attention_op,
+            return_lse=return_lse,
+        )
+        return expected
+
+    monkeypatch.setattr(
+        external,
+        "_build_vllm_sparse_flash_attention_callable",
+        fake_builder,
+    )
+    ctx = SimpleNamespace(
+        case=SimpleNamespace(qk_head_dim=576, value_head_dim=512),
+        implementation_module=SimpleNamespace(
+            ops=SimpleNamespace(sparse_flash_attention_forward=attention_op)
+        ),
+    )
+
+    assert external.build_vllm_simt_callable(ctx) is expected
+    assert captured == {
+        "ctx": ctx,
+        "attention_op": attention_op,
+        "return_lse": True,
+    }
+
+
+def test_vllm_simt_output_only_path_accepts_three_output_abi():
+    import cannbench.operators.builtin.sparse_attention.external as external
+
+    class FakeTensor:
+        device = "npu"
+        dtype = "bfloat16"
+
+        def __init__(self):
+            self.shapes = []
+
+        def reshape(self, *shape):
+            self.shapes.append(shape)
+            return self
+
+    output = FakeTensor()
+    result = external._reshape_or_pad_tnd_output(
+        SimpleNamespace(),
+        (output, object(), object()),
+        batch=1,
+        query_tokens=2,
+        query_heads=128,
+        value_head_dim=512,
+        query_lens=(2,),
+    )
+
+    assert result is output
+    assert output.shapes == [(2, 128, 512), (1, 2, 128, 512)]
 
 
 def test_build_simt_callable_passes_family_to_operator():

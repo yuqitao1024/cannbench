@@ -11,6 +11,7 @@ import v32_full_accuracy as full_accuracy
 from v32_full_accuracy import (
     deterministic_pattern,
     resize_prefill_case,
+    split_attention_result,
     validation_query_rows,
 )
 from v32_prefill_benchmark import summarize_samples
@@ -161,13 +162,20 @@ def test_prefill_benchmark_summary_uses_median_and_preserves_samples():
     }
 
 
-def test_full_accuracy_runner_selects_v2_explicitly():
+def test_full_accuracy_runner_selects_version_explicitly():
     source = Path(__file__).with_name("v32_full_accuracy.py").read_text(
         encoding="utf-8"
     )
 
-    assert 'choices=("v1", "v2")' in source
+    assert 'choices=("v1", "v2", "vllm")' in source
     assert "from aten_dsa_sparse_attention_v2 import ops" in source
+    assert "from aten_dsa_sparse_attention_vllm import ops" in source
+
+
+def test_split_attention_result_marks_output_only_abi_lse_unavailable():
+    output = object()
+
+    assert split_attention_result(output) == (output, None)
 
 
 def test_prefill_benchmark_uses_realistic_materialization_and_timed_contract():
@@ -221,3 +229,15 @@ def test_prefill_benchmark_freezes_public_wrapper_layout_and_dtypes():
     assert "expected_lse_shape = (case.batch, case.query_tokens, case.query_heads)" in benchmark_source
     assert "if output.dtype != torch.bfloat16:" in benchmark_source
     assert "if lse.dtype != torch.float32:" in benchmark_source
+
+
+def test_vllm_decode_workflow_benchmark_uses_cannbench_and_npu_events():
+    source = Path(__file__).with_name(
+        "vllm_decode_workflow_benchmark.py"
+    ).read_text(encoding="utf-8")
+
+    assert "build_dsa_decode_workflow(" in source
+    assert "OperatorBenchmarkRequest(" in source
+    assert "AscendBackend()" in source
+    assert "torch.npu.Event(enable_timing=True)" in source
+    assert 'implementation_version="vllm"' in source

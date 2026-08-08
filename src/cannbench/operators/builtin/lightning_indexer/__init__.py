@@ -83,6 +83,8 @@ def _simt_module_name(version: str | None) -> str | None:
         return "aten_dsa_lightning_indexer"
     if resolved_version == "v2":
         return "aten_dsa_lightning_indexer_v2"
+    if resolved_version == "vllm":
+        return "aten_dsa_lightning_indexer"
     return None
 
 

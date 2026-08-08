@@ -154,26 +154,49 @@ def build_vllm_ascend_callable(ctx):
     return _build_vllm_sharedkv_callable(ctx)
 
 
-def _build_vllm_sparse_flash_attention_callable(ctx):
+def build_vllm_simt_callable(ctx):
+    if (ctx.case.qk_head_dim, ctx.case.value_head_dim) != (576, 512):
+        raise RuntimeError(
+            "sparse_attention SIMT vllm version only supports the MLA 576/512 layout"
+        )
     attention_op = getattr(
-        ctx.backend._ascend_custom_ops(ctx.torch),
-        "npu_sparse_flash_attention",
+        getattr(ctx.implementation_module, "ops", None),
+        "sparse_flash_attention_forward",
         None,
     )
-    if attention_op is None:
-        try:
-            import torch_npu
-        except ModuleNotFoundError:
-            torch_npu = None
-        attention_op = getattr(
-            torch_npu, "npu_sparse_flash_attention", None
-        )
-    if attention_op is None:
+    if not callable(attention_op):
         raise RuntimeError(
-            "vllm_ascend V3.2 sparse_attention requires "
-            "torch.ops._C_ascend.npu_sparse_flash_attention or "
-            "torch_npu.npu_sparse_flash_attention"
+            "sparse_attention SIMT vllm module must expose callable "
+            "ops.sparse_flash_attention_forward"
         )
+    return _build_vllm_sparse_flash_attention_callable(
+        ctx, attention_op=attention_op, return_lse=True
+    )
+
+
+def _build_vllm_sparse_flash_attention_callable(
+    ctx, *, attention_op=None, return_lse: bool = True
+):
+    if attention_op is None:
+        attention_op = getattr(
+            ctx.backend._ascend_custom_ops(ctx.torch),
+            "npu_sparse_flash_attention",
+            None,
+        )
+        if attention_op is None:
+            try:
+                import torch_npu
+            except ModuleNotFoundError:
+                torch_npu = None
+            attention_op = getattr(
+                torch_npu, "npu_sparse_flash_attention", None
+            )
+        if attention_op is None:
+            raise RuntimeError(
+                "vllm_ascend V3.2 sparse_attention requires "
+                "torch.ops._C_ascend.npu_sparse_flash_attention or "
+                "torch_npu.npu_sparse_flash_attention"
+            )
 
     direct_device_inputs = _requires_direct_device_inputs(ctx.case)
     batch = ctx.case.batch
@@ -312,7 +335,7 @@ def _build_vllm_sparse_flash_attention_callable(ctx):
             kv_heads=kv_heads,
             selected_tokens=selected_tokens,
         )
-        result = attention_op(
+        attention_kwargs = dict(
             query=query,
             key=key,
             value=value,
@@ -328,8 +351,19 @@ def _build_vllm_sparse_flash_attention_callable(ctx):
             layout_kv="TND",
             sparse_mode=3,
             attention_mode=2,
-            return_softmax_lse=True,
+            return_softmax_lse=return_lse,
         )
+        result = attention_op(**attention_kwargs)
+        if not return_lse:
+            return _reshape_or_pad_tnd_output(
+                ctx.torch,
+                result,
+                batch=batch,
+                query_tokens=query_tokens,
+                query_heads=query_heads,
+                value_head_dim=value_head_dim,
+                query_lens=query_lens,
+            )
         return _normalize_ascend_sfa_result(
             ctx.torch,
             result,
@@ -341,6 +375,39 @@ def _build_vllm_sparse_flash_attention_callable(ctx):
         )
 
     return operator
+
+
+def _reshape_or_pad_tnd_output(
+    torch,
+    output,
+    *,
+    batch: int,
+    query_tokens: int,
+    query_heads: int,
+    value_head_dim: int,
+    query_lens: tuple[int, ...] | None,
+):
+    if isinstance(output, tuple):
+        output = output[0]
+    if query_lens is None:
+        query_lens = (query_tokens,) * batch
+    total_query_tokens = sum(query_lens)
+    output = output.reshape(total_query_tokens, query_heads, value_head_dim)
+    if total_query_tokens == batch * query_tokens:
+        return output.reshape(
+            batch, query_tokens, query_heads, value_head_dim
+        )
+    padded_output = torch.zeros(
+        (batch, query_tokens, query_heads, value_head_dim),
+        device=output.device,
+        dtype=output.dtype,
+    )
+    row_start = 0
+    for batch_index, query_len in enumerate(query_lens):
+        row_end = row_start + query_len
+        padded_output[batch_index, :query_len] = output[row_start:row_end]
+        row_start = row_end
+    return padded_output
 
 
 def _cumulative_lengths(lengths):

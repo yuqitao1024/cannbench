@@ -15,7 +15,11 @@ from .cases import (
 from .bound_inputs import bound_indices
 from cannbench.operators.plugin import OperatorPlugin, ProfileKernelSelectionContext
 from cannbench.operators.spec import OperatorSpec
-from .external import build_cuda_library_callable, build_vllm_ascend_callable
+from .external import (
+    build_cuda_library_callable,
+    build_vllm_ascend_callable,
+    build_vllm_simt_callable,
+)
 
 def _build_torch_callable(ctx):
     payload = materialize_sparse_attention_inputs(
@@ -126,6 +130,8 @@ def _simt_module_name(version: str | None) -> str | None:
         return "aten_dsa_sparse_attention"
     if resolved_version == "v2":
         return "aten_dsa_sparse_attention_v2"
+    if resolved_version == "vllm":
+        return "aten_dsa_sparse_attention_vllm"
     return None
 
 
@@ -149,6 +155,8 @@ def _select_simt_family(payload: dict[str, object]) -> str:
 def _build_simt_callable(ctx):
     if ctx.implementation_module is None:
         raise RuntimeError("sparse_attention SIMT implementation module is not loaded")
+    if ctx.request.implementation_version == "vllm":
+        return build_vllm_simt_callable(ctx)
     direct_device_inputs = _requires_direct_device_inputs(ctx.case)
     if direct_device_inputs:
         payload = {
@@ -332,6 +340,11 @@ def _build_ragged_simt_operator(
 
 
 def _build_profile_kernel_selection(ctx: ProfileKernelSelectionContext):
+    if ctx.implementation == "simt" and ctx.implementation_version == "vllm":
+        return ProfileKernelSelection(
+            kernel_name_patterns=("SparseFlashAttention",),
+            aggregate_across_files=True,
+        )
     if ctx.implementation == "simt":
         return ProfileKernelSelection(
             kernel_name_patterns=("sparse_attention", "aten_dsa_sparse_attention"),
