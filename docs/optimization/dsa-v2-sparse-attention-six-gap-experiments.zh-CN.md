@@ -19,7 +19,7 @@ causal=true, return_lse=true
 
 | 图中项目 | 当前状态 | 本轮处理 |
 | --- | --- | --- |
-| Softmax metadata | UB validity 缓存曾回退；仍重复读取 GM indices | E1：gather 生成四个 32-bit validity mask |
+| Softmax metadata | E1 精度通过但两轮性能回退，拒绝 | 保持 softmax 读取 GM indices |
 | PV/Vec2 粒度 | 已完成 | 保持两个 PV256 MMAD，一次 PV512 handoff/VF update |
 | Query movement | 未完成 | E3：AIC 直接 GM-to-L1 ND2NZ |
 | Vector 实现质量 | 未完成 | E2：lane-local score/validity 寄存器复用 |
@@ -43,6 +43,51 @@ softmax 的每个 warp 只读取四个 mask，并以 lane bit 判断自己负责
 
 metadata 必须位于现有 16 MiB operator workspace 内，与三个 rolling KV slot 分开
 计算 offset。mask 的 slot/generation 生命周期与 KV slot 相同，不引入新同步协议。
+
+### 3.1 实验结果：拒绝
+
+第一次实现由 gather 直接执行 4-byte GM 标量 store。远端编译成功，但 seed 7 的
+output mismatch 为 `247845 / 262144`，LSE mismatch 为 `512 / 512`，且 LSE 出现
+`inf/-inf`。证据表明该标量 store 没有被现有 MTE3 slot-ready 边界正确发布，softmax
+观察到全零 mask。
+
+修正实验把每个 mask 放入复用的 KV gather UB，并使用 32-byte 对齐的 Tensor API
+`DataCopy` 发布；每个 slot 的四个 mask 占 128 bytes。该版本在 Ascend 950PR、
+CANN 9.2 上通过两个独立进程的完整 output/LSE 精度：
+
+| seed | output mismatch | LSE mismatch | max output abs error | max LSE abs error |
+| ---: | ---: | ---: | ---: | ---: |
+| 7 | 0 / 262144 | 0 / 512 | 0.01806640625 | 0.02170562744140625 |
+| 19 | 0 / 262144 | 0 / 512 | 0.0185546875 | 0.025426864624023438 |
+
+但相对同一 E2 lane-cache checkpoint，连续两轮 `BasicInfo` 均回退：
+
+| 轮次 | E2 baseline | E1 aligned mask | 变化 |
+| ---: | ---: | ---: | ---: |
+| 1 | 81.133 us | 83.099 us | +2.42% |
+| 2 | 81.343 us | 82.612 us | +1.56% |
+
+两轮目标 kernel 的 Block/Mix Block Dim 均为 `16/32`，当前/额定频率均为
+`1650/1650 MHz`，failure count 为 0。E1 不满足“两轮均不劣化”门槛，因此撤销
+mask metadata 源码和契约测试，只保留本节证据。
+
+对齐版本 provenance：
+
+```text
+source SHA256:     bd174c6473dd611894e72703eb54ec08eea450e298872731358fb800e5ea1a27
+_C.so SHA256:      64406638e6fe50ccb0465a2633f42fbb0113eb04513912359a0a5a87ab41f820
+kernel ELF SHA256: 8867f972504ec4c5598ebc2169cb05a7cbdf8990c139145642c69baaffb71327
+```
+
+证据路径：
+
+```text
+/tmp/cannbench-dsa-v2-gap-pWg42i/six-gap-e1-aligned-build.log
+/tmp/cannbench-dsa-v2-gap-pWg42i/six-gap-e1-aligned-accuracy-seed7.json
+/tmp/cannbench-dsa-v2-gap-pWg42i/six-gap-e1-aligned-accuracy-seed19.json
+/tmp/cannbench-dsa-six-gap-e1-aligned-r1-20260810/
+/tmp/cannbench-dsa-six-gap-e1-aligned-r2-20260810/
+```
 
 ## 4. E2：Lane-local Score Cache
 
