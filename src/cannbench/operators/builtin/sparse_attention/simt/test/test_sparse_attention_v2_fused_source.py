@@ -608,9 +608,19 @@ def test_v2_vllm_gather_and_softmax_read_indices_from_gm():
         source, "sparse_attention_head64_fused_vllm_aiv("
     )
 
-    assert "asc_vf_call<head64_fused_key_pack_prepare_vf>" in gather
-    assert "asc_vf_call<head64_fused_key_pack_fast_vf>" in gather
-    assert "head64_fused_vllm_key_pack_prepare_vf" not in gather
+    copy_row = _function_definition(
+        source, "head64_vllm_copy_kv_row_gm_to_ub("
+    )
+    copy_chunk = _function_definition(
+        source, "head64_vllm_copy_kv_chunk_ub_to_gm("
+    )
+
+    assert "AscendC::DataCopyPad(" in copy_row
+    assert "AscendC::DataCopy(" in copy_chunk
+    assert "asc_vf_call<head64_fused_key_pack_prepare_vf>" not in gather
+    assert "asc_vf_call<head64_fused_key_pack_fast_vf>" not in gather
+    assert "head64_vllm_copy_kv_row_gm_to_ub(" in gather
+    assert "head64_vllm_copy_kv_chunk_ub_to_gm(" in gather
     assert "__gm__ const int32_t* indices" in softmax
     assert "indices[indices_row + selected_start + selected]" in softmax
     assert "asc_vf_call<head64_fused_vllm_softmax_vf>" in aiv
@@ -618,7 +628,7 @@ def test_v2_vllm_gather_and_softmax_read_indices_from_gm():
     assert "selected_start," in aiv
 
 
-def test_v2_vllm_decode_keeps_two_aivs_symmetric_and_crosscore_mode2():
+def test_v2_vllm_decode_four_aivs_share_each_selected128_gather():
     source = _v2_fused_source()
     kernel = _function_definition(
         source, "sparse_attention_head64_fused_mix12_restored_kernel("
@@ -629,15 +639,24 @@ def test_v2_vllm_decode_keeps_two_aivs_symmetric_and_crosscore_mode2():
 
     assert kernel.count("sparse_attention_head64_fused_vllm_aiv(") == 1
     assert "AscendC::GetSubBlockIdx()" in aiv
+    normalized_aiv = " ".join(aiv.split())
     assert "head_begin = static_cast<int32_t>(subblock_index) * 32" in aiv
-    assert "selected_begin = static_cast<int32_t>(subblock_index) * 64" in aiv
-    assert "CrossCoreSetFlag<4" not in source
-    assert "CrossCoreWaitFlag<4" not in source
-    assert "CrossCoreSetFlag<2" in source
-    assert "CrossCoreWaitFlag<2" in source
+    assert "kHead64FusedVllmSelectedQuarter = 32" in source
+    assert "const uint32_t aic_in_pair = block_id & 1U" in aiv
+    assert "aic_in_pair * 2U + subblock_index" in normalized_aiv
+    assert "quarter_index * kHead64FusedVllmSelectedQuarter" in normalized_aiv
+    assert "block_id >> 1U" in aiv
+    publish = _function_definition(source, "head64_vllm_aiv_publish_gm_slot(")
+    assert publish.index("CrossCoreSetFlag<0, PIPE_MTE3>") < publish.index(
+        "CrossCoreWaitFlag<0, PIPE_MTE3>"
+    )
+    assert publish.index("CrossCoreWaitFlag<0, PIPE_MTE3>") < publish.index(
+        "CrossCoreSetFlag<4, PIPE_MTE3>"
+    )
+    assert "CrossCoreWaitFlag<4, PIPE_MTE2>" in source
 
 
-def test_v2_vllm_decode_reuses_three_l1_kv_slots_and_probability_tails():
+def test_v2_vllm_decode_reuses_three_shared_gm_kv_slots_and_probability_tails():
     source = _v2_fused_source()
     aiv = _function_definition(
         source, "sparse_attention_head64_fused_vllm_aiv("
@@ -652,12 +671,16 @@ def test_v2_vllm_decode_reuses_three_l1_kv_slots_and_probability_tails():
     assert "kHead64FusedVllmL1ProbabilityOffset = 131072" in source
     assert "static_assert(kHead64FusedVllmL1Bytes <= 512 * 1024)" in source
     assert "head64_fused_vllm_gather_kv_tile" in aiv
-    assert "kHead64FusedVllmGmTaskBytes" not in source
-    assert "__gm__ uint8_t* gm_workspace" not in aiv
-    assert "__gm__ uint8_t* gm_workspace" not in aic
+    assert "kHead64FusedVllmGmKvSlotBytes = 147456" in source
+    assert "kHead64FusedVllmGmPairCount = 4" in source
+    assert "kHead64FusedVllmGmBytes = 1769472" in source
+    assert "__gm__ uint8_t* gm_workspace" in aiv
+    assert "__gm__ uint8_t* gm_workspace" in aic
+    assert "head64_vllm_aic_wait_gm_slot(slot)" in aic
+    assert "head64_vllm_copy_kv_gm_to_l1(" in aic
     assert "kHead64FusedVllmL1ProbabilityOffset" in aiv
     assert "MakeFrameLayout<NZLayoutPtn, bfloat16_t>(128, 576)" in aic
-    assert "Copy(copy_gm_to_l1, l1_kv, gm_kv)" not in aic
+    assert "AscendC::DataCopy(l1_tensor, gm_tensor, params)" in source
     assert "MakeFrameLayout<ZNLayoutPtn, bfloat16_t>(current_k, 128)" in aic
     assert "k_start * kHead64FusedVllmSelectedTile" in aic
     assert "MakeShape(128, kHead64FusedVllmValueTile)" in aic
@@ -676,7 +699,16 @@ def test_v2_vllm_decode_delivers_qk_and_pv_directly_to_both_aiv_ubs():
     assert "head64_copy_l0c_to_l1_nz(" not in aic
 
 
-def test_v2_vllm_decode_uses_explicit_strided_half_copies():
+def test_v2_l0c_to_l1_uses_linkable_nz_fixpipe():
+    source = _v2_fused_source()
+    helper = _function_definition(source, "head64_copy_l0c_to_l1_nz(")
+
+    assert "FixpipeParamsC310<AscendC::CO2Layout::NZ>" in helper
+    assert "AscendC::Fixpipe<float, float" in helper
+    assert "asc_copy_l0c2l1_sync(" not in helper
+
+
+def test_v2_vllm_decode_uses_upstream_gather_copy_events():
     source = _v2_fused_source()
     gather = _function_definition(
         source, "head64_fused_vllm_gather_kv_tile("
@@ -691,13 +723,15 @@ def test_v2_vllm_decode_uses_explicit_strided_half_copies():
     ):
         definition = _function_definition(source, helper)
         assert "asc_copy_ub2l1(" in definition
-    kv_copy = _function_definition(
-        source, "head64_vllm_copy_kv_half_ub_to_l1("
-    )
-    assert "asc_copy_ub2l1(" in kv_copy
-    assert "head64_vllm_copy_kv_half_ub_to_l1(" in gather
-    assert "asc_sync_notify(PIPE_MTE3, PIPE_V, EVENT_ID0)" in gather
-    assert "asc_sync_wait(PIPE_MTE3, PIPE_V, EVENT_ID0)" in gather
+    assert "head64_vllm_copy_kv_half_ub_to_l1(" not in gather
+    assert "head64_vllm_copy_kv_row_gm_to_ub(" in gather
+    assert "head64_vllm_copy_kv_chunk_ub_to_gm(" in gather
+    assert "kHead64FusedVllmGatherBatch = 16" in source
+    assert "batch_start += kHead64FusedVllmGatherBatch" in gather
+    assert "SetFlag<AscendC::HardEvent::MTE2_MTE3>" in gather
+    assert "WaitFlag<AscendC::HardEvent::MTE2_MTE3>" in gather
+    assert "SetFlag<AscendC::HardEvent::MTE3_MTE2>" in gather
+    assert "WaitFlag<AscendC::HardEvent::MTE3_MTE2>" in gather
     assert "head64_vllm_copy_query_half_ub_to_l1(" in aiv
     assert "head64_vllm_copy_probability_half_ub_to_l1(" in aiv
 
@@ -724,6 +758,12 @@ def test_v2_vllm_workspaces_are_top_level_with_dynamic_ub_base_zero():
     assert "__ubuf__ uint8_t ub_workspace[" not in aiv
     assert "__cbuf__ uint8_t l1_workspace[" not in aic
     assert "__ubuf__ uint8_t ub_workspace[" not in aic
+    assert "(void)workspace" not in kernel
+    assert "workspace" in aiv
+    assert "workspace" in aic
+    assert "kHead64FusedVllmUbKvGatherOffset" in source
+    assert "kHead64FusedVllmUbKvGatherBytes" in source
+    assert "static_assert(kHead64FusedVllmUbBytes == 178816)" in source
     assert "kHead64FusedDynamicUbBytes" in launcher
     assert "static_assert(kHead64FusedDynamicUbBytes <= 216 * 1024)" in source
 
@@ -740,6 +780,9 @@ def test_v2_vllm_mixed_launch_expands_pairs_and_decodes_aiv_block_id():
     )
     normalized_aiv = " ".join(aiv.split())
     normalized_launcher = " ".join(launcher.split())
+    inactive = _function_definition(
+        source, "head64_vllm_aiv_join_gather_barriers("
+    )
 
     assert "kHead64FusedTaskRatio = 2" in source
     assert "GetBlockIdx() / AscendC::GetTaskRatio()" in normalized_aiv
@@ -747,6 +790,10 @@ def test_v2_vllm_mixed_launch_expands_pairs_and_decodes_aiv_block_id():
         "static_cast<uint32_t>(plan->used_core_num) * "
         "kHead64FusedTaskRatio"
     ) in normalized_launcher
+    assert "head64_vllm_aiv_join_gather_barriers(tile_count)" in aiv
+    assert "barrier_index < tile_count" in inactive
+    assert "CrossCoreSetFlag<0, PIPE_MTE3>" in inactive
+    assert "CrossCoreWaitFlag<0, PIPE_MTE3>" in inactive
     assert (
         "launch_sparse_attention_head64_fused_hd576_bf16_v2_rolling_restored("
         in host_source
@@ -779,3 +826,31 @@ def test_v2_vllm_source_documents_exact_l1_and_ub_byte_layouts():
         "PV result",
     ):
         assert marker in aiv
+
+    kernel = _function_definition(
+        source, "sparse_attention_head64_fused_mix12_restored_kernel("
+    )
+    for marker in (
+        "VLLM-ROLLING shared GM layout",
+        "four adjacent-AIC pairs",
+        "three 147456-byte slots",
+        "128 x 576 BF16 ND",
+    ):
+        assert marker in kernel
+
+
+def test_v2_vllm_gm_to_l1_orders_mte2_before_tensor_api_mte1_reads():
+    source = _v2_fused_source()
+    copy = _function_definition(source, "head64_vllm_copy_kv_gm_to_l1(")
+    aic = _function_definition(
+        source, "sparse_attention_head64_fused_vllm_aic("
+    )
+
+    data_copy = copy.index("AscendC::DataCopy(l1_tensor, gm_tensor, params)")
+    set_ready = copy.index("SetFlag<AscendC::HardEvent::MTE2_MTE1>")
+    wait_ready = copy.index("WaitFlag<AscendC::HardEvent::MTE2_MTE1>")
+    assert data_copy < set_ready < wait_ready
+    wait_gm = aic.index("head64_vllm_aic_wait_gm_slot(slot)")
+    copy_l1 = aic.index("head64_vllm_copy_kv_gm_to_l1(")
+    copy_l0b = aic.index("Copy(copy_l1_to_l0b")
+    assert wait_gm < copy_l1 < copy_l0b

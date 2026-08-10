@@ -23,7 +23,7 @@
       "source_file": "docs/datasets/dsa-real-sources.md#deepseek-v32-flashmla-decode",
       "source_op": "dsa_decode",
       "metrics": {
-        "latency_ms": 0.208847004
+        "latency_ms": 0.19116199700000003
       },
       "accuracy": {
         "passed": true,
