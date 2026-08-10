@@ -274,3 +274,76 @@ kernel ELF SHA256: 9f3aafdff9af9adb4b908011091099f60eae53a13900b8596781011a65ff2
 和 DSA decode workflow 性能门槛后，才更新现有 canonical published record。run id、
 schema 和前端字段保持不变，workflow 数值使用同一次验证中可审计的 retained
 Lightning Indexer 与 Sparse Attention component 数据。
+
+## 10. 最终 V3.2 Decode Workflow 验证
+
+最终 retained source 为 PV512、upstream lane-local softmax 复用和 E3 AIC direct
+Query GM-to-L1。验证前从 `HEAD=773e3c2` 向远端新建目录上传干净 Git archive，并在
+该目录内重新编译、安装 Lightning Indexer V2 和 Sparse Attention V2：
+
+```text
+remote workdir: /tmp/cannbench-dsa-v2-six-gap-final-cuLoVr
+Sparse Attention source SHA256:
+9184b4c05bfcc244c5d77f56d183f0ef1d172a53bd10b3256fd0b3ed9f13a818
+
+accuracy-process Lightning Indexer _C.so SHA256:
+74636e4edf82597a51b123b5bfbc097574e619eecc81639049b64e19160159b5
+accuracy-process Lightning Indexer decode kernel SHA256:
+4ca147b91c095b656fc45bd69ea2c2c927c739b17921e2692db22b4f14657d7c
+accuracy-process Sparse Attention _C.so SHA256:
+d9f6c6fd22c26f4f40e134cb70dd6848cf49b7ba674d8d3c92779dbe158e5c0f
+accuracy-process Sparse Attention fused kernel SHA256:
+b9a5c761112db013ce095389bb9d420ced26d24258ed02e41d9eb6d4f5211be4
+```
+
+CannBench workflow profile 会在每轮开始前重新执行两个 V2 package 的 preinstall，
+因此性能轮使用的是同一新源码目录的独立 fresh build，而不是精度进程已加载的模块。
+所有进程实际 import 路径均位于上述 remote workdir。
+
+### 10.1 完整 Workflow 精度
+
+一次独立进程执行真实 Lightning Indexer，并把生成的 `[2, 2, 2048]` Top-K indices
+直接传给 Sparse Attention。完整两个 query row 相对 chunked FP32 reference 在
+`atol=rtol=0.05` 下通过：
+
+| 输出 | mismatch | max abs error |
+| --- | ---: | ---: |
+| output | 0 / 262144 | 0.009765625 |
+| LSE | 0 / 512 | 0.009985923767089844 |
+
+精度结果同时记录了上述模块绝对加载路径和 SHA-256。原始证据位于：
+
+```text
+/tmp/cannbench-dsa-v2-six-gap-final-evidence/final-workflow-accuracy.json
+/tmp/cannbench-dsa-v2-six-gap-final-evidence/final-indexer-v2-build.log
+/tmp/cannbench-dsa-v2-six-gap-final-evidence/final-sparse-v2-build.log
+```
+
+### 10.2 两轮 BasicInfo Workflow 性能
+
+两轮均显式限定 canonical V3.2 case，避免将同一 `realistic` 数据集中的 V4 workflow
+混入结果。每轮使用新的 run name、fresh profiler process、`BasicInfo` 和 plugin
+规定的 `launch-count=10`。框架按当前 contract 分别选择两个 Indexer kernel 与一个
+Sparse Attention fused kernel，再将两个 component latency 相加一次：
+
+| 轮次 | Lightning Indexer | Sparse Attention | Workflow |
+| ---: | ---: | ---: | ---: |
+| 1 | 85.347000 us | 76.629997 us | 161.976997 us |
+| 2 | 85.152000 us | 77.151001 us | 162.303001 us |
+
+两轮 workflow failure count 均为 0。Indexer context-sharded kernel 的
+Block/Mix Block Dim 为 `32/64`，distributed Top-K 的 Block Dim 为 `64`，Sparse
+Attention fused kernel 的 Block/Mix Block Dim 为 `16/32`；所有选中 kernel 的
+当前/额定频率均为 `1650/1650 MHz`。
+
+相对当前 published `165.986001 us`，两轮分别降低 `4.009004 us`（约 2.42%）和
+`3.683000 us`（约 2.22%），均满足 workflow 不劣化门槛。按照现有 published lane
+选择两轮中较低 workflow 的约定，canonical latency 更新为 `0.161976997 ms`，run id、
+schema 和其他前端字段保持不变。
+
+本机 raw artifacts 位于：
+
+```text
+/tmp/cannbench-dsa-v2-six-gap-v32-final-r1
+/tmp/cannbench-dsa-v2-six-gap-v32-final-r2
+```
