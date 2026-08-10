@@ -596,6 +596,34 @@ def test_v2_vllm_decode_uses_selected128_three_slot_rolling_schedule():
     assert "% kHead64FusedVllmRollingSlots" in aic
 
 
+def test_v2_vllm_aic_copies_query_directly_from_gm_to_l1():
+    source = _v2_fused_source()
+    copy_query = _function_definition(
+        source, "head64_vllm_copy_query_gm_to_l1("
+    )
+    aiv = _function_definition(
+        source, "sparse_attention_head64_fused_vllm_aiv("
+    )
+    aic = _function_definition(
+        source, "sparse_attention_head64_fused_vllm_aic("
+    )
+    kernel = _function_definition(
+        source, "sparse_attention_head64_fused_mix12_restored_kernel("
+    )
+
+    assert "__gm__ const bfloat16_t* query" in aic
+    assert "AscendC::Nd2NzParams params" in copy_query
+    assert "params.nValue = 64" in copy_query
+    assert "params.dValue = 576" in copy_query
+    assert "params.srcDValue = query_tokens * 576" in copy_query
+    assert "head64_vllm_copy_query_gm_to_l1(" in aic
+    assert "asc_vf_call<head64_fused_query_pack_vf>" not in aiv
+    assert "head64_vllm_copy_query_half_ub_to_l1(" not in aiv
+    assert "kVllmAivToAicQueryReady" not in aiv
+    assert "kVllmAivToAicQueryReady" not in aic
+    assert "sparse_attention_head64_fused_vllm_aic(\n          query," in kernel
+
+
 def test_v2_vllm_gather_and_softmax_read_indices_from_gm():
     source = _v2_fused_source()
     gather = _function_definition(
@@ -766,12 +794,10 @@ def test_v2_vllm_decode_uses_upstream_gather_copy_events():
         source, "sparse_attention_head64_fused_vllm_aiv("
     )
 
-    for helper in (
-        "head64_vllm_copy_query_half_ub_to_l1(",
-        "head64_vllm_copy_probability_half_ub_to_l1(",
-    ):
-        definition = _function_definition(source, helper)
-        assert "asc_copy_ub2l1(" in definition
+    probability_copy = _function_definition(
+        source, "head64_vllm_copy_probability_half_ub_to_l1("
+    )
+    assert "asc_copy_ub2l1(" in probability_copy
     assert "head64_vllm_copy_kv_half_ub_to_l1(" not in gather
     assert "head64_vllm_copy_kv_row_gm_to_ub(" in gather
     assert "head64_vllm_copy_kv_chunk_ub_to_gm(" in gather
@@ -781,7 +807,7 @@ def test_v2_vllm_decode_uses_upstream_gather_copy_events():
     assert "WaitFlag<AscendC::HardEvent::MTE2_MTE3>" in gather
     assert "SetFlag<AscendC::HardEvent::MTE3_MTE2>" in gather
     assert "WaitFlag<AscendC::HardEvent::MTE3_MTE2>" in gather
-    assert "head64_vllm_copy_query_half_ub_to_l1(" in aiv
+    assert "head64_vllm_copy_query_half_ub_to_l1(" not in aiv
     assert "head64_vllm_copy_probability_half_ub_to_l1(" in aiv
 
 

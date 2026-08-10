@@ -2,8 +2,10 @@
 
 ## 1. 目标
 
-本文逐项验证 vLLM-Ascend 对比图中的六类实现差距。实验基线为
-`main@7dbe8a2`，已经保留逻辑 PV512 handoff；canonical case 固定为：
+本文逐项验证 vLLM-Ascend 对比图中的六类实现差距。实验初始基线为
+`main@7dbe8a2`，已经保留逻辑 PV512 handoff；E2 完成后分支 rebase 到
+`origin/main@22ba333`，该 upstream 已包含同一 lane-local softmax 优化。canonical
+case 固定为：
 
 ```text
 Ascend 950PR, CANN 9.2, BF16
@@ -21,8 +23,8 @@ causal=true, return_lse=true
 | --- | --- | --- |
 | Softmax metadata | E1 精度通过但两轮性能回退，拒绝 | 保持 softmax 读取 GM indices |
 | PV/Vec2 粒度 | 已完成 | 保持两个 PV256 MMAD，一次 PV512 handoff/VF update |
-| Query movement | 未完成 | E3：AIC 直接 GM-to-L1 ND2NZ |
-| Vector 实现质量 | 未完成 | E2：lane-local score/validity 寄存器复用 |
+| Query movement | E3 已完成并保留 | AIC 直接 GM-to-L1 ND2NZ |
+| Vector 实现质量 | E2 已完成并进入 upstream | lane-local score/validity 寄存器复用 |
 | Cube 内部流水 | 部分完成 | E4：QK128 双 L0A/L0B staging |
 | Sync/buffer 管理 | 部分完成 | E5：PV free 从 PIPE_V 直接发布 |
 
@@ -91,12 +93,18 @@ kernel ELF SHA256: 8867f972504ec4c5598ebc2169cb05a7cbdf8990c139145642c69baaffb71
 
 ## 4. E2：Lane-local Score Cache
 
-在 E1 的 mask 基础上，每个 softmax lane 在 max pass 中读取并缩放自己负责的最多
+在 PV512 checkpoint 上，每个 softmax lane 在 max pass 中读取并缩放自己负责的最多
 四个 score，将其保存在固定大小的局部标量中。exp pass 复用这些标量，不再第二次
 读取 UB score 或重复乘以 scale。
 
 不使用动态数组索引，不手工展开整个 head 循环。编译后必须检查 Stack 和寄存器
-元数据；若发生 spill、资源异常或性能回退，完整撤销 E2，保留 E1 的接受状态不变。
+元数据；若发生 spill、资源异常或性能回退，完整撤销 E2，回到 PV512 checkpoint。
+
+E2 的 seed 7/19 output/LSE mismatch 均为 0，两轮 `BasicInfo` 从 PV512 的
+`90.723/91.131 us` 降至 `81.133/81.343 us`，两轮均值提升约 10.66%。本 worktree
+原提交在 rebase 时因 patch 已由 upstream `22ba333` 包含而自动去重；最终源码仍保留
+该优化。完整 provenance 和 artifacts 见
+`dsa-v2-sparse-attention-remaining-gap-experiments.zh-CN.md` 第 8.6 节。
 
 ## 5. E3：AIC Direct Query GM-to-L1
 
@@ -115,6 +123,50 @@ UB-to-L1 copy、Query-ready CrossCore handoff。通用路径保持不变。
 本候选复用源码已经存在的 GM-to-L1 ND2NZ 数据搬运设施，不增加新的 include 或新的
 API 家族。若工具链不支持该 source stride，或者实际布局不正确，候选在编译/精度门槛
 处终止并撤销。
+
+### 5.1 实验结果：保留
+
+AIC 使用 Query GM 起始地址和 `srcDValue=query_tokens * 576` 直接生成
+`64 x 576 BF16` NZ L1 Query。canonical rolling AIV 不再执行 Query pack VF、
+UB-to-L1 copy 或 Query-ready CrossCore handoff；通用路径未修改。
+
+远端 clean build 成功，seed 7/19 都覆盖 negative、out-of-range、causal-future 和
+完整 16 tiles，output/LSE mismatch 均为 0：
+
+| seed | output mismatch | LSE mismatch | max output abs error | max LSE abs error |
+| ---: | ---: | ---: | ---: | ---: |
+| 7 | 0 / 262144 | 0 / 512 | 0.0078125 | 0.009283065795898438 |
+| 19 | 0 / 262144 | 0 / 512 | 0.009765625 | 0.009229660034179688 |
+
+两轮独立 CannBench framework `BasicInfo` 均优于 rebase 后的 upstream lane-cache
+checkpoint：
+
+| 轮次 | upstream lane-cache | E3 direct Query | 变化 |
+| ---: | ---: | ---: | ---: |
+| 1 | 81.133 us | 76.711 us | -5.45% |
+| 2 | 81.343 us | 76.975 us | -5.37% |
+
+两轮目标 kernel 的 Block/Mix Block Dim 均为 `16/32`，当前/额定频率均为
+`1650/1650 MHz`，failure count 为 0。E3 满足精度和两轮性能门槛，予以保留并作为
+E4 的新 checkpoint。
+
+E3 provenance：
+
+```text
+source SHA256:     9184b4c05bfcc244c5d77f56d183f0ef1d172a53bd10b3256fd0b3ed9f13a818
+_C.so SHA256:      64406638e6fe50ccb0465a2633f42fbb0113eb04513912359a0a5a87ab41f820
+kernel ELF SHA256: b9a5c761112db013ce095389bb9d420ced26d24258ed02e41d9eb6d4f5211be4
+```
+
+证据路径：
+
+```text
+/tmp/cannbench-dsa-v2-gap-pWg42i/six-gap-e3-direct-query-build.log
+/tmp/cannbench-dsa-v2-gap-pWg42i/six-gap-e3-direct-query-accuracy-seed7.json
+/tmp/cannbench-dsa-v2-gap-pWg42i/six-gap-e3-direct-query-accuracy-seed19.json
+/tmp/cannbench-dsa-six-gap-e3-direct-query-r1-20260810/
+/tmp/cannbench-dsa-six-gap-e3-direct-query-r2-20260810/
+```
 
 ## 6. E4：QK128 Double Staging
 
