@@ -96,7 +96,7 @@ Tensor API 和 SIMT API 边界；现存过渡性同步调用不作为扩展接�
 
 ### 8.1 Gather32：拒绝
 
-候选提交 `0a44100` 把每个 AIV 的 gather staging 从 `16 x 576 BF16`
+Gather32 候选把每个 AIV 的 gather staging 从 `16 x 576 BF16`
 扩大为 `32 x 576 BF16`，动态 UB 从 178816 B 增至 197248 B。远端干净编译通过，
 seed 7、19 的 output/LSE mismatch 均为 0。
 
@@ -109,8 +109,8 @@ seed 7、19 的 output/LSE mismatch 均为 0。
 | Gather32 | 99.214996 us | 98.678001 us | 98.946499 us |
 
 Gather32 平均回退 1.205501 us，约 1.23%。说明减少一次 16-row UB-to-GM 搬运和
-一组 MTE event 不足以抵消更大 staging/单次搬运带来的代价。候选已由 `809a2b5`
-撤销，不进入后续组合。
+一组 MTE event 不足以抵消更大 staging/单次搬运带来的代价。该候选已从最终代码中
+移除，不进入后续组合。
 
 本机原始 framework artifacts 位于：
 
@@ -123,7 +123,7 @@ Gather32 平均回退 1.205501 us，约 1.23%。说明减少一次 16-row UB-to-
 
 ### 8.2 逻辑 PV512 Handoff：保留
 
-候选提交 `bc8961a` 保留两个 Value256 MMAD/Fixpipe，只把两块
+逻辑 PV512 候选保留两个 Value256 MMAD/Fixpipe，只把两块
 `32 x 256 FP32` 结果放入同一个 `32 x 512 FP32` staging。每个 selected128 tile
 由 Cube 完成两段结果后只发布一次 PV ready，AIV 只做一次 512 维 output update，
 因此不改变矩阵计算量，只减少一次 ready/free handoff 和一次 output-update VF 边界。
@@ -153,7 +153,7 @@ Gather32 平均回退 1.205501 us，约 1.23%。说明减少一次 16-row UB-to-
 
 ### 8.3 Slot-private Validity Metadata：拒绝
 
-候选提交 `609719c` 在 UB 末尾增加三个 slot-private 的 `128 x uint32` validity
+Validity metadata 候选在 UB 末尾增加三个 slot-private 的 `128 x uint32` validity
 数组，动态 UB 从 211584 B 增至 213120 B。每个 tile 由 warp 0 读取一次 GM
 indices 并生成 validity，经过一次 `__syncthreads()` 后，32 个 head warp 的 max 和
 exp 两遍只读取 UB metadata。
@@ -171,7 +171,7 @@ out-of-range、causal-future 和完整 16 tiles，output/LSE mismatch 均为 0�
 
 Run 1 快 0.142997 us，但 Run 2 慢 0.546997 us；两轮均值回退 0.202000 us，
 约 0.22%。减少重复 GM indices 读取的收益不足以抵消 validity UB 访问和新增块内同步，
-且结果不满足“两轮均优于对照”的接受标准。候选已由 `f60d731` 撤销。
+且结果不满足“两轮均优于对照”的接受标准。该候选已从最终代码中移除。
 
 本机原始 framework artifacts 位于：
 
@@ -190,9 +190,8 @@ AIV 读完 PV UB 前覆写结果，AIC 侧 `PV free -> 两段 MMAD/Fixpipe -> PV
 
 ### 8.5 最终接受结果
 
-最终源码只保留逻辑 PV512 handoff，和候选提交 `bc8961a` 的 operator source/test
-逐字一致。回退 validity 后重新干净编译，seed 7、19 的完整 decode output/LSE
-mismatch 再次均为 0。
+最终源码只保留经过验证的逻辑 PV512 handoff operator source/test。移除 validity
+候选后重新干净编译，seed 7、19 的完整 decode output/LSE mismatch 再次均为 0。
 
 最终两轮 CannBench framework BasicInfo 结果为：
 
@@ -218,3 +217,9 @@ operator-local 目标测试为 `43 passed`，`git diff --check` 通过，公共 
 以 `_v2` 结尾，而现有 rolling symbol 为
 `launch_sparse_attention_head64_fused_hd576_bf16_v2_rolling_restored`；该问题不由本次
 优化引入，也未在本分支顺带修改。
+
+按照 V2 decode published lane 现有的“两轮 provenance-audited 结果取较低 workflow”
+约定，最终 checkpoint 由已发布的 fused Indexer `0.084852998 ms` 和本实验较低的
+Sparse Attention `0.090723000 ms` 相加，得到 `0.175575998 ms`。canonical run
+`opbench-ascend-950pr-simt-v2-dsa_decode-realistic-bfloat16` 的 schema、run id 和其他
+字段保持不变。
