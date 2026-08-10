@@ -188,7 +188,7 @@ AIV 读完 PV UB 前覆写结果，AIC 侧 `PV free -> 两段 MMAD/Fixpipe -> PV
 保证 AIV 只消费完整的 512 维结果。这两条仍是实际 buffer ownership 边界，不能在
 不改变协议或缺少额外时序证据时删除，因此不再构造无依赖证明的删同步候选。
 
-### 8.5 最终接受结果
+### 8.5 PV512 阶段接受结果
 
 最终源码只保留经过验证的逻辑 PV512 handoff operator source/test。移除 validity
 候选后重新干净编译，seed 7、19 的完整 decode output/LSE mismatch 再次均为 0。
@@ -221,5 +221,58 @@ operator-local 目标测试为 `43 passed`，`git diff --check` 通过，公共 
 按照 V2 decode published lane 现有的“两轮 provenance-audited 结果取较低 workflow”
 约定，最终 checkpoint 由已发布的 fused Indexer `0.084852998 ms` 和本实验较低的
 Sparse Attention `0.090723000 ms` 相加，得到 `0.175575998 ms`。canonical run
+`opbench-ascend-950pr-simt-v2-dsa_decode-realistic-bfloat16` 的 schema、run id 和其他
+字段保持不变。
+
+### 8.6 PV512 后续关键路径：Lane-local Softmax 复用
+
+在 PV512 checkpoint 上重新采集同一 canonical case。新的 CannBench framework
+BasicInfo 基线为 91.004997 us；独立的 InstrTimeline 和 PipeTimeline 归因采集分别为
+90.666 us 和 90.861 us。详细时间线只用于归因，不与 BasicInfo 延迟混算。
+
+PipeTimeline 中 Vector 关键路径约 85 us，Cube 为 27.452 us，AIV MTE2 约 18 us。
+稳态 selected128 round 的周期约 4.95--5.05 us，其中 Vector 区间约
+4.73--4.85 us；两段 gather MTE2 合计约 1.0--1.3 us，基本被 Vector 覆盖。因此
+没有继续修改 gather 中转或跨核协议，而是转向仍在关键路径上的 softmax VF。
+
+每个 selected128 tile 中，一个 lane 固定处理最多 4 个位置。原实现的 max pass 和
+exp pass 都会读取同一份 GM indices，并再次读取相同 UB score。保留候选在 max pass
+中把 4 个 scaled score 缓存在 lane-local `float[4]` 中，同时用一个 4-bit mask 记录
+validity；exp pass 直接复用这些值。该修改不增加共享 UB、不增加 `__syncthreads()`，
+也不改变 gather、CrossCore 协议、Cube 逻辑、UB 布局或 API 边界。
+
+这与 8.3 中拒绝的 slot-private validity metadata 不同：旧候选由 warp 0 生成共享
+UB metadata，其他 head warp 经块内同步后读取；本候选由每个 head warp 的 lane
+自行读取一次 indices/score，并在 lane-local 生命周期内跨两遍 softmax 复用，避免了
+共享 UB 访问和新增同步。
+
+远端 clean build 成功。seed 7、19 均覆盖 negative、out-of-range、causal-future 和
+完整 16 tiles，output/LSE mismatch 均为 0。两轮独立 CannBench framework
+BasicInfo 结果如下：
+
+| 实现 | Run 1 | Run 2 | 两轮均值 |
+| --- | ---: | ---: | ---: |
+| PV512 checkpoint | 90.723000 us | 91.130997 us | 90.926999 us |
+| PV512 + lane-local softmax 复用 | 81.133003 us | 81.343002 us | 81.238003 us |
+
+候选相对 PV512 checkpoint 两轮均值降低 9.688996 us，约 10.66%；相对本轮新采集的
+91.004997 us BasicInfo 基线降低 9.766995 us，约 10.73%。两轮目标 fused kernel
+均为 `Block Dim=16`、`Mix Block Dim=32`、1650 MHz，framework failure count 为 0。
+msopprof 仍只显式使用 `BasicInfo` 和 plugin 提供的 `launch-count=10`，其他参数保持
+框架默认。该候选满足精度和两轮性能接受标准，予以保留。
+
+本机原始 artifacts 位于：
+
+```text
+/tmp/cannbench-dsa-pv512-critical-basic-20260810
+/tmp/cannbench-dsa-pv512-critical-instr-20260810
+/tmp/cannbench-dsa-pv512-critical-pipe-20260810
+/tmp/cannbench-dsa-pv512-lane-cache-r1-20260810
+/tmp/cannbench-dsa-pv512-lane-cache-r2-20260810
+```
+
+按照现有 published lane 的“两轮 provenance-audited 结果取较低 workflow”约定，
+本轮 checkpoint 由已发布的 fused Indexer `0.084852998 ms` 和本实验较低的
+Sparse Attention `0.081133003 ms` 相加，得到 `0.165986001 ms`。canonical run
 `opbench-ascend-950pr-simt-v2-dsa_decode-realistic-bfloat16` 的 schema、run id 和其他
 字段保持不变。

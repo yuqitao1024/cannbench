@@ -628,6 +628,24 @@ def test_v2_vllm_gather_and_softmax_read_indices_from_gm():
     assert "selected_start," in aiv
 
 
+def test_v2_vllm_softmax_reuses_lane_local_scores_without_shared_metadata():
+    softmax = _function_definition(
+        _v2_fused_source(), "head64_fused_vllm_softmax_vf("
+    )
+
+    assert "float lane_scores[4]" in softmax
+    assert "uint32_t lane_valid_mask" in softmax
+    assert softmax.count(
+        "indices[indices_row + selected_start + selected]"
+    ) == 1
+    assert softmax.count(
+        "scores[local_head * kHead64FusedVllmSelectedTile + selected]"
+    ) == 1
+    assert "lane_scores[lane_entry]" in softmax
+    assert "lane_valid_mask & (1U << lane_entry)" in softmax
+    assert "__syncthreads()" not in softmax
+
+
 def test_v2_vllm_decode_four_aivs_share_each_selected128_gather():
     source = _v2_fused_source()
     kernel = _function_definition(
