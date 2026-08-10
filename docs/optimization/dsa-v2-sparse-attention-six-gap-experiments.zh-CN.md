@@ -26,7 +26,7 @@ causal=true, return_lse=true
 | Query movement | E3 已完成并保留 | AIC 直接 GM-to-L1 ND2NZ |
 | Vector 实现质量 | E2 已完成并进入 upstream | lane-local score/validity 寄存器复用 |
 | Cube 内部流水 | E4 设备运行时失败，拒绝 | 保持 QK256 单 staging |
-| Sync/buffer 管理 | 部分完成 | E5：PV free 从 PIPE_V 直接发布 |
+| Sync/buffer 管理 | E5 精度失败，拒绝 | 保持 V-to-MTE3 排序后发布 PV-free |
 
 E1 至 E5 按顺序执行。每个候选只从上一个已接受 checkpoint 开始；候选失败时，
 恢复源码到该 checkpoint，再开始下一项。这样最终代码只包含逐项可归因且组合后仍
@@ -220,6 +220,34 @@ kernel ELF SHA256: 03cd175a37729bc0f49cdb25eac2c3eb49beac992096b65d872f654d58aa5
 Score-free、probability-ready、Query/KV 搬运以及 rolling slot 复用边界不变。
 若 `PIPE_V` CrossCore 发布不受当前工具链支持、出现 hang/精度问题或没有性能收益，
 恢复原协议。
+
+### 7.1 实验结果：拒绝
+
+E5 只把 output-update 后的 PV-free 从
+`V-to-MTE3 notify/wait -> PIPE_MTE3 CrossCoreSetFlag` 改为直接由 `PIPE_V` 发布，
+其他事件和 buffer ownership 协议不变。operator-local 源码契约测试 `32 passed`，
+远端 clean build 和 kernel launch 均成功。
+
+canonical seed 7 运行完成但精度严重失败：output mismatch 为
+`247866 / 262144`，LSE mismatch 为 `512 / 512`，max output/LSE abs error 分别为
+`0.82452392578125` 和 `4.986405372619629`。这证明在当前 Ascend 950PR/CANN 9.2
+环境中，`PIPE_V` CrossCore flag 不能替代显式 V-to-MTE3 排序来保护“VF 已读完 PV
+UB”边界。E5 在精度门槛即终止，没有采集性能；源码和契约测试均撤销。
+
+E5 provenance：
+
+```text
+source SHA256:     b4bdb99579c255ba97959c4be6b9f0b3f1bda154bc216064f3c1483e99802c86
+_C.so SHA256:      64406638e6fe50ccb0465a2633f42fbb0113eb04513912359a0a5a87ab41f820
+kernel ELF SHA256: 9f3aafdff9af9adb4b908011091099f60eae53a13900b8596781011a65ff2c79
+```
+
+证据路径：
+
+```text
+/tmp/cannbench-dsa-v2-gap-pWg42i/six-gap-e5-pipe-v-pv-free-build.log
+/tmp/cannbench-dsa-v2-gap-pWg42i/six-gap-e5-pipe-v-pv-free-accuracy-seed7.json
+```
 
 ## 8. 验证和保留门槛
 
