@@ -2,10 +2,10 @@
 
 ## Status
 
-Approved for implementation on 2026-08-10 as a measured experiment. The user
-selected the single-kernel fusion approach and granted a task-local exception
-for `AscendC::SyncAll()`. This exception does not modify `AGENTS.md` and does
-not apply to other operators or later work.
+Retained after target-device validation on 2026-08-10. The user selected the
+single-kernel fusion approach and granted a task-local exception for
+`AscendC::SyncAll()`. This exception does not modify `AGENTS.md` and does not
+apply to other operators or later work.
 
 ## Scope
 
@@ -181,6 +181,85 @@ Lightning Indexer nor complete selected DSA workflow is slower than its paired
 baseline in both clean-process pairs. No positive percentage threshold is
 required. If either boundary regresses in either pair, restore the retained
 five-launch implementation and document the candidate as rejected evidence.
+
+## Measured Result And Retention
+
+The experiment was built and validated on `Ascend950PR_9589` with CANN 9.2.0,
+the 2026-08-04 Bisheng build, PyTorch 2.10.0, torch_npu 2.10.0.post2,
+production `-O3`, and `dav-3510`. All retained `BasicInfo` rows reported a
+current and rated frequency of 1650 MHz.
+
+The isolated source revisions and distributed TopK ELF hashes were:
+
+| Variant | Revision | Source archive SHA-256 | Distributed TopK ELF SHA-256 |
+| --- | --- | --- | --- |
+| Baseline | `c7b23cf` | `a0d095d5b82aa0904afaf7431829fb810455b28262d12864159e92c8a5f5e20f` | `d7211e075f7a576e8ac148187180619afea2164903c29259c35d466281af01bf` |
+| Candidate | `4a63e64` | `391c8b1558ad589eac952c8699c01dcedd49277040798befffc348663a234e7f` | `ab08e711a56c6435d24b25d184c95e6f36312595b96ea1997c8d2d31af953f0c` |
+
+The candidate production build completed successfully. A separate
+`--cce-res-usage` build used the same compiler inputs and reported zero Stack
+bytes in all five VFs. Register counts in execution order were 24 for high
+histogram, 16 for high selection, 24 for low histogram, 33 for low selection
+and offsets, and 26 for compaction. The resource ELF SHA-256 was
+`c69d593f85e34859faa3b50bc4643725706bb4f64fbd4190e8d66feef26a5d75`.
+
+Device correctness passed the following fresh-process checks:
+
+- canonical random, masked-tail, tied-threshold, near-threshold, and
+  negative-score candidate cases at seed 7, with five repeats per case;
+- a noncanonical V2 `B=1,Q=4` fallback case at seed 19, with five repeats;
+- the independently built V1 canonical regression at seed 7, with five
+  repeats.
+
+Every check produced unique in-range indices, matched the reference TopK score
+multiset, and returned a stable index set across repeats. The tied-threshold
+case also returned the deterministic expected low-index set.
+
+Two alternating clean-process `BasicInfo` pairs used the same seed-7 DSA decode
+case. Times below are microseconds. Baseline TopK is the sum of the five stage
+rows; candidate TopK is the single fused row. The selected Sparse Attention V2
+path emitted one fused row and no separate Combine row, so the selected
+workflow is Indexer plus Sparse fused. Materialization Cast remains excluded.
+
+| Pair 1 boundary | Baseline | Candidate | Candidate delta |
+| --- | ---: | ---: | ---: |
+| Score | 56.611 | 56.340 | -0.271 (-0.48%) |
+| Complete TopK | 36.238 | 28.640 | -7.598 (-20.97%) |
+| Complete Indexer | 92.849 | 84.980 | -7.869 (-8.47%) |
+| Sparse Attention fused | 97.392 | 97.259 | -0.133 (-0.14%) |
+| Selected DSA workflow | 190.241 | 182.239 | -8.002 (-4.21%) |
+
+| Pair 2 boundary | Baseline | Candidate | Candidate delta |
+| --- | ---: | ---: | ---: |
+| Score | 56.788 | 56.877 | +0.089 (+0.16%) |
+| Complete TopK | 35.704 | 28.598 | -7.106 (-19.90%) |
+| Complete Indexer | 92.492 | 85.475 | -7.017 (-7.59%) |
+| Sparse Attention fused | 97.635 | 97.787 | +0.152 (+0.16%) |
+| Selected DSA workflow | 190.127 | 183.262 | -6.865 (-3.61%) |
+
+The candidate improves both complete Indexer and selected workflow boundaries
+in both pairs, so it satisfies the no-regression retention rule and is
+retained. An earlier `pair1-baseline` collection overlapped an unrelated device
+job and was interrupted; its partial rows are explicitly excluded from these
+tables and from the retention decision.
+
+Controller-side raw artifacts, including all four clean profile trees and
+build, resource, and accuracy logs, are under:
+
+```text
+/tmp/cannbench-lightning-topk-fused-results.EY6ail/
+```
+
+The corresponding remote source, logs, and profile trees remain under:
+
+```text
+/root/cannbench-lightning-topk-c7b23cf/
+/root/cannbench-lightning-topk-4a63e64/
+/root/cannbench-lightning-topk-perf/clean-pair1-baseline/
+/root/cannbench-lightning-topk-perf/clean-pair1-candidate/
+/root/cannbench-lightning-topk-perf/clean-pair2-baseline/
+/root/cannbench-lightning-topk-perf/clean-pair2-candidate/
+```
 
 ## Non-Goals
 
