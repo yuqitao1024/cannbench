@@ -824,7 +824,7 @@ def test_v2_vllm_workspaces_are_top_level_with_dynamic_ub_base_zero():
     )
     launcher = _function_definition(
         source,
-        "launch_sparse_attention_head64_fused_hd576_bf16_v2_rolling_restored(",
+        "launch_sparse_attention_head64_fused_hd576_bf16_rolling_restored_v2(",
     )
 
     assert "__cbuf__ uint8_t l1_workspace[kHead64FusedL1Bytes]" in kernel
@@ -851,7 +851,7 @@ def test_v2_vllm_mixed_launch_expands_pairs_and_decodes_aiv_block_id():
     )
     launcher = _function_definition(
         source,
-        "launch_sparse_attention_head64_fused_hd576_bf16_v2_rolling_restored(",
+        "launch_sparse_attention_head64_fused_hd576_bf16_rolling_restored_v2(",
     )
     normalized_aiv = " ".join(aiv.split())
     normalized_launcher = " ".join(launcher.split())
@@ -870,7 +870,7 @@ def test_v2_vllm_mixed_launch_expands_pairs_and_decodes_aiv_block_id():
     assert "CrossCoreSetFlag<0, PIPE_MTE3>" in inactive
     assert "CrossCoreWaitFlag<0, PIPE_MTE3>" in inactive
     assert (
-        "launch_sparse_attention_head64_fused_hd576_bf16_v2_rolling_restored("
+        "launch_sparse_attention_head64_fused_hd576_bf16_rolling_restored_v2("
         in host_source
     )
 
