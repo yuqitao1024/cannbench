@@ -120,3 +120,33 @@ Gather32 平均回退 1.205501 us，约 1.23%。说明减少一次 16-row UB-to-
 /tmp/cannbench-dsa-v2-gap-gather32-r1
 /tmp/cannbench-dsa-v2-gap-gather32-r2
 ```
+
+### 8.2 逻辑 PV512 Handoff：保留
+
+候选提交 `bc8961a` 保留两个 Value256 MMAD/Fixpipe，只把两块
+`32 x 256 FP32` 结果放入同一个 `32 x 512 FP32` staging。每个 selected128 tile
+由 Cube 完成两段结果后只发布一次 PV ready，AIV 只做一次 512 维 output update，
+因此不改变矩阵计算量，只减少一次 ready/free handoff 和一次 output-update VF 边界。
+
+动态 UB 为 211584 B，低于 216 KiB 上限；operator-local 测试 `43 passed`，远端
+干净编译通过。seed 7、19 的完整 decode 精度中，output/LSE mismatch 均为 0。
+
+性能沿用与 baseline 完全相同的 CannBench framework 路径。msopprof 只显式收到
+`BasicInfo` 和 `launch-count=10`，其余参数保持默认。两轮目标 fused kernel 都是
+`Block Dim=16`、`Mix Block Dim=32`、1650 MHz：
+
+| 实现 | Run 1 | Run 2 | 两轮均值 |
+| --- | ---: | ---: | ---: |
+| main baseline | 98.033997 us | 97.447998 us | 97.740998 us |
+| 逻辑 PV512 handoff | 91.224998 us | 90.707001 us | 90.966000 us |
+
+两轮分别降低 6.808999 us 和 6.740997 us，平均降低 6.774998 us，约 6.93%。
+该候选满足“两轮均优于 baseline”的接受标准，予以保留，并作为后续增量候选的
+新对照点。
+
+本机原始 framework artifacts 位于：
+
+```text
+/tmp/cannbench-dsa-v2-gap-pv512-r1
+/tmp/cannbench-dsa-v2-gap-pv512-r2
+```
