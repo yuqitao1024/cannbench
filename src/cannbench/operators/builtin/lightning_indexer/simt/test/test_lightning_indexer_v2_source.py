@@ -124,11 +124,12 @@ def test_decode_distributed_topk_owns_histograms_offsets_and_output_ranges():
         "constexpr int32_t kContextCount = 32768;",
         "constexpr int32_t kTopK = 2048;",
         "constexpr int32_t kCanonicalContextShardCount = 16;",
-        "lightning_indexer_decode_distributed_high_histogram_bfloat16_v2_kernel",
-        "lightning_indexer_decode_distributed_select_high_bfloat16_v2_kernel",
-        "lightning_indexer_decode_distributed_low_histogram_bfloat16_v2_kernel",
-        "lightning_indexer_decode_distributed_select_low_offsets_bfloat16_v2_kernel",
-        "lightning_indexer_decode_distributed_compact_bfloat16_v2_kernel",
+        "lightning_indexer_decode_distributed_topk_bfloat16_v2_kernel",
+        "lightning_indexer_decode_distributed_high_histogram_bfloat16_v2_vf",
+        "lightning_indexer_decode_distributed_select_high_bfloat16_v2_vf",
+        "lightning_indexer_decode_distributed_low_histogram_bfloat16_v2_vf",
+        "lightning_indexer_decode_distributed_select_low_offsets_bfloat16_v2_vf",
+        "lightning_indexer_decode_distributed_compact_bfloat16_v2_vf",
         "asc_atomic_add(local_histogram + bucket, 1U);",
         "shard_greater_offset",
         "shard_equal_offset",
@@ -144,8 +145,8 @@ def test_decode_distributed_topk_owns_histograms_offsets_and_output_ranges():
     assert "block_index % context_shard_count" in source
     assert "for (int32_t offset = 1; offset < kThreadsPerBlock; offset <<= 1)" in source
     assert "asc_atomic_add(output" not in source
+    assert '#include "basic_api/kernel_operator_block_sync_intf.h"' in source
     for forbidden in (
-        "basic_api/",
         "kernel_operator.h",
         "AscendC::LocalTensor",
         "SetFlag",
@@ -155,6 +156,44 @@ def test_decode_distributed_topk_owns_histograms_offsets_and_output_ranges():
         "asc_sync_inter",
     ):
         assert forbidden not in source
+    for removed_kernel in (
+        "lightning_indexer_decode_distributed_high_histogram_bfloat16_v2_kernel(",
+        "lightning_indexer_decode_distributed_select_high_bfloat16_v2_kernel(",
+        "lightning_indexer_decode_distributed_low_histogram_bfloat16_v2_kernel(",
+        "lightning_indexer_decode_distributed_select_low_offsets_bfloat16_v2_kernel(",
+        "lightning_indexer_decode_distributed_compact_bfloat16_v2_kernel(",
+    ):
+        assert removed_kernel not in source
+
+
+def test_decode_distributed_topk_fuses_vfs_with_full_core_barriers():
+    source = DISTRIBUTED_TOPK_SOURCE.read_text(encoding="utf-8")
+    kernel = _function_body(
+        source,
+        "lightning_indexer_decode_distributed_topk_bfloat16_v2_kernel(",
+    )
+    launcher = _function_body(
+        source,
+        "launch_lightning_indexer_decode_distributed_topk_bfloat16_v2(",
+    )
+
+    stages = (
+        "lightning_indexer_decode_distributed_high_histogram_bfloat16_v2_vf",
+        "lightning_indexer_decode_distributed_select_high_bfloat16_v2_vf",
+        "lightning_indexer_decode_distributed_low_histogram_bfloat16_v2_vf",
+        "lightning_indexer_decode_distributed_select_low_offsets_bfloat16_v2_vf",
+        "lightning_indexer_decode_distributed_compact_bfloat16_v2_vf",
+    )
+    positions = [kernel.index(stage) for stage in stages]
+    assert positions == sorted(positions)
+    assert kernel.count("AscendC::SyncAll();") == 4
+    assert "extern __ubuf__ uint32_t dynamicStartUB[];" in kernel
+    assert "<<<row_count * context_shard_count, kCompactUbufBytes, stream>>>" in launcher
+
+    for producer in stages[:-1]:
+        body = _function_body(source, f"{producer}(")
+        assert "publish_gm_for_next_stage();" in body
+    assert source.count("__builtin_cce_dcci(nullptr, 1, 0);") == 1
 
 
 def test_decode_distributed_low_reducer_groups_threshold_scan():
@@ -256,16 +295,21 @@ def test_decode_bridge_uses_distributed_topk_only_for_canonical_shape():
     ):
         assert workspace in body
 
-    launches = (
-        "launch_lightning_indexer_context_sharded_family_64x128_bfloat16_v2(",
+    score_launch = (
+        "launch_lightning_indexer_context_sharded_family_64x128_bfloat16_v2("
+    )
+    fused_topk_launch = (
+        "launch_lightning_indexer_decode_distributed_topk_bfloat16_v2("
+    )
+    assert body.index(score_launch) < body.index(fused_topk_launch)
+    for old_launch in (
         "launch_lightning_indexer_decode_distributed_high_histogram_bfloat16_v2(",
         "launch_lightning_indexer_decode_distributed_select_high_bfloat16_v2(",
         "launch_lightning_indexer_decode_distributed_low_histogram_bfloat16_v2(",
         "launch_lightning_indexer_decode_distributed_select_low_offsets_bfloat16_v2(",
         "launch_lightning_indexer_decode_distributed_compact_bfloat16_v2(",
-    )
-    positions = [body.index(launch) for launch in launches]
-    assert positions == sorted(positions)
+    ):
+        assert old_launch not in body
     assert "} else {\n    launch_lightning_indexer_decode_radix_topk_bfloat16_v2(" in body
 
 
