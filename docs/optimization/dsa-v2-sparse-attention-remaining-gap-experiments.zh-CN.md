@@ -91,3 +91,32 @@ Tensor API 和 SIMT API 边界；现存过渡性同步调用不作为扩展接�
 
 接受性能候选要求精度完整通过，并且两次 framework run 的中位数均优于同条件基线。
 若收益落在 profiler 抖动范围内，则记录为无明确收益，不进入组合版本。
+
+## 8. 实验记录
+
+### 8.1 Gather32：拒绝
+
+候选提交 `0a44100` 把每个 AIV 的 gather staging 从 `16 x 576 BF16`
+扩大为 `32 x 576 BF16`，动态 UB 从 178816 B 增至 197248 B。远端干净编译通过，
+seed 7、19 的 output/LSE mismatch 均为 0。
+
+性能严格走 CannBench framework，msopprof 只显式收到 `BasicInfo` 和
+`launch-count=10`，其余参数为默认值。两轮结果如下：
+
+| 实现 | Run 1 | Run 2 | 两轮均值 |
+| --- | ---: | ---: | ---: |
+| main baseline | 98.033997 us | 97.447998 us | 97.740998 us |
+| Gather32 | 99.214996 us | 98.678001 us | 98.946499 us |
+
+Gather32 平均回退 1.205501 us，约 1.23%。说明减少一次 16-row UB-to-GM 搬运和
+一组 MTE event 不足以抵消更大 staging/单次搬运带来的代价。候选已由 `809a2b5`
+撤销，不进入后续组合。
+
+本机原始 framework artifacts 位于：
+
+```text
+/tmp/cannbench-dsa-v2-gap-baseline-r1
+/tmp/cannbench-dsa-v2-gap-baseline-r2
+/tmp/cannbench-dsa-v2-gap-gather32-r1
+/tmp/cannbench-dsa-v2-gap-gather32-r2
+```
