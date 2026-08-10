@@ -168,6 +168,7 @@ def test_decode_distributed_topk_owns_histograms_offsets_and_output_ranges():
 
 def test_decode_distributed_topk_fuses_vfs_with_full_core_barriers():
     source = DISTRIBUTED_TOPK_SOURCE.read_text(encoding="utf-8")
+    publish = _function_body(source, "publish_gm_for_next_stage()")
     kernel = _function_body(
         source,
         "lightning_indexer_decode_distributed_topk_bfloat16_v2_kernel(",
@@ -186,13 +187,30 @@ def test_decode_distributed_topk_fuses_vfs_with_full_core_barriers():
     )
     positions = [kernel.index(stage) for stage in stages]
     assert positions == sorted(positions)
+    assert all(kernel.count(stage) == 1 for stage in stages)
     assert kernel.count("AscendC::SyncAll();") == 4
+    assert "return;" not in kernel
     assert "extern __ubuf__ uint32_t dynamicStartUB[];" in kernel
-    assert "<<<row_count * context_shard_count, kCompactUbufBytes, stream>>>" in launcher
+    normalized_launcher = " ".join(launcher.split())
+    fused_launch = (
+        "lightning_indexer_decode_distributed_topk_bfloat16_v2_kernel"
+        " <<<row_count * context_shard_count, kCompactUbufBytes, stream>>>"
+    )
+    assert normalized_launcher.count(fused_launch) == 1
 
-    for producer in stages[:-1]:
+    assert publish.count("asc_syncthreads();") == 1
+    assert publish.count("__builtin_cce_dcci(nullptr, 1, 0);") == 1
+    assert publish.index("asc_syncthreads();") < publish.index(
+        "__builtin_cce_dcci(nullptr, 1, 0);"
+    )
+
+    for stage_index, producer in enumerate(stages[:-1]):
         body = _function_body(source, f"{producer}(")
-        assert "publish_gm_for_next_stage();" in body
+        assert body.rstrip().endswith("publish_gm_for_next_stage();\n}")
+        stage_segment = kernel[
+            positions[stage_index] : positions[stage_index + 1]
+        ]
+        assert stage_segment.count("AscendC::SyncAll();") == 1
     assert source.count("__builtin_cce_dcci(nullptr, 1, 0);") == 1
 
 
@@ -302,6 +320,7 @@ def test_decode_bridge_uses_distributed_topk_only_for_canonical_shape():
         "launch_lightning_indexer_decode_distributed_topk_bfloat16_v2("
     )
     assert body.index(score_launch) < body.index(fused_topk_launch)
+    assert body.count(fused_topk_launch) == 1
     for old_launch in (
         "launch_lightning_indexer_decode_distributed_high_histogram_bfloat16_v2(",
         "launch_lightning_indexer_decode_distributed_select_high_bfloat16_v2(",

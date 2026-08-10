@@ -225,7 +225,7 @@ workflow is Indexer plus Sparse fused. Materialization Cast remains excluded.
 | --- | ---: | ---: | ---: |
 | Score | 56.611 | 56.340 | -0.271 (-0.48%) |
 | Complete TopK | 36.238 | 28.640 | -7.598 (-20.97%) |
-| Complete Indexer | 92.849 | 84.980 | -7.869 (-8.47%) |
+| Complete Indexer | 92.849 | 84.980 | -7.869 (-8.48%) |
 | Sparse Attention fused | 97.392 | 97.259 | -0.133 (-0.14%) |
 | Selected DSA workflow | 190.241 | 182.239 | -8.002 (-4.21%) |
 
@@ -243,11 +243,75 @@ retained. An earlier `pair1-baseline` collection overlapped an unrelated device
 job and was interrupted; its partial rows are explicitly excluded from these
 tables and from the retention decision.
 
+### Provenance Audit Recollection
+
+A follow-up audit repeated two alternating baseline/candidate pairs with
+process-local provenance capture. Each run used the same seed-7 case and this
+command shape, with only source root and run name changed:
+
+```text
+python -m cannbench bench --backend ascend --implementation simt \
+  --implementation-version v2 --op dsa_decode --dataset realistic \
+  --case-id deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048 \
+  --dtype bfloat16 --seed 7 --aic-metrics BasicInfo \
+  --output-dir <audit-root> --run-name <pair-label>
+```
+
+CannBench invoked `msopprof --aic-metrics=BasicInfo --launch-count=10` for
+each component. The profiler reported `Warm Up enabled. times:5` for every
+selected kernel. At process exit, an audit hook recorded the Python argv,
+source root, imported module paths, mapped device-library paths, and SHA-256
+values from inside each `internal-run` process. All four Indexer processes
+resolved the expected isolated source and TopK ELF:
+
+| Variant | Resolved source root | TopK ELF SHA-256 |
+| --- | --- | --- |
+| Baseline | `/root/cannbench-lightning-topk-c7b23cf` | `d7211e075f7a576e8ac148187180619afea2164903c29259c35d466281af01bf` |
+| Candidate | `/root/cannbench-lightning-topk-4a63e64` | `ab08e711a56c6435d24b25d184c95e6f36312595b96ea1997c8d2d31af953f0c` |
+
+Both variants mapped Sparse Attention device ELF SHA-256
+`582907dfe7726d14e0ce231c263898ea6c109bdca4c0bf84399002f1ce100ca4`.
+The profiler-dumped candidate `aicore_binary.o` SHA-256 was
+`a92259a98c8b33128dbb3bd20af4add6895ae2c30a40227f2fd5e30ed9a6c8cc`
+in both component captures of both pairs.
+
+The audit recollection independently passed the retention gate. Times are
+microseconds and use the same standalone-component aggregation as the
+published workflow record.
+
+| Audit pair 1 boundary | Baseline | Candidate | Candidate delta |
+| --- | ---: | ---: | ---: |
+| Score | 56.568 | 56.852 | +0.284 (+0.50%) |
+| Complete TopK | 35.862 | 28.421 | -7.441 (-20.75%) |
+| Complete Indexer | 92.430 | 85.273 | -7.157 (-7.74%) |
+| Sparse Attention fused | 98.923 | 97.828 | -1.095 (-1.11%) |
+| Selected DSA workflow | 191.353 | 183.101 | -8.252 (-4.31%) |
+
+| Audit pair 2 boundary | Baseline | Candidate | Candidate delta |
+| --- | ---: | ---: | ---: |
+| Score | 56.769 | 56.399 | -0.370 (-0.65%) |
+| Complete TopK | 35.853 | 28.454 | -7.399 (-20.64%) |
+| Complete Indexer | 92.622 | 84.853 | -7.769 (-8.39%) |
+| Sparse Attention fused | 97.573 | 97.305 | -0.268 (-0.27%) |
+| Selected DSA workflow | 190.195 | 182.158 | -8.037 (-4.23%) |
+
+An initial audit preflight is excluded because its candidate Sparse Attention
+module resolved to a stale `/tmp/.../aiv8` editable build and produced a
+337.499 us fused row. The provenance hook exposed that mismatch before the
+retention data was accepted. Sparse Attention was then rebuilt from the
+candidate source, its device ELF was verified identical to the baseline, and
+the four audit runs above were collected in fresh directories.
+
+The published V2 decode workflow checkpoint is `0.182157998 ms`, the lower of
+the two provenance-audited candidate workflows, following the existing lane
+convention.
+
 Controller-side raw artifacts, including all four clean profile trees and
 build, resource, and accuracy logs, are under:
 
 ```text
 /tmp/cannbench-lightning-topk-fused-results.EY6ail/
+/tmp/cannbench-lightning-topk-fused-results.EY6ail/provenance-rerun/
 ```
 
 The corresponding remote source, logs, and profile trees remain under:
@@ -259,7 +323,15 @@ The corresponding remote source, logs, and profile trees remain under:
 /root/cannbench-lightning-topk-perf/clean-pair1-candidate/
 /root/cannbench-lightning-topk-perf/clean-pair2-baseline/
 /root/cannbench-lightning-topk-perf/clean-pair2-candidate/
+/root/cannbench-lightning-topk-provenance-rerun-a26f7e8/
+/root/cannbench-lightning-topk-provenance-rerun-manifests-a26f7e8/
 ```
+
+The controller and candidate roots also retain
+`accuracy-v2-noncanonical-seed19.json` and
+`accuracy-v1-canonical-seed7.json`. Both record five repeats with exact TopK
+score-multiset agreement, unique in-range indices, and stable selected index
+sets; their resolved module paths point at the candidate V2 and V1 packages.
 
 ## Non-Goals
 
