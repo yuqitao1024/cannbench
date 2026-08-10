@@ -187,3 +187,34 @@ Run 1 快 0.142997 us，但 Run 2 慢 0.546997 us；两轮均值回退 0.202000 
 AIV 读完 PV UB 前覆写结果，AIC 侧 `PV free -> 两段 MMAD/Fixpipe -> PV ready` 则
 保证 AIV 只消费完整的 512 维结果。这两条仍是实际 buffer ownership 边界，不能在
 不改变协议或缺少额外时序证据时删除，因此不再构造无依赖证明的删同步候选。
+
+### 8.5 最终接受结果
+
+最终源码只保留逻辑 PV512 handoff，和候选提交 `bc8961a` 的 operator source/test
+逐字一致。回退 validity 后重新干净编译，seed 7、19 的完整 decode output/LSE
+mismatch 再次均为 0。
+
+最终两轮 CannBench framework BasicInfo 结果为：
+
+| 实现 | Run 1 | Run 2 | 两轮均值 |
+| --- | ---: | ---: | ---: |
+| main baseline | 98.033997 us | 97.447998 us | 97.740998 us |
+| 最终 PV512 | 90.723000 us | 91.130997 us | 90.926999 us |
+
+最终均值降低 6.813999 us，约 6.97%。两轮目标 fused kernel 均为
+`Block Dim=16`、`Mix Block Dim=32`、1650 MHz，framework failure count 均为 0。
+msopprof 仍只显式使用 `BasicInfo` 和 `launch-count=10`，其他参数保持框架默认。
+
+本机最终 artifacts 位于：
+
+```text
+/tmp/cannbench-dsa-v2-gap-final-r1
+/tmp/cannbench-dsa-v2-gap-final-r2
+```
+
+operator-local 目标测试为 `43 passed`，`git diff --check` 通过，公共 backend/core/CLI
+无修改。相对 `main@c7b23cf`，Basic API include、Set/Wait 和 CrossCore 调用数量均未
+增加。完整 SIMT 测试目录仍有一个基线已有失败：ABI 后缀测试要求所有 launch symbol
+以 `_v2` 结尾，而现有 rolling symbol 为
+`launch_sparse_attention_head64_fused_hd576_bf16_v2_rolling_restored`；该问题不由本次
+优化引入，也未在本分支顺带修改。
