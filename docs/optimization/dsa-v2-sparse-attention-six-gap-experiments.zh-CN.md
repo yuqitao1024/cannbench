@@ -25,7 +25,7 @@ causal=true, return_lse=true
 | PV/Vec2 粒度 | 已完成 | 保持两个 PV256 MMAD，一次 PV512 handoff/VF update |
 | Query movement | E3 已完成并保留 | AIC 直接 GM-to-L1 ND2NZ |
 | Vector 实现质量 | E2 已完成并进入 upstream | lane-local score/validity 寄存器复用 |
-| Cube 内部流水 | 部分完成 | E4：QK128 双 L0A/L0B staging |
+| Cube 内部流水 | E4 设备运行时失败，拒绝 | 保持 QK256 单 staging |
 | Sync/buffer 管理 | 部分完成 | E5：PV free 从 PIPE_V 直接发布 |
 
 E1 至 E5 按顺序执行。每个候选只从上一个已接受 checkpoint 开始；候选失败时，
@@ -182,6 +182,34 @@ L0C，后续段累加。
 
 该候选可能因 MMAD 次数从 3 增至 5 而回退，因此只在真实 profile 中接受，不依据
 理论 overlap 或资源可行性保留。
+
+### 6.1 实验结果：拒绝
+
+E4 使用两个独立 L0A/L0B slot 和两个 MTE1-to-M/M-to-MTE1 event，L0 总容量与
+QK256 单 staging 相同。operator-local 源码契约测试 `32 passed`，远端 clean build
+成功，但 canonical seed 7 在第一次 `torch.npu.synchronize()` 返回设备错误
+`507015`，尚未进入 output/LSE 比较，因此没有采集性能数据。
+
+运行日志只确认 kernel 触发异步设备异常，没有提供可归因到单条 event 的 trap 地址。
+同一加载路径上的 E3 binary 在此前 seed 7/19 均通过，所以将失败边界限定在 E4 新增
+的双 staging/event 协议；不在该候选上继续叠加同步修补。按“设备运行异常直接拒绝”
+门槛，撤销 E4 源码和契约测试，恢复 QK256 `256+256+64` 单 staging。
+
+E4 provenance：
+
+```text
+source SHA256:     80a9dfaff8843b4cebda400584b37916320ddb7fa68ed0b1fca64ab4ee18d7ff
+_C.so SHA256:      64406638e6fe50ccb0465a2633f42fbb0113eb04513912359a0a5a87ab41f820
+kernel ELF SHA256: 03cd175a37729bc0f49cdb25eac2c3eb49beac992096b65d872f654d58aa5b1e
+```
+
+证据路径：
+
+```text
+/tmp/cannbench-dsa-v2-gap-pWg42i/six-gap-e4-qk128-double-stage-build.log
+/root/ascend/log/run/plog/plog-595235_20260810221533579.log
+/root/ascend/log/run/device-0/device-595235_20260810221541079.log
+```
 
 ## 7. E5：PV-free 同步收敛
 
