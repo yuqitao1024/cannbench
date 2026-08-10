@@ -699,6 +699,37 @@ def test_v2_vllm_decode_delivers_qk_and_pv_directly_to_both_aiv_ubs():
     assert "head64_copy_l0c_to_l1_nz(" not in aic
 
 
+def test_v2_vllm_decode_handoffs_one_logical_pv512_tile():
+    source = _v2_fused_source()
+    aiv = _function_definition(
+        source, "sparse_attention_head64_fused_vllm_aiv("
+    )
+    aic = _function_definition(
+        source, "sparse_attention_head64_fused_vllm_aic("
+    )
+    update = _function_definition(
+        source, "head64_fused_vllm_output_update_vf("
+    )
+
+    assert "kHead64FusedVllmUbPvBytes =\n    32 * 512 * sizeof(float)" in source
+    assert "static_assert(kHead64FusedVllmUbBytes == 211584)" in source
+    assert "for (int32_t value_start = 0;" not in aiv
+    assert "old_scale + slot * 32,\n            512);" in aiv
+
+    pv_loop = aic.index("for (int32_t value_start = 0;")
+    pv_free = aic.index(
+        "AscendC::CrossCoreWaitFlag<2, PIPE_FIX>(kVllmAivToAicPvFree)"
+    )
+    pv_copy = aic.index("asc_copy_l0c2ub(", pv_loop)
+    pv_ready = aic.index(
+        "AscendC::CrossCoreSetFlag<2, PIPE_FIX>(kVllmAicToAivPvReady)"
+    )
+    assert pv_free < pv_loop < pv_copy < pv_ready
+    assert "ub_pv + value_start * 32" in aic
+    assert "dim < current_value" in update
+    assert "pv_chunk * 32 * kHead64FusedVllmValueTile" in update
+
+
 def test_v2_l0c_to_l1_uses_linkable_nz_fixpipe():
     source = _v2_fused_source()
     helper = _function_definition(source, "head64_copy_l0c_to_l1_nz(")
@@ -763,7 +794,7 @@ def test_v2_vllm_workspaces_are_top_level_with_dynamic_ub_base_zero():
     assert "workspace" in aic
     assert "kHead64FusedVllmUbKvGatherOffset" in source
     assert "kHead64FusedVllmUbKvGatherBytes" in source
-    assert "static_assert(kHead64FusedVllmUbBytes == 178816)" in source
+    assert "static_assert(kHead64FusedVllmUbBytes == 211584)" in source
     assert "kHead64FusedDynamicUbBytes" in launcher
     assert "static_assert(kHead64FusedDynamicUbBytes <= 216 * 1024)" in source
 
