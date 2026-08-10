@@ -150,3 +150,40 @@ Gather32 平均回退 1.205501 us，约 1.23%。说明减少一次 16-row UB-to-
 /tmp/cannbench-dsa-v2-gap-pv512-r1
 /tmp/cannbench-dsa-v2-gap-pv512-r2
 ```
+
+### 8.3 Slot-private Validity Metadata：拒绝
+
+候选提交 `609719c` 在 UB 末尾增加三个 slot-private 的 `128 x uint32` validity
+数组，动态 UB 从 211584 B 增至 213120 B。每个 tile 由 warp 0 读取一次 GM
+indices 并生成 validity，经过一次 `__syncthreads()` 后，32 个 head warp 的 max 和
+exp 两遍只读取 UB metadata。
+
+operator-local 目标测试 `43 passed`，远端干净编译通过。seed 7、19 都覆盖 negative、
+out-of-range、causal-future 和完整 16 tiles，output/LSE mismatch 均为 0。
+
+两轮 CannBench framework BasicInfo 结果如下，目标 kernel 均为 `Block Dim=16`、
+`Mix Block Dim=32`、1650 MHz：
+
+| 实现 | Run 1 | Run 2 | 两轮均值 |
+| --- | ---: | ---: | ---: |
+| 逻辑 PV512 handoff | 91.224998 us | 90.707001 us | 90.966000 us |
+| PV512 + validity metadata | 91.082001 us | 91.253998 us | 91.168000 us |
+
+Run 1 快 0.142997 us，但 Run 2 慢 0.546997 us；两轮均值回退 0.202000 us，
+约 0.22%。减少重复 GM indices 读取的收益不足以抵消 validity UB 访问和新增块内同步，
+且结果不满足“两轮均优于对照”的接受标准。候选已由 `f60d731` 撤销。
+
+本机原始 framework artifacts 位于：
+
+```text
+/tmp/cannbench-dsa-v2-gap-validity-r1
+/tmp/cannbench-dsa-v2-gap-validity-r2
+```
+
+### 8.4 同步收敛边界
+
+逻辑 PV512 已把两个 Value256 阶段的两次 PV ready/free 和两次 output update 自然
+收敛为一次。剩余 AIV `output update -> V/MTE3 event -> PV free` 保证 Cube 不会在
+AIV 读完 PV UB 前覆写结果，AIC 侧 `PV free -> 两段 MMAD/Fixpipe -> PV ready` 则
+保证 AIV 只消费完整的 512 维结果。这两条仍是实际 buffer ownership 边界，不能在
+不改变协议或缺少额外时序证据时删除，因此不再构造无依赖证明的删同步候选。
