@@ -1,5 +1,16 @@
 # Performance Optimization
 
+## Contents
+
+- [Optimize The Algorithm Before The Schedule](#optimize-the-algorithm-before-the-schedule)
+- [Split Workloads By Behavior](#split-workloads-by-behavior)
+- [Find The Dominant Resource](#find-the-dominant-resource)
+- [Choose Fusion Boundaries Deliberately](#choose-fusion-boundaries-deliberately)
+- [Tune Launch Geometry And Reductions](#tune-launch-geometry-and-reductions)
+- [Treat Layout As Part Of The Algorithm](#treat-layout-as-part-of-the-algorithm)
+- [Treat Source-Level Scheduling As A Hypothesis](#treat-source-level-scheduling-as-a-hypothesis)
+- [Preserve Comparison Fairness](#preserve-comparison-fairness)
+
 ## Optimize The Algorithm Before The Schedule
 
 Estimate work, bytes, temporary storage, and launch count per output. If the
@@ -77,6 +88,21 @@ Test an unfused twin to separate algorithmic benefit from compiler side effects.
 Measure both main-kernel time and total operator time. A faster kernel can lose
 overall if it adds packing, initialization, or merge launches.
 
+Batch VF work at the natural ownership boundary. Repeatedly entering a VF and
+performing cache publication for one row can dominate a mixed kernel even when
+the physical AIC/AIV launch geometry is unchanged. Count dynamic VF calls and
+DCCI or fence operations per physical worker, then compare per-row, multi-row,
+and per-tile publication as controlled variants. Keep the visibility operation
+at the first true cross-pipeline or cross-core consumer boundary; do not simply
+delete it to make the microbenchmark faster.
+
+For multi-stage launch fusion, compare both the sum of selected device rows and
+one interval that contains launch gaps. If a device-wide barrier is permitted
+by the operator's API boundary, every launched task must reach every barrier in
+the same order, including tasks masked out of reducer work. Publish producer GM
+writes with the platform-required cache/visibility sequence before the barrier.
+The repository's API rules override an attractive historical implementation.
+
 Do not equate legal resource occupancy with useful parallelism. In the recorded
 950PR experiments, removing a spill was latency-neutral, 2048-thread variants
 could pass register and Stack gates yet regress, and a 32-block by 512-thread
@@ -123,6 +149,11 @@ at a measured bottleneck. It can be neutral or slower when values are unpacked
 immediately for FP32 math, when the original access was already conflict-free,
 or when register lifetime and tail handling grow. Test each VF boundary
 independently before propagating a packed type through an operator.
+
+Prefer ownership-local reuse before shared metadata. A few lane-local values or
+validity bits can survive from one reduction pass to the next without a shared
+UB producer or block barrier. Shared caching is justified only when the avoided
+work exceeds its synchronization and memory traffic on the measured path.
 
 ## Preserve Comparison Fairness
 

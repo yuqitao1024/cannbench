@@ -1,5 +1,8 @@
 # Correctness And Debugging
 
+Use this reference to validate or recover an Ascend 950 performance candidate.
+Do not treat it as a generic functional-development workflow.
+
 ## Contents
 
 - [Establish A Trustworthy Oracle](#establish-a-trustworthy-oracle)
@@ -92,6 +95,12 @@ then rerun the minimal failing case before naming it the root cause.
 
 For intermittent errors, repeat the same input many times and vary only core
 count or scheduling pressure.
+
+For seed-specific pipeline failures, preserve one failing seed and one passing
+seed. Change one ordering edge without changing buffers, work, or flag count;
+repeat both in fresh processes. If moving an older wait before the next wait or
+reuse point fixes only the failing path, that is stronger evidence for a state
+ordering defect than broad synchronization or layout changes.
 
 ## Eliminate Stale-Code Explanations
 

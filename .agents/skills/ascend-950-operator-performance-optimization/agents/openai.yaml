@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ascend 950 Operator Performance Optimization"
+  short_description: "Profile and optimize Ascend 950 custom operators"
+  default_prompt: "Use $ascend-950-operator-performance-optimization to profile and optimize this Ascend 950 operator with reproducible device evidence."

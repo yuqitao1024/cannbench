@@ -1,11 +1,11 @@
-# Development Workflow
+# Ascend 950 Performance Optimization Workflow
 
 ## Contents
 
 - [Use An Evidence Ladder](#use-an-evidence-ladder)
 - [Record A Reproducible Baseline](#record-a-reproducible-baseline)
-- [Define The Contract First](#define-the-contract-first)
-- [Build The Smallest Real Path](#build-the-smallest-real-path)
+- [Define The Optimization Contract](#define-the-optimization-contract)
+- [Establish The Smallest Measured Path](#establish-the-smallest-measured-path)
 - [Expand Coverage By Behavior](#expand-coverage-by-behavior)
 - [Iterate One Hypothesis At A Time](#iterate-one-hypothesis-at-a-time)
 - [Escalate With Smaller Repros](#escalate-with-smaller-repros)
@@ -24,6 +24,10 @@ Prefer evidence in this order:
 Lower levels generate hypotheses. They do not override contradictory device
 evidence.
 
+Apply this workflow to Ascend 950 or 950PR performance work. For another device,
+do not transfer numerical gains or hardware/compiler conclusions without a new
+baseline and revalidation.
+
 ## Record A Reproducible Baseline
 
 Before editing, record:
@@ -40,9 +44,14 @@ Keep production code, temporary experiments, and deployed packages distinguishab
 Use a clean process after rebuilding a custom operator unless same-process
 reload behavior is itself under test.
 
-## Define The Contract First
+## Define The Optimization Contract
 
-Write down the complete output contract before choosing a kernel structure:
+Write down the performance and output contracts before choosing a candidate:
+
+- baseline implementation and exact measured boundary
+- target metric, retention threshold, warmup, repetitions, and variance rule
+- selected and excluded kernels, launch count, and workflow aggregation rule
+- representative, boundary, and stress shapes that must not regress
 
 - supported shape ranges and layouts
 - dtype of every input, output, workspace, and accumulator
@@ -54,18 +63,19 @@ Write down the complete output contract before choosing a kernel structure:
 Use a simple trusted implementation as the oracle. If the oracle performs
 extra casting, sorting, masking, or padding, make that behavior explicit.
 
-## Build The Smallest Real Path
+## Establish The Smallest Measured Path
 
-Bring up one representative case end to end:
+Start from one runnable representative case:
 
-1. Register the host entry and verify its schema.
-2. Validate dtype, rank, shape, layout, device, and workspace assumptions.
-3. Launch a minimal kernel through the intended production launch mechanism.
-4. Synchronize and compare against the oracle on the real device.
-5. Preserve a fallback while specialized paths are incomplete.
+1. Call the existing operator through the intended production path.
+2. Validate dtype, rank, shape, layout, device, workspace, and input parity.
+3. Synchronize and compare against the oracle on Ascend 950 or 950PR.
+4. Enumerate the physical launches and capture a repeatable baseline.
+5. Isolate the smallest kernel or stage that preserves the measured bottleneck.
 
-Start with independent work ownership and a correctness-first algorithm. Add
-mixed pipelines, fusion, multicore exchange, and persistent state separately.
+If the operator is not runnable yet and no benchmark boundary exists, finish
+functional bring-up outside this skill. Return here once a correct baseline can
+be measured.
 
 ## Expand Coverage By Behavior
 
@@ -84,7 +94,7 @@ maximum, odd, tail, and dispatch-threshold values.
 
 ## Iterate One Hypothesis At A Time
 
-For every performance or correctness change:
+For every performance candidate:
 
 1. State the expected mechanism and metric.
 2. Change one independent factor.
@@ -113,10 +123,11 @@ after verifying whether its removal changes the failure.
 
 Do not claim completion until:
 
-- all declared paths pass representative and boundary correctness cases
-- real-device runtime was exercised for device-dependent work
+- the target is identified as Ascend 950 or 950PR with the complete stack
+- all benchmarked paths pass representative and boundary correctness cases
+- real-device performance was measured on the target 950 variant
 - performance uses a defined and fair boundary with raw artifacts retained
 - the baseline was rerun under the same stack
-- unsupported shapes, dtypes, phases, and devices are stated
+- unsupported shapes, dtypes, phases, and 950 variants are stated
 - temporary flags, packages, workspaces, and debug paths are not mistaken for
-  the final implementation
+  the retained performance candidate

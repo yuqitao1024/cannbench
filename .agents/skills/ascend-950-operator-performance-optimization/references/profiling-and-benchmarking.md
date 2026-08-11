@@ -24,6 +24,12 @@ Before collecting data, state whether the result measures:
 Use the same semantic boundary for every implementation. If a stage is excluded,
 name it and explain why it is outside the contract.
 
+The sum of profiler `Task Duration` rows is a device-work boundary, not proof of
+end-to-end launch cost. It commonly excludes host dispatch and gaps between
+serial launches. For launch-count changes, retain that row sum for attribution
+and also collect one NPU event or synchronized wall interval around the whole
+sequence under identical inputs and synchronization.
+
 ## Audit Every Kernel First
 
 List all raw profiler rows before applying name filters. Classify each launch as:
@@ -38,6 +44,14 @@ List all raw profiler rows before applying name filters. Classify each launch as
 Unexpected `Fill`, `ZerosLike`, cast, or copy kernels are clues about materialization,
 not automatically bugs. Determine who launched them and whether the comparison
 boundary includes them.
+
+For workflow profiling, verify whether components execute in one process or as
+independent component runs. A downstream input binding may re-execute its
+producer to obtain a live device tensor. In that case the producer can appear
+twice physically while name filters count it once, and the published workflow
+may be a synthetic sum rather than one end-to-end invocation. Record both the
+physical launch sequence and the aggregation rule. Prefer one-process execution
+when the real contract passes a device tensor between components.
 
 ## Aggregate Multi-Stage Implementations Correctly
 
@@ -119,6 +133,11 @@ the framework prepends an operator-local directory or an earlier import has
 already populated the module cache. Re-run in a fresh process after replacing
 an extension.
 
+Capture mapped device-library paths and, when the profiler dumps one, the device
+object hash inside the same process. Use unique run names and output roots. A
+successful preinstall, source hash, or host `.so` hash does not disprove a stale
+editable module or cached device program.
+
 ## Interpret Profiles Conservatively
 
 A profile can show where time is spent and which kernels execute. It may not
@@ -129,3 +148,10 @@ the next discriminating collection.
 
 Retain raw CSV/timeline output, selected-kernel rules, aggregation script or
 formula, environment manifest, and the exact source/package revision.
+
+Instruction timeline spans can overlap across lanes and pipes, and large
+kernels may lose dynamic instrumentation after a tool-specific sub-block limit.
+Do not sum instruction `dur` fields into wall time or infer an instruction's
+removable cost from a utilization percentage. Use source to establish dynamic
+call structure, timeline union/overlap for attribution, and a controlled
+BasicInfo or event A/B for retention.

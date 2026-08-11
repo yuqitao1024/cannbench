@@ -1,14 +1,34 @@
 # Observed Performance Patterns
 
+## Contents
+
+- [Purpose And Evidence Boundary](#purpose-and-evidence-boundary)
+- [Algorithm And Work Mapping](#algorithm-and-work-mapping)
+- [Tiling, Lifetime, And Fusion](#tiling-lifetime-and-fusion)
+- [Producer Consumer Pipelines](#producer-consumer-pipelines)
+- [Layout And UB Conflict Handling](#layout-and-ub-conflict-handling)
+- [Packed Types And Vector Width](#packed-types-and-vector-width)
+- [Row Reduction Shape Specialization](#row-reduction-shape-specialization)
+- [Resource And Launch Geometry](#resource-and-launch-geometry)
+- [Measurement And Attribution Failures](#measurement-and-attribution-failures)
+- [How To Apply These Results](#how-to-apply-these-results)
+
 ## Purpose And Evidence Boundary
 
 Use this reference to form priors, avoid repeating disproven experiments, and
 set realistic retention gates. It is not a performance guarantee.
 
-The primary evidence is the complete workspace Codex session corpus through
-2026-08-05: 43 logical sessions reconstructed from 154 relevant rollout files.
-Repository notes, source, commits, raw benchmark records, and profiler artifacts
-were used only to clarify or cross-check session claims.
+Treat these results as Ascend 950-family evidence, primarily Ascend 950PR. Do
+not transfer an exact gain, hardware limit, synchronization property, or
+compiler behavior to another Ascend generation; remeasure even when the source
+transformation looks identical.
+
+The initial synthesis covered the complete workspace Codex session corpus
+through 2026-08-05: 43 logical sessions reconstructed from 154 relevant rollout
+files. An incremental exact-working-directory scan through 2026-08-10 raised
+the corpus to 163 rollout files across `cannbench` and `cannbench-2`. Repository
+notes, source, commits, raw benchmark records, and profiler artifacts were used
+only to clarify or cross-check session claims.
 
 Most multi-stage, latency-oriented measurements used Ascend 950PR
 (`dav-3510`), CANN 9.2.0, production `-O3`, 1,650 MHz, BF16, and this
@@ -37,9 +57,12 @@ different baselines as if they were one cumulative experiment.
 | Change only VF threads from 1024 to 32/64/128/256 while retaining a serial 64-channel loop | Best producer gain `1.8%`; best workflow gain `0.8%` | Removing inactive threads is not equivalent to parallelizing the dominant loop. |
 | Replace atomic and repeated threshold-compaction scans with one packed-count scan | Selection chain `37.8%-37.9%`; component `22.9%-23.1%`; workflow `10.0%-10.1%` | Once a threshold is known, scan each candidate once and derive deterministic offsets. |
 | Partition a length-32768 context into 16 shards and reduce shard-local histograms | Complete selection chain about `82.031 -> 56.759-57.279 us` (`30.2%-30.8%`); workflow `7.85%-7.98%` | Distributed histograms help when context ownership already exists and one-block selection is serial. |
+| Fuse five distributed Top-K stage launches into one 64-task kernel with four producer-visibility plus device-wide barrier boundaries | Top-K `35.704-36.238 -> 28.421-28.640 us` (`19.9%-21.0%`); complete Indexer `7.6%-8.5%`; selected workflow `3.6%-4.3%` | Launch-bound stage fusion paid after preserving GM visibility and making all 64 tasks reach every barrier, including the 60 masked reducer tasks. This used a task-local API exception and is not blanket permission to cross the repository API boundary. |
 | Parallelize a low-byte reducer's serial shard tails and offset construction | Reducer `28.904 -> 14.423-14.444 us`; workflow `5.56%-5.62%` | Activate idle threads in the measured dominant tail, not merely in an already-small prefix. |
 | Group a 256-bin threshold scan | Dominant low scan `14.945 -> 7.494-7.600 us`, workflow `1.95%-2.45%`; smaller high scan improved locally `16.7%-20.2%` but workflow only `0.117%-0.538%` | The same local transformation can be retained or rejected solely because its absolute workflow share differs. |
 | Pair two query rows but shrink score tiles, increasing selection merge rounds | `11226.192 -> 12472.903 ms`, `11.11%` slower | Reuse is a loss when it increases an expensive downstream boundary more than it saves upstream. |
+| Share one selected-128 KV gather across two Head64 groups using four AIV producers | Published selected workflow `208.847 -> 191.162 us` (`8.47%`) | Reuse irregular source traffic across consumers that share the same KV before tuning the per-lane gather instruction shape. |
+| Replace a copied gather with per-row QK and V VF calls plus per-row DCCI for 8,192 selected rows | Sparse main kernel `54.483 -> 882.803-883.764 us` (`16.21x`); selected workflow regressed `40.62%` | A VF is not a free function call. Batch rows inside a VF and publish visibility at the tile or phase boundary instead of paying entry, address-generation, and cache-maintenance cost per row. |
 
 ## Tiling, Lifetime, And Fusion
 
@@ -55,6 +78,10 @@ different baselines as if they were one cumulative experiment.
 | Use an outer tile of 256 with two streamed 128-row compute subtiles | Workflow `279.771 -> 270.696/271.191 us` (`3.07%-3.24%`) | Streaming subtiles can reduce outer transitions without making the full operand resident. |
 | Increase the outer tile to 512 but replay a packed persistent operand three times | Workflow improved only `0.244%-0.674%` | Replayed persistent state can consume most of a larger tile's theoretical gain. |
 | Reuse an earlier packed latent operand in a later phase but double outer-loop overhead | One workflow pair improved `0.075%`; another regressed `0.641%` | Removing logical GM reads does not prove less physical traffic; cache and phase overhead can erase the saving. |
+| Keep row-major Value data through UB/L1 and transpose during the L1-to-L0B copy | Published selected workflow `219.827 -> 208.847 us` (`5.00%`) | Prefer a supported downstream copy-format conversion when it removes a repeated explicit UB transpose and its intermediate layout. |
+| Combine two Value-256 Cube results into one logical PV-512 handoff and one output-update VF | Sparse fused kernel improved about `6.97%`; selected workflow checkpoint improved about `3.61%` | Merge producer handoffs when the two results have one consumer and a common lifetime; the gain came from one fewer ready/free exchange and VF boundary, not less MMAD work. |
+| Cache each lane's four scaled softmax values and validity bits across max and exp passes | Sparse fused kernel `10.66%`; selected workflow checkpoint `5.46%` | Lane-local reuse can beat shared UB metadata because it removes repeated loads without adding a block barrier or shared-memory traffic. |
+| Move canonical Query packing from an AIV VF to direct AIC GM-to-L1 ND2NZ | Sparse fused kernel `5.37%-5.45%`; selected workflow `2.22%-2.42%` | Deliver data directly in the consumer layout when the source stride is supported and the change removes a VF, UB-to-L1 copy, and CrossCore handoff together. |
 | Fuse an FP16 row pipeline for `32768 < width <= 51200` | Scalar fused form regressed about `32%`; after packed normalize/write, three shapes improved `21.21%-25.15%` and aggregate improved `23.12%` | Fusion pays only when the fused inner schedule is also efficient. Always retain an unfused control. |
 
 ## Producer Consumer Pipelines
@@ -63,11 +90,13 @@ different baselines as if they were one cumulative experiment.
 | --- | --- | --- |
 | Two-slot BF16 producer/consumer overlap across 64 repeated tiles | Producer `148.363 -> 82.889 us` (`44.1%`); component `23.7%`; workflow `12.2%` | Double buffering paid because producer and postprocess had exposed, repeated overlap. |
 | Initial two-slot implementation reused the same flag IDs for ready and free directions | Device hang; a separate invalid conversion parameter later produced a runtime error, not a timeout | Use distinct directional state and classify synchronization versus instruction-parameter failures separately. |
+| Replace an explicit V-to-MTE3 ordering edge with direct PIPE_V publication of PV-free | Kernel completed, but output mismatched `247866/262144` and LSE `512/512` | A cross-core flag is not automatically a substitute for a local pipeline ordering edge. Remove an event only after proving producer completion and visibility to the flag's pipeline. |
 | In-place MTE2/compute/MTE3 pipeline for FP16 rowwise `8192 <= width <= 32768` | Three representative shapes improved only `2.59%-3.12%` | A valid pipeline can have small benefit when compute, not transfer, is dominant. |
 | Merge max/sum into one UB stats kernel for FP16 `32768 < width <= 51200`, limiting physical grid to 64 | Three shapes improved `25.30%-37.67%` | Reducing scans and launches paid only after each physical block owned enough rows for slot reuse. |
 | Tiled online `(max,sum)` for FP16 rows wider than 51200 | Representative and stress shapes improved `17.16%-21.84%` | Online stable statistics work when a full row cannot reside in UB. |
 | Tiled MTE2/compute/MTE3 final write for FP16 rows wider than 32768 | Two representative full components improved about `27.3%` and `40.5%`; changed write stage `44%-56%` | Convert direct-GM bulk traffic only after profiling proves it is a dominant stage. |
 | UB pipeline for a nine-element row with about six small tiles per core | Median regressed `22.8%` | Event, copy, and VF fixed costs can exceed direct-GM traffic for very short rows. |
+| Recreate a three-slot P=1 rolling schedule while retaining duplicate irregular gathers | Fused candidate mean `230.933 us` versus P=4 complete Sparse Attention `105.744 us` (`2.18x` slower), despite removing Combine and partial output | Scheduling resemblance is insufficient when the reference path's decisive data-reuse and copy primitives are missing; fix the traffic pattern before copying its pipeline depth. |
 
 ## Layout And UB Conflict Handling
 
@@ -103,6 +132,9 @@ different baselines as if they were one cumulative experiment.
 | Use a fixed-grid specialization for one exact `49152 x 9` shape | Reached about `4.7-5.3 us` but was reverted | A fast exact-shape experiment is not a general dispatch policy. |
 | Cache FP16 or FP32 exponentials in UB for 30K-32K rows | FP16 about `28%` slower; FP32 about `22%-23%` slower | Saving exponentiation did not compensate for extra UB traffic and lost overlap. Fit is feasibility, not performance. |
 | Release optional UB reservations and generalize a two-kernel tiled path | Synthetic FP32 `(1024,49152)` improved `0.853744 -> 0.436659 ms` (`1.95x`); two measured FP16 cases were effectively neutral | The same memory schedule can be dtype-sensitive. Do not infer FP16 from FP32 or vice versa. |
+| Expand gather staging from 16 to 32 rows to remove one UB-to-GM copy and MTE event | Sparse fused mean regressed `1.23%` | Fewer transfers can lose when a larger staging lifetime or copy shape costs more; test transfer granularity rather than maximizing it. |
+| Cache tile validity in shared UB with a producer warp and block barrier | One pair improved `0.143 us`, the other regressed `0.547 us`; mean regressed `0.22%` | Shared metadata is a loss when repeated reads are already small and the barrier/shared traffic exceed them. Prefer ownership-local reuse first. |
+| Split QK-576 into five QK-128 segments with two L0A/L0B staging slots | Build and source tests passed, but the first device synchronization returned `507015` | More overlap can fail because extra MMAD and event edges enlarge the protocol. Reject a runtime-failing pipeline before layering synchronization fixes on it. |
 
 ## Resource And Launch Geometry
 
@@ -114,6 +146,8 @@ different baselines as if they were one cumulative experiment.
 | Estimate a 2048-thread change from the measured critical-path share before coding | Ideal saving was at most `4.62%` of the fused boundary before overhead | Reject candidates whose physical upper bound cannot clear the retention gate. |
 | Move 16 tasks/256 threads to 32 tasks/1024 threads in a many-row path | Selected kernel `11.219 -> 3.125 s` (`3.59x`), but synchronized public boundary `11.226 -> 16.672 s` (`48.5%` slower) | Preserve conflicting measurement boundaries; a kernel win is not an end-to-end win. |
 | Compiler loop versus manual expansion | Loop faster about `20.4%` in direct SIMT and `34.2%` in mixed execution; other paired samples showed manual expansion slower `14.2%-25.3%` | Source-level expansion can worsen Stack, registers, or scheduling. Inspect emitted resources and device time. |
+| Remove an L1 score handoff and deliver L0C results closer to the consumer | Fused kernel improved only `0.81%-0.87%`; workflow regressed `0.33%` in one pair and improved `0.50%` in the other | Eliminating one logical copy is not enough when the absolute edge is small and neighboring stages move by similar amounts. |
+| Combine larger 128-context Indexer packets with two-slot L1 prefetch | Score regressed `3.40%-4.33%`; workflow regressed `0.92%-1.55%` | Larger copies plus a more complex ownership protocol can cost more than the reduced copy count. Do not retry the combined mapping without evidence that one factor changed. |
 
 ## Measurement And Attribution Failures
 
@@ -124,6 +158,9 @@ different baselines as if they were one cumulative experiment.
 | Reuse a run name and leave old profiler directories discoverable | Parser produced an invalid aggregate almost exactly twice the valid workflow | Use unique run names or clean profile trees; discard contaminated aggregates. |
 | Change metric groups between latency comparisons | Detailed profiles may preserve attribution but perturb timing | Use a low-overhead timing run for retention and separate detailed runs for explanation. |
 | Compare a component microbenchmark with a workflow-bound invocation using different materialized inputs | Absolute latency differed even though the kernel family looked similar | Normalize inputs, setup, and selected-kernel boundary before comparing. |
+| Sum five selected kernel rows and call the result end-to-end launch cost | Host launch gaps and framework dispatch were omitted; the apparent distributed-Top-K margin was only a few microseconds under a plausible per-launch cost | Use selected-kernel sums for device-work attribution and a device event or synchronized wall interval for launch-reduction claims. Keep both boundaries. |
+| Profile workflow components in separate processes while a downstream input binding re-executes its producer | The producer physically ran again inside the downstream raw profile, while name filtering excluded it and the published workflow synthetically added standalone component summaries | Audit physical launch sequence separately from aggregation. Prefer a one-process workflow runner that passes the exact device tensor and attributes both components from one execution. |
+| Reuse a stale editable operator build during an otherwise clean profile pair | Candidate Sparse Attention appeared as `337.499 us`; an in-process module/device-ELF provenance hook exposed the wrong build and the run was discarded | Capture imported module, mapped device library, and hashes inside the benchmark process; a source root or preinstall log alone does not prove provenance. |
 
 ## How To Apply These Results
 

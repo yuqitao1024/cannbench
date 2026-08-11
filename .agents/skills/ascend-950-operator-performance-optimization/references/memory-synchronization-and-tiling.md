@@ -161,6 +161,28 @@ whether the terminal release has a consumer. Reusing the same flag IDs for both
 directions caused a recorded device hang. Validate one tile, two tiles, first
 slot reuse, full tile count, and multi-query behavior in that order.
 
+When one pipeline uses multiple flag IDs, write the publication and consumption
+partial order explicitly. Do not assume that waiting for a later-published flag
+also consumes or makes visible an older pending flag. Unless the tested API
+guarantees out-of-order pairing, preserve publication order at the consumer:
+
+```text
+producer: set old-buffer-free < set next-tile-ready
+consumer: wait old-buffer-free < wait next-tile-ready < destructive reuse
+```
+
+Use the next wait or first destructive reuse as the source-test anchor. A test
+that only places the older wait before a distant copy can miss an illegal
+cross-ID pending interval. The minimal discriminator is to move only that wait,
+keeping flag count, buffer layout, work, and overlap otherwise unchanged, then
+repeat the failing seed in fresh processes with a known-passing seed as control.
+
+For a device-wide phase barrier, separate control convergence from memory
+visibility. All physical tasks must reach the barrier even when only a subset
+executes the stage. Complete per-task stores and perform the required cache
+publication before the barrier; a barrier alone must not be assumed to flush
+GM. Treat such a pattern as platform- and API-boundary-specific.
+
 Double buffering is useful only when the launch gives each physical worker
 multiple items and there is exposed copy/compute overlap. A two-slot source
 array with one logical row per physical block is not a pipeline. Conversely,

@@ -1,5 +1,8 @@
 # Failure Signatures
 
+Use these signatures only inside an Ascend 950 benchmark or tuning campaign,
+where the failure blocks measurement or invalidates a candidate.
+
 ## Contents
 
 - [Compile Rejects A Type, Intrinsic, Or Annotation](#compile-rejects-a-type-intrinsic-or-annotation)
@@ -85,6 +88,11 @@ unexpected loop.
 Check whether all paths reach synchronization in the same order. Run one core,
 bound loops, add debug progress markers, and remove cross-core dependencies.
 
+If multiple flag IDs share a pipeline, compare producer set order with consumer
+wait order. A later wait must not overtake an older pending free/ready state
+unless the installed API explicitly guarantees that ordering. Anchor the check
+at the next wait and first buffer reuse, not at a later output copy.
+
 ## Output Is All Zero Or Contains Untouched Sentinels
 
 Likely classes: only an initialization kernel ran, stale module, early return,
@@ -144,6 +152,9 @@ compile flags.
 
 Confirm the operator runs without profiling, collect the lowest-overhead metric
 set, inspect tool logs, and test the profiler against a minimal known kernel.
+Compare application replay with kernel replay only as a version-specific
+diagnostic, and test one- versus multiple-entry binaries before attributing a
+registration failure to the operator's second VF or mixed launch form.
 
 ## Unrolling Or Manual Instruction Ordering Is Slower
 

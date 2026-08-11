@@ -1,5 +1,20 @@
 # Compiler And Runtime Pitfalls
 
+Use this reference only when a compiler, loader, launch, or runtime issue blocks
+or contaminates an Ascend 950 performance experiment. It is not a general
+operator bring-up guide.
+
+## Contents
+
+- [Locate The Failing Boundary](#locate-the-failing-boundary)
+- [Verify Compile Mode And Launch Form](#verify-compile-mode-and-launch-form)
+- [Check Host/Kernel ABI Mechanically](#check-hostkernel-abi-mechanically)
+- [Watch Translation-Unit Resource Effects](#watch-translation-unit-resource-effects)
+- [Isolate Dtype-Specific Loader Failures](#isolate-dtype-specific-loader-failures)
+- [Prove Which Artifact Is Loaded](#prove-which-artifact-is-loaded)
+- [Construct A Minimal Repro Ladder](#construct-a-minimal-repro-ladder)
+- [Handle Version Drift](#handle-version-drift)
+
 ## Locate The Failing Boundary
 
 Separate the path into:
@@ -24,6 +39,13 @@ different entry annotations and flags.
 Do not change optimization flags as a profiling convenience. If a flag change
 is required to collect data, treat it as a different build and re-establish the
 baseline.
+
+In mixed AIC/AIV launches, distinguish logical AIC tasks, physical subblocks,
+and host grid units. On tested `MIX_AIC_1_2` code, AIV block indices include the
+subblock dimension, the logical AIC id is derived using the task ratio, and the
+host grid must cover both AIV subblocks. A grid sized only to logical AIC count
+can execute half the Vector work while looking superficially plausible. Verify
+actual AIC/AIV work rows, not only `Block Dim` metadata.
 
 ## Check Host/Kernel ABI Mechanically
 
@@ -71,6 +93,8 @@ version-specific limitation if the minimal BF16 form fails while FP16 passes.
 - Print or expose a build identifier in a diagnostic path.
 - Use a fresh process after replacing a custom operator.
 - Check environment ordering for older wheels, build trees, and copied packages.
+- When device-program caching is plausible, use a unique kernel and launcher
+  symbol for the discriminator in addition to checking host-library hashes.
 
 Rebuilding successfully does not prove the remote process loaded that build.
 
@@ -87,6 +111,14 @@ Reduce the failing system without changing the failure boundary:
 Keep passing and failing variants together with exact build/run commands,
 expected return codes, device-log excerpts, and version information. Avoid
 including credentials or machine-specific endpoints.
+
+When direct execution passes but profiling fails, reproduce with the smallest
+one-entry and multi-entry device binaries before blaming the operator. Recorded
+profiler combinations produced `RegisterFuncSymbol`, `507046`, empty data, or
+`Kernel binary register failure` under replay while compatible versions
+profiled the same one- and two-VF controls. Application replay can be a useful
+version-bound workaround, but baseline and candidate must use the same replay
+mode and the unprofiled direct run must still validate.
 
 ## Handle Version Drift
 
