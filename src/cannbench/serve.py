@@ -12,6 +12,9 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
+from cannbench.operators import get_operator_plugin, list_operator_plugins
+from cannbench.operators.shape_trace import shape_trace_to_payload
+
 
 SENSITIVE_FIELDS = {
     "hostname",
@@ -98,6 +101,23 @@ class ServeConfig:
     host: str = "127.0.0.1"
     port: int = 8000
     enable_gpu_upload: bool = False
+
+
+def list_shape_trace_payloads() -> list[dict[str, Any]]:
+    keys = []
+    for plugin in list_operator_plugins():
+        if plugin.list_shape_trace_cases is not None:
+            keys.extend(plugin.list_shape_trace_cases())
+    return [shape_trace_to_payload(key) for key in keys]
+
+
+def build_shape_trace_payload(
+    operator: str, dataset: str, case_id: str
+) -> dict[str, Any]:
+    plugin = get_operator_plugin(operator)
+    if plugin.build_shape_trace is None:
+        raise LookupError(f"shape trace is not available for operator: {operator}")
+    return shape_trace_to_payload(plugin.build_shape_trace(dataset, case_id))
 
 
 def _operators_builtin_root() -> Path:
@@ -414,17 +434,63 @@ class CannBenchRequestHandler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/config":
             self._handle_config()
             return
+        if parsed.path == "/api/shape-traces":
+            self._write_json(
+                HTTPStatus.OK, {"traces": list_shape_trace_payloads()}
+            )
+            return
+        if parsed.path == "/api/shape-trace":
+            self._handle_shape_trace(parsed.query)
+            return
         if parsed.path == "/api/simt-versions":
             self._handle_simt_versions(parsed.query)
             return
         if parsed.path == "/api/simt-diff":
             self._handle_simt_diff(parsed.query)
             return
-        if parsed.path == "/":
+        if parsed.path in {"/", "/shape-explorer"}:
             self.path = "/index.html"
         else:
             self.path = parsed.path
         super().do_GET()
+
+    def _write_json(self, status: HTTPStatus, payload: Any) -> None:
+        response = json.dumps(payload).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(response)))
+        self.end_headers()
+        self.wfile.write(response)
+
+    def _handle_shape_trace(self, query: str) -> None:
+        params = parse_qs(query, keep_blank_values=False)
+        operator = params.get("operator", [None])[0]
+        dataset = params.get("dataset", [None])[0]
+        case_id = params.get("case", [None])[0]
+        if not operator or not dataset or not case_id:
+            self.send_error(
+                HTTPStatus.BAD_REQUEST,
+                "operator, dataset, and case are required",
+            )
+            return
+
+        try:
+            safe_operator = _validate_component(operator, "operator")
+            safe_dataset = _validate_component(dataset, "dataset")
+            safe_case_id = _validate_component(case_id, "case")
+        except ValueError as exc:
+            self.send_error(HTTPStatus.BAD_REQUEST, str(exc))
+            return
+
+        try:
+            payload = build_shape_trace_payload(
+                safe_operator, safe_dataset, safe_case_id
+            )
+        except (LookupError, ValueError) as exc:
+            self.send_error(HTTPStatus.NOT_FOUND, str(exc))
+            return
+
+        self._write_json(HTTPStatus.OK, payload)
 
     def _handle_config(self) -> None:
         response = json.dumps({"gpu_upload_enabled": self._enable_gpu_upload}).encode()

@@ -1,9 +1,15 @@
+from http import HTTPStatus
+from io import BytesIO
 from pathlib import Path
 
 import cannbench.serve as serve
+import pytest
+from cannbench.operators.shape_trace import ShapeTraceKey
 from cannbench.serve import (
+    build_shape_trace_payload,
     build_simt_operator_diff,
     CannBenchRequestHandler,
+    list_shape_trace_payloads,
     list_simt_operator_versions,
     validate_gpu_benchmark_upload,
 )
@@ -42,6 +48,174 @@ def _valid_gpu_upload():
             }
         ]
     }
+
+
+def test_shape_trace_index_uses_plugin_hooks(monkeypatch):
+    key = ShapeTraceKey("example", "realistic", "case", "decode", "group")
+    plugin = type(
+        "Plugin", (), {"list_shape_trace_cases": staticmethod(lambda: (key,))}
+    )()
+    monkeypatch.setattr(serve, "list_operator_plugins", lambda: (plugin,))
+
+    assert list_shape_trace_payloads() == [
+        {
+            "operator": "example",
+            "dataset": "realistic",
+            "case_id": "case",
+            "phase": "decode",
+            "group": "group",
+        }
+    ]
+
+
+def test_shape_trace_payload_rejects_plugin_without_hook(monkeypatch):
+    plugin = type("Plugin", (), {"build_shape_trace": None})()
+    monkeypatch.setattr(serve, "get_operator_plugin", lambda name: plugin)
+
+    with pytest.raises(LookupError, match="shape trace is not available"):
+        build_shape_trace_payload("example", "realistic", "case")
+
+
+def test_shape_trace_payload_calls_generic_plugin_hook(monkeypatch):
+    trace = object()
+    plugin = type(
+        "Plugin",
+        (),
+        {"build_shape_trace": staticmethod(lambda dataset, case: trace)},
+    )()
+    monkeypatch.setattr(serve, "get_operator_plugin", lambda name: plugin)
+    monkeypatch.setattr(
+        serve, "shape_trace_to_payload", lambda value: {"case_id": "case"}
+    )
+
+    assert build_shape_trace_payload("example", "realistic", "case")["case_id"] == "case"
+
+
+class _FakeGetHandler(CannBenchRequestHandler):
+    def __init__(self, path: str, tmp_path: Path) -> None:
+        self.path = path
+        self.headers = {}
+        self.wfile = BytesIO()
+        self._frontend_dir = tmp_path
+        self._published_dir = tmp_path
+        self._enable_gpu_upload = False
+        self.status = None
+        self.error_message = None
+        self.sent_headers: list[tuple[str, str]] = []
+
+    def send_response(self, status, message=None):
+        self.status = status
+
+    def send_header(self, key, value):
+        self.sent_headers.append((key, value))
+
+    def end_headers(self):
+        return None
+
+    def send_error(self, code, message=None, explain=None):
+        self.status = code
+        self.error_message = message
+
+    def send_head(self):
+        self.status = HTTPStatus.NOT_FOUND
+        return None
+
+
+def _get(path: str, tmp_path: Path) -> _FakeGetHandler:
+    handler = _FakeGetHandler(path, tmp_path)
+    handler.do_GET()
+    return handler
+
+
+def test_request_handler_returns_shape_trace_index(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(
+        serve,
+        "list_shape_trace_payloads",
+        lambda: [{"operator": "example", "case_id": "case"}],
+    )
+
+    handler = _get("/api/shape-traces", tmp_path)
+
+    assert handler.status == HTTPStatus.OK
+    assert b'"traces": [{"operator": "example", "case_id": "case"}]' in (
+        handler.wfile.getvalue()
+    )
+
+
+def test_request_handler_returns_shape_trace_detail(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(
+        serve,
+        "build_shape_trace_payload",
+        lambda operator, dataset, case_id: {
+            "operator": operator,
+            "dataset": dataset,
+            "case_id": case_id,
+        },
+    )
+
+    handler = _get(
+        "/api/shape-trace?operator=example&dataset=realistic&case=case", tmp_path
+    )
+
+    assert handler.status == HTTPStatus.OK
+    assert b'"operator": "example"' in handler.wfile.getvalue()
+
+
+def test_request_handler_rejects_missing_shape_trace_parameters(tmp_path: Path):
+    handler = _get("/api/shape-trace?operator=example", tmp_path)
+
+    assert handler.status == HTTPStatus.BAD_REQUEST
+
+
+@pytest.mark.parametrize("field", ["operator", "dataset", "case"])
+def test_request_handler_rejects_invalid_shape_trace_components(
+    field: str, tmp_path: Path
+):
+    params = {"operator": "example", "dataset": "realistic", "case": "case"}
+    params[field] = "../unsafe"
+    query = "&".join(f"{key}={value}" for key, value in params.items())
+
+    handler = _get(f"/api/shape-trace?{query}", tmp_path)
+
+    assert handler.status == HTTPStatus.BAD_REQUEST
+
+
+def test_request_handler_returns_not_found_for_unknown_shape_trace(
+    tmp_path: Path, monkeypatch
+):
+    def _raise_unknown(operator, dataset, case_id):
+        raise ValueError(f"Unsupported operator: {operator}")
+
+    monkeypatch.setattr(serve, "build_shape_trace_payload", _raise_unknown)
+
+    handler = _get(
+        "/api/shape-trace?operator=unknown&dataset=x&case=y", tmp_path
+    )
+
+    assert handler.status == HTTPStatus.NOT_FOUND
+    assert handler.error_message == "Unsupported operator: unknown"
+
+
+def test_request_handler_returns_not_found_for_unavailable_shape_trace(
+    tmp_path: Path, monkeypatch
+):
+    def _raise_unavailable(operator, dataset, case_id):
+        raise LookupError(f"shape trace is not available for operator: {operator}")
+
+    monkeypatch.setattr(serve, "build_shape_trace_payload", _raise_unavailable)
+
+    handler = _get(
+        "/api/shape-trace?operator=example&dataset=x&case=y", tmp_path
+    )
+
+    assert handler.status == HTTPStatus.NOT_FOUND
+    assert handler.error_message == "shape trace is not available for operator: example"
+
+
+def test_request_handler_rewrites_shape_explorer_to_spa(tmp_path: Path):
+    handler = _get("/shape-explorer", tmp_path)
+
+    assert handler.path == "/index.html"
 
 
 def test_validate_gpu_benchmark_upload_accepts_minimal_gpu_record():
