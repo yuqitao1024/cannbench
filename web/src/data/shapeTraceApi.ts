@@ -10,6 +10,16 @@ function stringArray(value: unknown): string[] | null {
     : null;
 }
 
+function validateUniqueReferences(fieldName: string, ids: string[]): void {
+  const seen = new Set<string>();
+  for (const id of ids) {
+    if (seen.has(id)) {
+      throw new Error(`${fieldName} contains duplicate tensor id: ${id}`);
+    }
+    seen.add(id);
+  }
+}
+
 function validateStageTensorReferences(stage: unknown): void {
   if (!isObject(stage) || !Array.isArray(stage.tensors)) {
     throw new Error("invalid shape trace stage payload");
@@ -31,6 +41,8 @@ function validateStageTensorReferences(stage: unknown): void {
   if (inputIds === null || outputIds === null) {
     throw new Error("invalid shape trace tensor references");
   }
+  validateUniqueReferences("input_ids", inputIds);
+  validateUniqueReferences("output_ids", outputIds);
   const missing = [...inputIds, ...outputIds].find((id) => !seen.has(id));
   if (missing !== undefined) {
     throw new Error(`unknown tensor id: ${missing}`);

@@ -95,6 +95,32 @@ def test_shape_stage_rejects_duplicate_tensor_ids():
         replace(trace.stages[0], tensors=(*trace.stages[0].tensors, duplicate_q))
 
 
+@pytest.mark.parametrize(
+    ("field_name", "references", "duplicate_id"),
+    (
+        ("input_ids", ("q", "q"), "q"),
+        ("output_ids", ("scores", "scores"), "scores"),
+    ),
+)
+def test_shape_stage_rejects_duplicate_tensor_references(
+    field_name: str,
+    references: tuple[str, ...],
+    duplicate_id: str,
+):
+    stage = _valid_trace().stages[0]
+    with pytest.raises(
+        ValueError,
+        match=rf"{field_name} contains duplicate tensor id: {duplicate_id}",
+    ):
+        replace(stage, **{field_name: references})
+
+
+def test_shape_stage_allows_the_same_tensor_as_input_and_output():
+    stage = _valid_trace().stages[0]
+    replaced = replace(stage, input_ids=("q",), output_ids=("q",))
+    assert replaced.input_ids == replaced.output_ids == ("q",)
+
+
 def test_shape_trace_key_keeps_phase_group_and_identity():
     key = ShapeTraceKey("dsa_prefill", "realistic", "case", "prefill", "deepseek-v32")
     assert shape_trace_to_payload(key) == {

@@ -56,6 +56,17 @@ class ShapeStage:
             if tensor_id in seen:
                 raise ValueError(f"stage has duplicate tensor id: {tensor_id}")
             seen.add(tensor_id)
+        for field_name, reference_ids in (
+            ("input_ids", self.input_ids),
+            ("output_ids", self.output_ids),
+        ):
+            seen_references: set[str] = set()
+            for tensor_id in reference_ids:
+                if tensor_id in seen_references:
+                    raise ValueError(
+                        f"{field_name} contains duplicate tensor id: {tensor_id}"
+                    )
+                seen_references.add(tensor_id)
         references = set(self.input_ids) | set(self.output_ids)
         unknown = references - seen
         if unknown:

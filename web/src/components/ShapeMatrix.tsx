@@ -46,7 +46,9 @@ export function ShapeMatrix({
         <span>{tensor.label}</span>
         {tensor.logical_only ? <small>logical view</small> : null}
       </figcaption>
-      <div className="shape-matrix-ratio">{axisRatioLabel(tensor)}</div>
+      <div className="shape-matrix-ratio">
+        {axisRatioLabel({ ...tensor, axes: geometryAxes })}
+      </div>
       {scopeAxes.length > 0 ? (
         <div className="shape-matrix-scopes" aria-label="Aggregate scope">
           {scopeAxes.map((axis) => (

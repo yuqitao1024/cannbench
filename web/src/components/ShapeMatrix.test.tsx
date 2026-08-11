@@ -81,6 +81,25 @@ describe("ShapeMatrix", () => {
     expect(screen.getByText("R=4,096")).toHaveClass("shape-matrix-scope");
     expect(screen.getByText("logical view")).toBeInTheDocument();
   });
+
+  it("computes a rank-three ratio from the two geometry axes", () => {
+    const aggregateTensor: ShapeTensor = {
+      id: "index-query-all",
+      label: "All index queries",
+      logical_only: false,
+      axes: [
+        { symbol: "R", value: 4096, meaning: "flattened query rows", role: "preserved" },
+        { symbol: "Hi", value: 64, meaning: "index heads", role: "preserved" },
+        { symbol: "Di", value: 128, meaning: "index feature", role: "preserved" }
+      ]
+    };
+
+    render(<ShapeMatrix tensor={aggregateTensor} contractedAxes={new Set()} />);
+
+    expect(screen.getByText("R=4,096")).toHaveClass("shape-matrix-scope");
+    expect(screen.getByText("Di / Hi = 2x")).toHaveClass("shape-matrix-ratio");
+    expect(screen.queryByText("R / Hi = 64x")).not.toBeInTheDocument();
+  });
 });
 
 describe("ShapeMatrixEquation", () => {

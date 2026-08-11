@@ -104,6 +104,29 @@ describe("shapeTraceApi", () => {
     );
   });
 
+  it.each(["input_ids", "output_ids"] as const)(
+    "rejects duplicate tensor ids within %s at the fetched trace boundary",
+    async (fieldName) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () =>
+          response(traceWithStage({ [fieldName]: ["query", "query"] }))
+        )
+      );
+
+      await expect(fetchShapeTrace("operator", "dataset", "case")).rejects.toThrow(
+        `${fieldName} contains duplicate tensor id: query`
+      );
+    }
+  );
+
+  it("allows the same tensor id once in each reference list", async () => {
+    const payload = traceWithStage({ output_ids: ["query"] });
+    vi.stubGlobal("fetch", vi.fn(async () => response(payload)));
+
+    await expect(fetchShapeTrace("operator", "dataset", "case")).resolves.toEqual(payload);
+  });
+
   it("builds a stable identity key", () => {
     expect(shapeTraceKey(indexEntry)).toBe("dsa_decode\u0000realistic\u0000case-1");
   });
