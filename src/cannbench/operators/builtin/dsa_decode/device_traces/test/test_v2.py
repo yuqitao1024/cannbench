@@ -111,9 +111,11 @@ def test_v2_descriptor_assumptions_are_present_in_current_sources():
     assert "kHead64FusedVllmQkTile = 256" in fused_source
     assert "kHead64FusedVllmValueTile = 256" in fused_source
 
-    vllm_aic = fused_source.split(
-        "sparse_attention_head64_fused_vllm_aic(", 1
-    )[1].split("sparse_attention_head64_fused_mix12_kernel(", 1)[0]
+    vllm_aic_start = "sparse_attention_head64_fused_vllm_aic("
+    vllm_aic_end = "sparse_attention_head64_fused_aiv("
+    assert vllm_aic_start in fused_source
+    assert vllm_aic_end in fused_source
+    vllm_aic = fused_source.split(vllm_aic_start, 1)[1].split(vllm_aic_end, 1)[0]
     assert "k_start += kHead64FusedVllmQkTile" in vllm_aic
     assert "576 - k_start < kHead64FusedVllmQkTile" in vllm_aic
     assert "MakeShape(64, current_k)" in vllm_aic
