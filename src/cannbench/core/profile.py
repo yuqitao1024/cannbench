@@ -11,6 +11,7 @@ from cannbench.core.result import OperatorBenchmarkResult
 from cannbench.core.timing import summarize_timings_ms
 
 NVIDIA_TIME_DURATION_AVG = "gpu__time_duration.avg"
+WORKFLOW_DEFAULT_LAUNCH_BUDGET = 64
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,15 @@ class ProfileKernelSelection:
     launch_count: int | None = None
     aggregate_across_files: bool = False
     nvtx_range: str | None = None
+
+
+def workflow_profile_launch_count(
+    selections: tuple[ProfileKernelSelection, ...],
+) -> int:
+    return sum(
+        selection.launch_count or WORKFLOW_DEFAULT_LAUNCH_BUDGET
+        for selection in selections
+    )
 
 
 def ncu_profile_options(

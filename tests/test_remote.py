@@ -4,15 +4,22 @@ from types import SimpleNamespace
 import pytest
 
 from cannbench.core.execution import RemoteExecutionArtifacts, RemoteProfileArtifacts
-from cannbench.core.prepared_input import build_prepared_operator_input, write_prepared_operator_input
+from cannbench.core.prepared_input import (
+    build_prepared_operator_input,
+    prepare_workflow_input,
+    write_prepared_operator_input,
+    write_prepared_workflow_input,
+)
 from cannbench.core.profile import DeviceProfileSummary, ProfileKernelSelection
 from cannbench.core.remote import (
     RemoteCollectionResult,
     RemoteEndpoint,
     collect_remote_artifacts,
+    collect_remote_workflow_artifacts,
     preinstall_remote_simt_op,
     read_remote_endpoint,
 )
+from cannbench.operators.builtin.dsa_decode import build_dsa_decode_workflow
 
 
 def _write_softmax_prepared(path):
@@ -26,6 +33,85 @@ def _write_softmax_prepared(path):
             seed=0,
         ),
     )
+
+
+def _write_dsa_workflow_prepared(path):
+    return write_prepared_workflow_input(
+        path,
+        prepare_workflow_input(
+            build_dsa_decode_workflow(
+                dataset="stress",
+                case_id="vllm_ascend_a5_decode_b1_ctx512_top512",
+                dtype="bfloat16",
+                seed=0,
+            )
+        ),
+    )
+
+
+def test_collect_remote_workflow_artifacts_profiles_one_uploaded_manifest(tmp_path):
+    commands: list[list[str]] = []
+
+    def fake_runner(command):
+        commands.append(command)
+        if command[:2] == ["scp", "-r"] and command[-1].endswith("/profile"):
+            profile_dir = tmp_path / "results" / "profile"
+            profile_dir.mkdir(parents=True)
+            (profile_dir / "OpBasicInfo.csv").write_text(
+                "Op Name,Task Duration(us)\n"
+                "Cast_indexer,2\n"
+                "LightningIndexer_main,30\n"
+                "Cast_attention,3\n"
+                "SparseFlashAttention_main,50\n"
+            )
+        if command[:2] == ["scp", "-r"] and command[-1].endswith("/perf"):
+            perf_dir = tmp_path / "results" / "perf"
+            perf_dir.mkdir(parents=True)
+            (perf_dir / "benchmark.json").write_text(
+                json.dumps(
+                    {
+                        "backend": "ascend",
+                        "device_name": "Ascend 950PR",
+                    }
+                )
+                + "\n"
+            )
+
+    endpoint = RemoteEndpoint(
+        name="ascend-a5",
+        backend="ascend",
+        host="user@ascend-host",
+        workdir="/opt/cannbench",
+        python="python3",
+        env={"ASCEND_VISIBLE_DEVICES": "0"},
+    )
+    prepared_workflow = _write_dsa_workflow_prepared(
+        tmp_path / "prepared-workflow.json"
+    )
+
+    result = collect_remote_workflow_artifacts(
+        endpoint=endpoint,
+        prepared_workflow=prepared_workflow,
+        output_dir=tmp_path / "results",
+        run_id="dsa-workflow",
+        implementation="vllm_ascend",
+        aic_metrics="InstrTimeline",
+        runner=fake_runner,
+    )
+
+    assert len(commands) == 5
+    assert commands[1][-1].endswith(
+        ":/opt/cannbench/.cannbench-runs/dsa-workflow/prepared-workflow.json"
+    )
+    profile_command = commands[2][2]
+    assert profile_command.count("internal-run-workflow") == 1
+    assert "--prepared-workflow .cannbench-runs/dsa-workflow/prepared-workflow.json" in profile_command
+    assert "--aic-metrics=InstrTimeline" in profile_command
+    assert "--launch-count=128" in profile_command
+    assert result.artifacts.profile.profile_summary.latency_ms == pytest.approx(0.085)
+    assert [
+        item.latency_ms for item in result.artifacts.profile.component_summaries
+    ] == pytest.approx([0.032, 0.053])
 
 
 def test_read_remote_endpoint_config(tmp_path):

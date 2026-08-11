@@ -9,10 +9,16 @@ from pathlib import Path
 from typing import Callable
 
 from cannbench.core.execution import RemoteExecutionArtifacts, RemoteProfileArtifacts, read_artifact_tree
-from cannbench.core.prepared_input import read_prepared_operator_input
+from cannbench.core.prepared_input import (
+    read_prepared_operator_input,
+    read_prepared_workflow_input,
+)
 from cannbench.core.profile import (
+    ProfileKernelSelection,
     ncu_profile_options,
     read_device_profile,
+    read_workflow_profile,
+    workflow_profile_launch_count,
     write_device_profile_summary,
 )
 from cannbench.operators import get_operator_plugin
@@ -316,4 +322,144 @@ def collect_remote_artifacts(
             output_artifacts=output_artifacts,
             profile=profile_artifacts_result,
         ),
+    )
+
+
+def collect_remote_workflow_artifacts(
+    *,
+    prepared_workflow: Path,
+    output_dir: Path,
+    implementation: str | None = None,
+    implementation_version: str | None = None,
+    preinstalled_simt: bool = False,
+    aic_metrics: str = "BasicInfo",
+    run_id: str | None = None,
+    endpoint: RemoteEndpoint | None = None,
+    endpoint_path: Path | None = None,
+    runner: CommandRunner = _default_runner,
+) -> RemoteCollectionResult:
+    if endpoint is None:
+        if endpoint_path is None:
+            raise ValueError("endpoint or endpoint_path is required")
+        endpoint = read_remote_endpoint(endpoint_path)
+
+    actual_run_id = run_id or uuid.uuid4().hex
+    remote_run_dir = f"{endpoint.workdir}/.cannbench-runs/{actual_run_id}"
+    remote_prepared = f"{remote_run_dir}/prepared-workflow.json"
+    remote_profile = f"{remote_run_dir}/profile"
+    remote_perf = f"{remote_run_dir}/perf"
+    relative_prepared = (
+        f".cannbench-runs/{actual_run_id}/prepared-workflow.json"
+    )
+    relative_perf = f".cannbench-runs/{actual_run_id}/perf"
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    runner(
+        _ssh_command(
+            endpoint,
+            "mkdir -p "
+            + " ".join(
+                shlex.quote(target)
+                for target in (remote_run_dir, remote_profile, remote_perf)
+            ),
+        )
+    )
+    runner(_scp_upload_command(endpoint, prepared_workflow, remote_prepared))
+
+    prepared = read_prepared_workflow_input(prepared_workflow)
+    operator_env = dict(endpoint.env)
+    if implementation == "simt":
+        if not preinstalled_simt:
+            for op in dict.fromkeys(
+                step.prepared.op for step in prepared.steps
+            ):
+                preinstall_remote_simt_op(
+                    endpoint=endpoint,
+                    op=op,
+                    implementation_version=implementation_version,
+                    runner=runner,
+                )
+        operator_env[_SKIP_SIMT_INSTALL_ENV] = "1"
+
+    selections = tuple(
+        get_operator_plugin(step.prepared.op).profile_kernel_selection(
+            backend=endpoint.backend,
+            implementation=implementation,
+            implementation_version=implementation_version,
+        )
+        for step in prepared.steps
+    )
+    launch_count = workflow_profile_launch_count(selections)
+    implementation_arg = (
+        f" --implementation {shlex.quote(implementation)}"
+        if implementation
+        else ""
+    )
+    implementation_version_arg = (
+        f" --implementation-version {shlex.quote(implementation_version)}"
+        if implementation_version
+        else ""
+    )
+    base_operator = (
+        f"{shlex.quote(endpoint.python)} -m cannbench internal-run-workflow "
+        f"--backend {shlex.quote(endpoint.backend)} "
+        f"--prepared-workflow {shlex.quote(relative_prepared)} "
+        f"--output-dir {shlex.quote(relative_perf)} "
+        f"--run-name benchmark{implementation_arg}{implementation_version_arg}"
+    )
+    if endpoint.backend == "ascend":
+        profiled_operator = (
+            f"msopprof "
+            f"--output={shlex.quote(remote_profile)} "
+            f"--aic-metrics={shlex.quote(aic_metrics)} "
+            f"--launch-count={launch_count} "
+            f"{base_operator}"
+        )
+    elif endpoint.backend == "nvidia":
+        ncu_options = " ".join(
+            shlex.quote(option)
+            for option in ncu_profile_options(
+                ProfileKernelSelection(launch_count=launch_count)
+            )
+        )
+        profiled_operator = (
+            "ncu --target-processes all --force-overwrite "
+            f"{ncu_options} --csv "
+            f"--log-file {shlex.quote(remote_profile + '/ncu.csv')} "
+            f"--export {shlex.quote(remote_profile + '/ncu-report')} "
+            f"{base_operator}"
+        )
+    else:
+        raise ValueError(f"unsupported profiler backend: {endpoint.backend}")
+    command = (
+        f"{_remote_command_prefix(endpoint)}"
+        f"{_remote_command_env(operator_env)}"
+        f"{profiled_operator}"
+    )
+    runner(_ssh_command(endpoint, command))
+    runner(_scp_download_command(endpoint, remote_profile, output_dir / "profile"))
+    runner(_scp_download_command(endpoint, remote_perf, output_dir / "perf"))
+
+    summary = read_workflow_profile(
+        output_dir / "profile",
+        backend=endpoint.backend,
+        step_selections=selections,
+    )
+    perf_payload = json.loads(
+        (output_dir / "perf" / "benchmark.json").read_text()
+    )
+    profile = RemoteProfileArtifacts(
+        backend=endpoint.backend,
+        device_name=str(perf_payload.get("device_name", "unknown")),
+        profile_summary=summary.profile_summary,
+        profile_artifacts=read_artifact_tree(output_dir / "profile"),
+        perf_artifacts=read_artifact_tree(output_dir / "perf"),
+        component_summaries=summary.component_summaries,
+    )
+    return RemoteCollectionResult(
+        endpoint=endpoint,
+        run_id=actual_run_id,
+        remote_run_dir=remote_run_dir,
+        local_output_dir=output_dir,
+        artifacts=RemoteExecutionArtifacts(profile=profile),
     )

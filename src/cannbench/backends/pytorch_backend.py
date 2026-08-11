@@ -23,13 +23,13 @@ from cannbench.core.profile import (
     ncu_profile_options,
     read_device_profile,
     read_workflow_profile,
+    workflow_profile_launch_count,
 )
 from cannbench.core.result import OperatorBenchmarkResult, OperatorCase
 from cannbench.operators import get_operator_plugin
 from cannbench.operators.materialize import materialized_values_to_buffer
 
 _SKIP_SIMT_INSTALL_ENV = "CANNBENCH_SKIP_SIMT_INSTALL"
-_WORKFLOW_DEFAULT_LAUNCH_BUDGET = 64
 
 
 def _subprocess_pythonpath() -> str:
@@ -63,13 +63,6 @@ def _workflow_step_selections(request: WorkflowBenchmarkRequest):
             implementation_version=request.implementation_version,
         )
         for step in request.prepared.steps
-    )
-
-
-def _workflow_launch_count(selections) -> int:
-    return sum(
-        selection.launch_count or _WORKFLOW_DEFAULT_LAUNCH_BUDGET
-        for selection in selections
     )
 
 
@@ -253,7 +246,7 @@ class NvidiaBackend(TorchOperatorBackend):
             raise RuntimeError(self._availability_error())
         selections = _workflow_step_selections(request)
         workflow_selection = ProfileKernelSelection(
-            launch_count=_workflow_launch_count(selections)
+            launch_count=workflow_profile_launch_count(selections)
         )
         with tempfile.TemporaryDirectory(
             prefix="cannbench-ncu-workflow-"
@@ -477,7 +470,7 @@ class AscendBackend(TorchOperatorBackend):
             self._before_run_operator(self._request_for_workflow_step(request, step))
         selections = _workflow_step_selections(request)
         workflow_selection = ProfileKernelSelection(
-            launch_count=_workflow_launch_count(selections)
+            launch_count=workflow_profile_launch_count(selections)
         )
         with tempfile.TemporaryDirectory(
             prefix="cannbench-msopprof-workflow-"

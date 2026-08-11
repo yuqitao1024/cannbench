@@ -27,6 +27,7 @@ from cannbench.core.prepared_input import (
     build_prepared_operator_input,
     prepare_workflow_input,
     read_prepared_operator_input,
+    read_prepared_workflow_input,
     write_prepared_workflow_input,
     write_prepared_operator_input,
 )
@@ -2730,19 +2731,37 @@ def test_main_preinstalls_each_remote_simt_workflow_component(tmp_path, monkeypa
         lambda **kwargs: preinstalls.append(kwargs),
     )
 
-    def fake_collect_remote_artifacts(**kwargs):
+    def fake_collect_remote_workflow_artifacts(**kwargs):
         collected_calls.append(kwargs)
-        prepared = read_prepared_operator_input(kwargs["prepared_input"])
-        return remote_collect_result(
+        prepared = read_prepared_workflow_input(kwargs["prepared_workflow"])
+        profile = RemoteProfileArtifacts(
+            backend=endpoint.backend,
+            device_name="Ascend 950PR",
+            profile_summary=DeviceProfileSummary(
+                backend="ascend",
+                latency_ms=0.01,
+                source_files=("OpBasicInfo.csv",),
+            ),
+            profile_artifacts=(
+                ("OpBasicInfo.csv", b"Op Name,Task Duration(us)\n"),
+            ),
+            perf_artifacts=(("benchmark.json", b"{}\n"),),
+            component_summaries=(
+                DeviceProfileSummary("ascend", ("OpBasicInfo.csv",), 0.003),
+                DeviceProfileSummary("ascend", ("OpBasicInfo.csv",), 0.007),
+            ),
+        )
+        return RemoteCollectionResult(
             endpoint=endpoint,
             run_id=kwargs["run_id"],
-            output_dir=kwargs["output_dir"],
-            prepared=prepared,
-            profile_device_time=True,
+            remote_run_dir=f"{endpoint.workdir}/.cannbench-runs/{kwargs['run_id']}",
+            local_output_dir=kwargs["output_dir"],
+            artifacts=RemoteExecutionArtifacts(profile=profile),
         )
 
     monkeypatch.setattr(
-        "cannbench.cli.collect_remote_artifacts", fake_collect_remote_artifacts
+        "cannbench.cli.collect_remote_workflow_artifacts",
+        fake_collect_remote_workflow_artifacts,
     )
 
     exit_code = main(
@@ -2780,6 +2799,12 @@ def test_main_preinstalls_each_remote_simt_workflow_component(tmp_path, monkeypa
             "implementation_version": "v1",
         },
     ]
+    assert len(collected_calls) == 3
+    assert all(
+        read_prepared_workflow_input(call["prepared_workflow"]).workflow
+        == "dsa_decode"
+        for call in collected_calls
+    )
     assert all(call["preinstalled_simt"] is True for call in collected_calls)
 
 

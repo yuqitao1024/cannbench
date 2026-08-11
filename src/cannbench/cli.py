@@ -48,6 +48,7 @@ from cannbench.core.prepared_input import (
 )
 from cannbench.core.remote import (
     collect_remote_artifacts,
+    collect_remote_workflow_artifacts,
     preinstall_remote_simt_op,
     read_remote_endpoint,
 )
@@ -474,17 +475,6 @@ def _single_case_plan_from_args(args: argparse.Namespace) -> PreparedInputPlan:
     )
 
 
-def _plan_from_workflow_step(step) -> PreparedInputPlan:
-    return PreparedInputPlan(
-        op=step.op,
-        dataset=step.dataset,
-        case_id=step.case_id,
-        dtype=step.prepared.dtype,
-        seed=step.prepared.seed,
-        prepared=step.prepared,
-    )
-
-
 def _plans_from_workflow_operator_selection(
     args: argparse.Namespace,
 ) -> list[PreparedWorkflowPlan]:
@@ -533,23 +523,6 @@ def _plans_from_workflow_operator_selection(
             )
         )
     return plans
-
-
-def _component_plans_from_workflow_plans(
-    plans: list[PreparedWorkflowPlan],
-) -> list[PreparedInputPlan]:
-    return [
-        PreparedInputPlan(
-            op=step.prepared.op,
-            dataset=step.prepared.dataset,
-            case_id=step.prepared.case.case_id,
-            dtype=step.prepared.dtype,
-            seed=step.prepared.seed,
-            prepared=step.prepared,
-        )
-        for plan in plans
-        for step in plan.prepared.steps
-    ]
 
 
 def _validate_unique_batch_artifact_stems(plans: list) -> None:
@@ -651,7 +624,7 @@ def _finalize_local_execution_artifacts(
     return profiled_result_path or result_path
 
 
-def _finalize_local_workflow_artifacts(
+def _finalize_workflow_artifacts(
     *,
     layout,
     artifact_stem: str,
@@ -708,111 +681,6 @@ def _build_benchmark_record_entry(
         device_name=execution_result.artifacts.profile.device_name,
         profile_summary=execution_result.artifacts.profile.profile_summary,
     )
-
-
-def _ordered_unique_case_ids(plans: list) -> list[str]:
-    seen: set[str] = set()
-    ordered: list[str] = []
-    for plan in plans:
-        if plan.case_id in seen:
-            continue
-        seen.add(plan.case_id)
-        ordered.append(plan.case_id)
-    return ordered
-
-
-def _sum_metric(records: list[dict[str, object]], name: str) -> float:
-    return sum(float(record["metrics"][name]) for record in records)
-
-
-def _aggregate_workflow_benchmark_records(
-    *,
-    args: argparse.Namespace,
-    run_name: str,
-    plans: list,
-    component_records: list[dict[str, object]],
-) -> list[dict[str, object]]:
-    plugin = _workflow_plugin(getattr(args, "op", None))
-    if plugin is None:
-        return component_records
-    component_operator_names = plugin.component_operator_names
-
-    records_by_case: dict[str, list[dict[str, object]]] = {}
-    for record in component_records:
-        records_by_case.setdefault(str(record["case_id"]), []).append(record)
-
-    seeds_by_case: dict[str, int] = {}
-    for plan in plans:
-        seeds_by_case.setdefault(plan.case_id, plan.seed)
-
-    workflow_records: list[dict[str, object]] = []
-    for case_id in _ordered_unique_case_ids(plans):
-        records = records_by_case.get(case_id, [])
-        records_by_op = {str(record["operator"]): record for record in records}
-        if any(name not in records_by_op for name in component_operator_names):
-            continue
-
-        ordered_component_records = [
-            records_by_op[name] for name in component_operator_names
-        ]
-        reference_record = ordered_component_records[-1]
-        dtype = str(reference_record["dtype"])
-        seed = seeds_by_case[case_id]
-        workflow_prepared = build_prepared_operator_input(
-            op=args.op,
-            dtype=dtype,
-            dataset=args.dataset,
-            case_id=case_id,
-            seed=seed,
-        )
-        workflow_case = workflow_prepared.case
-        workflow_artifact_stem = build_benchmark_artifact_stem(
-            op=args.op,
-            dataset=args.dataset,
-            case_id=case_id,
-            dtype=dtype,
-            seed=seed,
-        )
-        workflow_records.append(
-            {
-                "schema_version": 1,
-                "run_id": f"{run_name}/{workflow_artifact_stem}",
-                "operator": args.op,
-                "dataset": args.dataset,
-                "case_id": case_id,
-                "family": workflow_case.family,
-                "shape": reference_record["shape"],
-                "dtype": dtype,
-                "backend": reference_record["backend"],
-                "device_class": reference_record["device_class"],
-                "implementation": reference_record["implementation"],
-                "implementation_version": reference_record["implementation_version"],
-                "source_kind": workflow_case.source_kind,
-                "source_project": workflow_case.source_project,
-                "source_model": workflow_case.source_model,
-                "source_file": workflow_case.source_file,
-                "source_op": workflow_case.source_op,
-        "metrics": {
-                    "latency_ms": _sum_metric(ordered_component_records, "latency_ms"),
-                },
-                "accuracy": {
-                    "passed": all(
-                        bool(record.get("accuracy", {}).get("passed", False))
-                        for record in ordered_component_records
-                    ),
-                    "max_abs_error": max(
-                        float(record.get("accuracy", {}).get("max_abs_error", 0.0))
-                        for record in ordered_component_records
-                    ),
-                    "max_rel_error": max(
-                        float(record.get("accuracy", {}).get("max_rel_error", 0.0))
-                        for record in ordered_component_records
-                    ),
-                },
-                "diff_ref": None,
-            }
-        )
-    return workflow_records
 
 
 def _prepare_batch_run_layout(output_dir: Path, run_name: str):
@@ -1003,12 +871,7 @@ def _run_local_bench_with_plans(
         implementation=getattr(args, "implementation", None),
         summary_rows=summary_rows,
         failure_rows=failure_rows,
-        benchmark_records=_aggregate_workflow_benchmark_records(
-            args=args,
-            run_name=run_name,
-            plans=plans,
-            component_records=benchmark_records,
-        ),
+        benchmark_records=benchmark_records,
     )
     _emit_run_event(
         f"[run] bench completed run_name={run_name} backend={args.backend} "
@@ -1076,7 +939,7 @@ def _run_local_workflow_bench(
                 output_dir=layout.perf_dir,
                 run_name=artifact_stem,
             )
-            result_path = _finalize_local_workflow_artifacts(
+            result_path = _finalize_workflow_artifacts(
                 layout=layout,
                 artifact_stem=artifact_stem,
                 plan=plan,
@@ -1269,17 +1132,157 @@ def _run_remote_bench_with_plans(
         implementation=getattr(args, "implementation", None),
         summary_rows=summary_rows,
         failure_rows=failure_rows,
-        benchmark_records=_aggregate_workflow_benchmark_records(
-            args=args,
-            run_name=run_name,
-            plans=plans,
-            component_records=benchmark_records,
-        ),
+        benchmark_records=benchmark_records,
     )
     if failure_rows:
         label = "single" if len(plans) == 1 else "batch"
         raise RuntimeError(
             f"{label} bench completed with {len(failure_rows)} failures; see {failures_path}"
+        )
+
+
+def _run_remote_workflow_bench(
+    args: argparse.Namespace,
+    *,
+    plans: list[PreparedWorkflowPlan],
+    run_name: str,
+    endpoint,
+) -> None:
+    _validate_unique_batch_artifact_stems(plans)
+    layout = _prepare_batch_run_layout(args.output_dir, run_name)
+    executor = RemoteBenchExecutor(
+        collect_remote_artifacts,
+        endpoint,
+        endpoint_path=args.endpoint,
+        aic_metrics=args.aic_metrics,
+        collect_remote_workflow_artifacts=collect_remote_workflow_artifacts,
+    )
+    summary_rows: list[BatchResultRecord] = []
+    benchmark_records: list[dict[str, object]] = []
+    failure_rows: list[BatchFailureRecord] = []
+    implementation_version = _resolve_implementation_version(
+        args.implementation,
+        args.implementation_version,
+    )
+
+    if args.implementation == "simt":
+        component_ops = dict.fromkeys(
+            step.prepared.op
+            for plan in plans
+            for step in plan.prepared.steps
+        )
+        for op in component_ops:
+            preinstall_remote_simt_op(
+                endpoint=endpoint,
+                op=op,
+                implementation_version=implementation_version,
+            )
+        executor.mark_simt_preinstalled()
+
+    _emit_run_event(
+        f"[run] bench started run_name={run_name} backend={endpoint.backend} "
+        f"mode=remote-workflow cases={len(plans)}"
+    )
+    for index, plan in enumerate(plans, start=1):
+        prepared_path, prepared_reference = (
+            _prepared_reference_for_workflow_plan(
+                layout.prepared_dir,
+                layout.root,
+                plan,
+            )
+        )
+        artifact_stem = build_benchmark_artifact_stem(
+            op=plan.op,
+            dataset=plan.dataset,
+            case_id=plan.case_id,
+            dtype=plan.dtype,
+            seed=plan.seed,
+        )
+        remote_run_id = f"{run_name}/{artifact_stem}"
+        _emit_run_event(
+            f"[case] start {index}/{len(plans)} case_id={plan.case_id} "
+            f"dataset={plan.dataset} dtype={plan.dtype} backend={endpoint.backend}"
+        )
+        try:
+            execution_result = executor.execute_workflow(
+                prepared_workflow=prepared_path,
+                layout_root=layout.root,
+                artifact_stem=artifact_stem,
+                run_id=remote_run_id,
+                implementation=args.implementation,
+                implementation_version=implementation_version,
+            )
+            result_path = _finalize_workflow_artifacts(
+                layout=layout,
+                artifact_stem=artifact_stem,
+                plan=plan,
+                execution_result=execution_result,
+            )
+            profile = execution_result.artifacts.profile
+            if profile is None:
+                raise RuntimeError(
+                    f"missing profile summary for remote workflow {artifact_stem}"
+                )
+            benchmark_records.append(
+                build_workflow_benchmark_record(
+                    run_id=remote_run_id,
+                    backend=endpoint.backend,
+                    implementation=args.implementation,
+                    implementation_version=implementation_version,
+                    prepared=plan.prepared,
+                    device_name=profile.device_name,
+                    profile_summary=profile.profile_summary,
+                )
+            )
+            summary_rows.append(
+                _build_success_row(
+                    plan=plan,
+                    prepared_reference=prepared_reference,
+                    layout_root=layout.root,
+                    result_path=result_path,
+                )
+            )
+            _emit_run_event(
+                f"[case] success case_id={plan.case_id} backend={endpoint.backend}"
+            )
+        except Exception as exc:
+            summary_rows.append(
+                _build_failure_row(
+                    plan=plan,
+                    prepared_reference=prepared_reference,
+                )
+            )
+            failure_rows.append(
+                _build_failure_record(
+                    plan=plan,
+                    prepared_reference=prepared_reference,
+                    error=exc,
+                )
+            )
+            _emit_run_event(
+                f"[case] failed case_id={plan.case_id} "
+                f"backend={endpoint.backend} error={exc}"
+            )
+
+    failures_path = _write_bench_metadata(
+        layout=layout,
+        backend=endpoint.backend,
+        run_name=run_name,
+        implementation=args.implementation,
+        summary_rows=summary_rows,
+        failure_rows=failure_rows,
+        benchmark_records=benchmark_records,
+    )
+    _emit_run_event(
+        f"[run] bench completed run_name={run_name} backend={endpoint.backend} "
+        f"successes={len(summary_rows) - len(failure_rows)} "
+        f"failures={len(failure_rows)}"
+    )
+    if failure_rows:
+        label = "single" if len(plans) == 1 else "batch"
+        raise RuntimeError(
+            f"{label} remote workflow bench completed with "
+            f"{len(failure_rows)} failures; see {failures_path}"
         )
 
 
@@ -1353,12 +1356,11 @@ def _run_workflow_operator_bench(args: argparse.Namespace) -> None:
         return
 
     endpoint = read_remote_endpoint(args.endpoint)
-    _run_remote_bench_with_plans(
+    _run_remote_workflow_bench(
         args,
-        plans=_component_plans_from_workflow_plans(plans),
+        plans=plans,
         run_name=run_name,
         endpoint=endpoint,
-        parent_run_id=run_name,
     )
 
 

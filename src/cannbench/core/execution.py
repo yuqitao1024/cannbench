@@ -100,8 +100,12 @@ class RemoteBenchExecutor(BenchCaseExecutor):
         endpoint,
         endpoint_path: Path | None = None,
         aic_metrics: str = "BasicInfo",
+        collect_remote_workflow_artifacts=None,
     ) -> None:
         self._collect_remote_artifacts = collect_remote_artifacts
+        self._collect_remote_workflow_artifacts = (
+            collect_remote_workflow_artifacts
+        )
         self._endpoint = endpoint
         self._endpoint_path = endpoint_path
         self._aic_metrics = aic_metrics
@@ -131,6 +135,37 @@ class RemoteBenchExecutor(BenchCaseExecutor):
                 run_id=run_id,
                 capture_output=capture_output,
                 profile_device_time=True,
+                implementation=implementation,
+                implementation_version=implementation_version,
+                preinstalled_simt=self._preinstalled_simt,
+                aic_metrics=self._aic_metrics,
+            )
+            return BenchCaseExecutionResult(
+                artifacts=remote_result.artifacts,
+                result_path=None,
+            )
+
+    def execute_workflow(
+        self,
+        *,
+        prepared_workflow: Path,
+        layout_root: Path,
+        artifact_stem: str,
+        run_id: str,
+        implementation: str | None = None,
+        implementation_version: str | None = None,
+    ) -> BenchCaseExecutionResult:
+        if self._collect_remote_workflow_artifacts is None:
+            raise RuntimeError("remote workflow collector is not configured")
+        with TemporaryDirectory(
+            prefix=f"{artifact_stem}-", dir=layout_root
+        ) as temp_dir_name:
+            remote_result = self._collect_remote_workflow_artifacts(
+                endpoint=self._endpoint,
+                endpoint_path=self._endpoint_path,
+                prepared_workflow=prepared_workflow,
+                output_dir=Path(temp_dir_name),
+                run_id=run_id,
                 implementation=implementation,
                 implementation_version=implementation_version,
                 preinstalled_simt=self._preinstalled_simt,
