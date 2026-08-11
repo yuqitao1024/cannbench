@@ -1,6 +1,8 @@
 import pytest
 
-from cannbench.core.config import OperatorBenchmarkRequest
+from cannbench.core.config import OperatorBenchmarkRequest, WorkflowBenchmarkRequest
+from cannbench.core.prepared_input import prepare_workflow_input
+from cannbench.operators.builtin.dsa_decode import build_dsa_decode_workflow
 
 
 def test_operator_request_accepts_builtin_dataset_case():
@@ -202,6 +204,30 @@ def test_operator_request_rejects_unknown_dtype():
             dataset="smoke",
             case_id="tiny_logits",
         )
+
+
+def test_workflow_request_preserves_prepared_workflow_and_implementation():
+    prepared = prepare_workflow_input(
+        build_dsa_decode_workflow(
+            dataset="realistic",
+            case_id="deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048",
+            dtype="bfloat16",
+            seed=7,
+        )
+    )
+
+    request = WorkflowBenchmarkRequest(
+        backend="ascend",
+        prepared=prepared,
+        implementation="simt",
+        implementation_version="v2",
+        aic_metrics=" InstrTimeline ",
+    )
+
+    assert request.prepared is prepared
+    assert request.implementation == "simt"
+    assert request.implementation_version == "v2"
+    assert request.aic_metrics == "InstrTimeline"
 
 
 def test_operator_request_defaults_seed():

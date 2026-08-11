@@ -55,7 +55,9 @@ class NvidiaBackend(TorchOperatorBackend):
     def _availability_error(self) -> str:
         return "CUDA is required for the nvidia backend"
 
-    def _operator_callable(self, torch, request, case, *, device, dtype):
+    def _operator_callable(
+        self, torch, request, case, *, device, dtype, bound_inputs=None
+    ):
         if request.implementation == "cuda_library":
             plugin = get_operator_plugin(request.op)
             if plugin.build_cuda_library_callable is None:
@@ -64,7 +66,12 @@ class NvidiaBackend(TorchOperatorBackend):
                 )
             return plugin.build_cuda_library_callable(
                 self._operator_context(
-                    torch, request, case, device=device, dtype=dtype
+                    torch,
+                    request,
+                    case,
+                    device=device,
+                    dtype=dtype,
+                    bound_inputs=bound_inputs,
                 )
             )
         return super()._operator_callable(
@@ -73,6 +80,7 @@ class NvidiaBackend(TorchOperatorBackend):
             case,
             device=device,
             dtype=dtype,
+            bound_inputs=bound_inputs,
         )
 
     def profile_operator_device_time(
@@ -460,7 +468,9 @@ class AscendBackend(TorchOperatorBackend):
                     reordered.extend(zero_pad)
         return materialized_values_to_buffer(reordered)
 
-    def _operator_callable(self, torch, request, case, *, device, dtype):
+    def _operator_callable(
+        self, torch, request, case, *, device, dtype, bound_inputs=None
+    ):
         if request.implementation == "vllm_ascend":
             plugin = get_operator_plugin(request.op)
             if plugin.build_vllm_ascend_callable is None:
@@ -469,7 +479,12 @@ class AscendBackend(TorchOperatorBackend):
                 )
             return plugin.build_vllm_ascend_callable(
                 self._operator_context(
-                    torch, request, case, device=device, dtype=dtype
+                    torch,
+                    request,
+                    case,
+                    device=device,
+                    dtype=dtype,
+                    bound_inputs=bound_inputs,
                 )
             )
         if request.implementation == "simt":
@@ -485,6 +500,7 @@ class AscendBackend(TorchOperatorBackend):
                     device=device,
                     dtype=dtype,
                     implementation_module=module,
+                    bound_inputs=bound_inputs,
                 )
             )
         return super()._operator_callable(
@@ -493,6 +509,7 @@ class AscendBackend(TorchOperatorBackend):
             case,
             device=device,
             dtype=dtype,
+            bound_inputs=bound_inputs,
         )
 
     def _before_run_operator(self, request: OperatorBenchmarkRequest) -> None:

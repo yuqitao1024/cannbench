@@ -1,9 +1,9 @@
 from dataclasses import dataclass
 
-from cannbench.core.config import OperatorBenchmarkRequest
+from cannbench.core.config import OperatorBenchmarkRequest, WorkflowBenchmarkRequest
 from cannbench.core.operator_output import CapturedOperatorOutput
 from cannbench.core.profile import LocalDeviceProfileResult
-from cannbench.core.result import OperatorBenchmarkResult
+from cannbench.core.result import OperatorBenchmarkResult, WorkflowBenchmarkResult
 
 
 @dataclass(frozen=True)
@@ -15,6 +15,11 @@ class OperatorBackend:
         del request
 
     def run_operator(self, request: OperatorBenchmarkRequest) -> OperatorBenchmarkResult:
+        raise NotImplementedError
+
+    def run_workflow(
+        self, request: WorkflowBenchmarkRequest
+    ) -> WorkflowBenchmarkResult:
         raise NotImplementedError
 
     def capture_operator_output(

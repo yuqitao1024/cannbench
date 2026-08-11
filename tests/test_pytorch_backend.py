@@ -8,9 +8,10 @@ from types import SimpleNamespace
 import pytest
 
 from cannbench.backends import get_backend
-from cannbench.core.config import OperatorBenchmarkRequest
-from cannbench.core.prepared_input import OperatorInputBinding
+from cannbench.core.config import OperatorBenchmarkRequest, WorkflowBenchmarkRequest
+from cannbench.core.prepared_input import OperatorInputBinding, prepare_workflow_input
 from cannbench.core.profile import LocalDeviceProfileResult, ProfileKernelSelection
+from cannbench.operators.builtin.dsa_decode import build_dsa_decode_workflow
 
 
 def test_get_backend_returns_nvidia_backend():
@@ -92,6 +93,112 @@ def test_torch_backend_resolves_bound_operator_output_before_target(monkeypatch)
     assert captured["bound_inputs"] == {"indices": producer_output}
     assert captured["producer_request"].case_id == "tiny_attention_scores"
     assert captured["producer_request"].seed == 13
+
+
+def test_torch_backend_runs_workflow_once_and_passes_identical_tensor(monkeypatch):
+    import cannbench.backends.torch_backend_base as backend_module
+    from cannbench.backends.pytorch_backend import NvidiaBackend
+
+    producer_output = object()
+    calls: list[str] = []
+    captured: dict[str, object] = {}
+
+    def build_callable(ctx):
+        if ctx.request.op == "lightning_indexer":
+            assert ctx.bound_inputs == {}
+
+            def producer():
+                calls.append("lightning_indexer")
+                return producer_output
+
+            return producer
+
+        captured["indices"] = ctx.bound_inputs["indices"]
+
+        def consumer():
+            calls.append("sparse_attention")
+            return object(), object()
+
+        return consumer
+
+    monkeypatch.setattr(
+        backend_module,
+        "get_operator_plugin",
+        lambda op: SimpleNamespace(
+            build_torch_callable=build_callable,
+            build_result_case=lambda case: case,
+        ),
+    )
+    fake_cuda = SimpleNamespace(
+        is_available=lambda: True,
+        synchronize=lambda: calls.append("synchronize"),
+        get_device_name=lambda device: "Fake GPU",
+    )
+    fake_torch = SimpleNamespace(
+        cuda=fake_cuda,
+        bfloat16="bfloat16",
+        device=lambda name: name,
+    )
+    backend = NvidiaBackend()
+    monkeypatch.setattr(backend, "_torch_module", lambda: fake_torch)
+    prepared = prepare_workflow_input(
+        build_dsa_decode_workflow(
+            dataset="realistic",
+            case_id="deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048",
+            dtype="bfloat16",
+            seed=7,
+        )
+    )
+
+    result = backend.run_workflow(
+        WorkflowBenchmarkRequest(backend="nvidia", prepared=prepared)
+    )
+
+    assert captured["indices"] is producer_output
+    assert calls == ["lightning_indexer", "sparse_attention", "synchronize"]
+    assert [step.op for step in result.steps] == [
+        "lightning_indexer",
+        "sparse_attention",
+    ]
+
+
+def test_torch_backend_rejects_workflow_output_arity_mismatch(monkeypatch):
+    import cannbench.backends.torch_backend_base as backend_module
+    from cannbench.backends.pytorch_backend import NvidiaBackend
+
+    monkeypatch.setattr(
+        backend_module,
+        "get_operator_plugin",
+        lambda op: SimpleNamespace(
+            build_torch_callable=lambda ctx: lambda: (object(), object()),
+            build_result_case=lambda case: case,
+        ),
+    )
+    fake_torch = SimpleNamespace(
+        cuda=SimpleNamespace(
+            is_available=lambda: True,
+            synchronize=lambda: None,
+            get_device_name=lambda device: "Fake GPU",
+        ),
+        bfloat16="bfloat16",
+        device=lambda name: name,
+    )
+    backend = NvidiaBackend()
+    monkeypatch.setattr(backend, "_torch_module", lambda: fake_torch)
+    workflow = build_dsa_decode_workflow(
+        dataset="realistic",
+        case_id="deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048",
+        dtype="bfloat16",
+        seed=7,
+    )
+
+    with pytest.raises(RuntimeError, match="returned 2 outputs but declares 1"):
+        backend.run_workflow(
+            WorkflowBenchmarkRequest(
+                backend="nvidia",
+                prepared=prepare_workflow_input(workflow),
+            )
+        )
 
 
 def test_backend_raises_clear_error_when_torch_is_missing(monkeypatch):

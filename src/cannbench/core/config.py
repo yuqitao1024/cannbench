@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 
-from cannbench.core.prepared_input import OperatorInputBinding
+from cannbench.core.prepared_input import OperatorInputBinding, PreparedWorkflowInput
 from cannbench.datasets import get_operator_case
 
 SUPPORTED_DTYPES = {"float32", "float16", "bfloat16"}
@@ -69,3 +69,30 @@ class OperatorBenchmarkRequest:
         if "dimensions" in case.payload and "dim" in case.payload:
             object.__setattr__(self, "dimensions", tuple(case.payload["dimensions"]))
             object.__setattr__(self, "dim", int(case.payload["dim"]))
+
+
+@dataclass(frozen=True)
+class WorkflowBenchmarkRequest:
+    backend: str
+    prepared: PreparedWorkflowInput
+    implementation: str | None = None
+    implementation_version: str | None = None
+    aic_metrics: str = "BasicInfo"
+
+    def __post_init__(self) -> None:
+        if self.implementation is not None:
+            implementation = self.implementation.strip()
+            if implementation not in SUPPORTED_IMPLEMENTATIONS:
+                raise ValueError(f"Unsupported implementation: {self.implementation}")
+            object.__setattr__(self, "implementation", implementation)
+        if self.implementation_version is not None:
+            version = self.implementation_version.strip()
+            if not version:
+                raise ValueError("implementation_version must not be empty")
+            object.__setattr__(self, "implementation_version", version)
+        aic_metrics = self.aic_metrics.strip()
+        if not aic_metrics:
+            raise ValueError("aic_metrics must not be empty")
+        if self.backend != "ascend" and aic_metrics != "BasicInfo":
+            raise ValueError("aic_metrics is only supported for the ascend backend")
+        object.__setattr__(self, "aic_metrics", aic_metrics)

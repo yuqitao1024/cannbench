@@ -7,6 +7,7 @@ from cannbench.core.output import write_benchmark_outputs
 from cannbench.core.result import (
     OperatorBenchmarkResult,
     OperatorCase,
+    WorkflowBenchmarkResult,
 )
 
 
@@ -121,6 +122,26 @@ def test_write_benchmark_outputs_creates_json_and_csv(tmp_path):
         "dimensions=128x128, dim=-1",
         "smoke_fixture",
     ]
+
+
+def test_workflow_result_serializes_ordered_component_results():
+    component = _sample_result()
+    result = WorkflowBenchmarkResult(
+        backend="nvidia",
+        device_name="Fake GPU",
+        workflow="test_workflow",
+        phase="decode",
+        dataset="smoke",
+        case_id="tiny_logits",
+        steps=(component,),
+    )
+
+    payload = result.to_json_dict()
+
+    assert payload["workflow"] == "test_workflow"
+    assert payload["phase"] == "decode"
+    assert payload["case_id"] == "tiny_logits"
+    assert payload["steps"] == [component.to_json_dict()]
 
 def test_operator_case_payload_summary_is_stable():
     case = OperatorCase(

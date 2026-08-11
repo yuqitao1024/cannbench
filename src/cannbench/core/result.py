@@ -128,3 +128,25 @@ class OperatorBenchmarkResult:
             "dtype": self.dtype,
             "case": self.case.to_json_dict(),
         }
+
+
+@dataclass(frozen=True)
+class WorkflowBenchmarkResult:
+    backend: str
+    device_name: str
+    workflow: str
+    phase: str
+    dataset: str
+    case_id: str
+    steps: tuple[OperatorBenchmarkResult, ...]
+
+    def to_json_dict(self) -> dict[str, object]:
+        return {
+            "backend": self.backend,
+            "device_name": self.device_name,
+            "workflow": self.workflow,
+            "phase": self.phase,
+            "dataset": self.dataset,
+            "case_id": self.case_id,
+            "steps": [step.to_json_dict() for step in self.steps],
+        }

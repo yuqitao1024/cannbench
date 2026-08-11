@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from cannbench.backends.base import OperatorBackend
-from cannbench.core.config import OperatorBenchmarkRequest
+from cannbench.core.config import OperatorBenchmarkRequest, WorkflowBenchmarkRequest
 from cannbench.core.operator_output import CapturedOperatorOutput
 from cannbench.core.profile import LocalDeviceProfileResult
-from cannbench.core.result import OperatorBenchmarkResult
+from cannbench.core.result import OperatorBenchmarkResult, WorkflowBenchmarkResult
 from cannbench.datasets import get_operator_case
 from cannbench.operators import (
     TorchOperatorContext,
@@ -99,6 +99,7 @@ class TorchOperatorBackend(OperatorBackend):
         device,
         dtype,
         implementation_module=None,
+        bound_inputs=None,
     ):
         return TorchOperatorContext(
             backend=self,
@@ -108,14 +109,25 @@ class TorchOperatorBackend(OperatorBackend):
             device=device,
             dtype=dtype,
             implementation_module=implementation_module,
-            bound_inputs=self._resolve_input_bindings(torch, request, device=device),
+            bound_inputs=(
+                self._resolve_input_bindings(torch, request, device=device)
+                if bound_inputs is None
+                else dict(bound_inputs)
+            ),
         )
 
-    def _operator_callable(self, torch, request, case, *, device, dtype):
+    def _operator_callable(
+        self, torch, request, case, *, device, dtype, bound_inputs=None
+    ):
         plugin = get_operator_plugin(request.op)
         return plugin.build_torch_callable(
             self._operator_context(
-                torch, request, case, device=device, dtype=dtype
+                torch,
+                request,
+                case,
+                device=device,
+                dtype=dtype,
+                bound_inputs=bound_inputs,
             )
         )
 
@@ -217,6 +229,87 @@ class TorchOperatorBackend(OperatorBackend):
             op=request.op,
             dtype=request.dtype,
             case=get_operator_plugin(request.op).build_result_case(case),
+        )
+
+    def run_workflow(
+        self, request: WorkflowBenchmarkRequest
+    ) -> WorkflowBenchmarkResult:
+        torch = self._torch_module()
+        if not self._is_available(torch):
+            raise RuntimeError(self._availability_error())
+
+        device = self._device(torch)
+        outputs: dict[str, object] = {}
+        step_results: list[OperatorBenchmarkResult] = []
+        for step in request.prepared.steps:
+            prepared = step.prepared
+            step_request = OperatorBenchmarkRequest(
+                backend=request.backend,
+                op=prepared.op,
+                dtype=prepared.dtype,
+                dataset=prepared.dataset,
+                case_id=prepared.case.case_id,
+                implementation=request.implementation,
+                seed=prepared.seed,
+                implementation_version=request.implementation_version,
+                aic_metrics=request.aic_metrics,
+            )
+            self.validate_request(step_request)
+            self._before_run_operator(step_request)
+            spec = get_operator_spec(step_request.op)
+            if step_request.dtype not in spec.supported_dtypes:
+                raise RuntimeError(
+                    f"Unsupported dtype for {step_request.op}: {step_request.dtype}"
+                )
+            case = get_operator_case(
+                step_request.op,
+                step_request.dataset,
+                step_request.case_id,
+            )
+            bound_inputs = {name: outputs[name] for name in step.consumes}
+            operator = self._operator_callable(
+                torch,
+                step_request,
+                case,
+                device=device,
+                dtype=getattr(torch, step_request.dtype),
+                bound_inputs=bound_inputs,
+            )
+            step_output = operator()
+            if isinstance(step_output, (tuple, list)):
+                if len(step_output) != len(step.produces):
+                    raise RuntimeError(
+                        f"workflow step {step.contract} returned {len(step_output)} "
+                        f"outputs but declares {len(step.produces)}"
+                    )
+                produced_values = tuple(step_output)
+            elif len(step.produces) == 1:
+                produced_values = (step_output,)
+            else:
+                raise RuntimeError(
+                    f"workflow step {step.contract} returned one output but declares "
+                    f"{len(step.produces)}"
+                )
+            outputs.update(zip(step.produces, produced_values, strict=True))
+            step_results.append(
+                OperatorBenchmarkResult(
+                    backend=self.name,
+                    device_name=self._device_name(torch, device),
+                    op=step_request.op,
+                    dtype=step_request.dtype,
+                    case=get_operator_plugin(step_request.op).build_result_case(case),
+                )
+            )
+
+        self._synchronize(torch)
+        return WorkflowBenchmarkResult(
+            backend=self.name,
+            device_name=self._device_name(torch, device),
+            workflow=request.prepared.workflow,
+            phase=request.prepared.phase,
+            dataset=request.prepared.dataset,
+            case_id=request.prepared.case_id,
+            steps=tuple(step_results),
         )
 
     def profile_operator_device_time(
