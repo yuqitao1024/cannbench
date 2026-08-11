@@ -142,8 +142,8 @@ shape 是：
 | 张量 | aggregate shape | 状态 |
 | --- | --- | --- |
 | `index_query_all` | `[R,Hi,Di] = [4096,64,128]` | 输入 view |
-| `head_scores_all` | `[R,Hi,C] = [4096,64,32768]` | logical only |
-| `index_scores_all` | `[R,C] = [4096,32768]` | logical only |
+| `head_scores_all` | `[R,Hi,C] = [4096,64,32768]` | `logical_only=True` |
+| `index_scores_all` | `[R,C] = [4096,32768]` | `logical_only=True` |
 | `indices_all` | `[R,S] = [4096,2048]` | workflow 输出 |
 
 每个 row 独立执行第 5 节的矩阵计算，因此总 MAC 数为：
@@ -155,7 +155,7 @@ R * Hi * C * Di
 ```
 
 `head_scores_all` 和 `index_scores_all` 用于核对完整数学域；production trace 将
-二者标为 `logical_only`，不要求在 global memory 中一次性物化。
+二者标为 `logical_only=True`，不要求在 global memory 中一次性物化。
 
 ## 7. TopK And Workflow Binding
 
@@ -249,11 +249,15 @@ scores [128,2048] -> P [128,2048], LSE [128]
 | 张量 | aggregate shape | 状态 |
 | --- | --- | --- |
 | `query_all` | `[R,H,Dqk] = [4096,128,576]` | 输入 view |
-| `selected_k_all` | `[R,S,Dqk] = [4096,2048,576]` | logical view |
-| `selected_v_all` | `[R,S,Dv] = [4096,2048,512]` | logical view |
-| `scores_all` / `P_all` | `[R,H,S] = [4096,128,2048]` | logical only |
+| `selected_k_all` | `[R,S,Dqk] = [4096,2048,576]` | `logical_only=True` |
+| `selected_v_all` | `[R,S,Dv] = [4096,2048,512]` | `logical_only=True` |
+| `scores_all` | `[R,H,S] = [4096,128,2048]` | `logical_only=True` |
 | `output_all` | `[R,H,Dv] = [4096,128,512]` | 输出 view |
 | `lse_all` | `[R,H] = [4096,128]` | 输出 view |
+
+Softmax stage 复用同一个 `scores_all` aggregate trace tensor 表达 probability
+view，不创建独立的 probability aggregate tensor ID。下文公式中的 `P` 是数学结果
+名称，不是另一个 production trace ID。
 
 对应的 batched 数学关系为：
 
@@ -318,12 +322,24 @@ q=4095:  position=32767, valid_length=32768
 | component 输入 | `index_query`、`index_key`、`weights`、`query`、`shared_kv` | materializer 按第 4、8 节 contract shape 创建 |
 | workflow 绑定 | `indices [1,4096,2048]` | Indexer 输出并作为 Attention 输入 |
 | component 输出 | `out [1,4096,128,512]`、`lse [1,4096,128]` | 对外返回的物理结果 |
-| 逻辑中间量 | `head_scores_all`、`index_scores_all`、`selected_k_all`、`selected_v_all`、`scores_all/P_all` | 用于证明矩阵兼容性，不是 GM 全量物化要求 |
-| 逻辑 view | `V=shared_kv[...,0:512]`、展平后的 `R` 视图 | 不凭 shape 推断额外复制 |
+| production trace 逻辑中间量 | 下列五个 aggregate tensor ID | `logical_only=True`，不是 GM 全量物化要求 |
+| 非 trace aggregate ID 的 contract view | `V=shared_kv[...,0:512]`、展平后的 `R` 视图 | 不凭 shape 推断额外复制 |
 
-Torch 参考公式可能通过 head broadcast、gather 或 layout 变换表达这些中间量；这只
-说明参考计算的张量语义。Shape Explorer 的 `logical_only` 标记不能反过来证明某个
-未优化 prefill device kernel 的真实缓存、workspace 或搬运策略。
+production trace 中 `logical_only=True` 的 aggregate tensor ID 恰好是：
+
+```text
+head_scores_all
+index_scores_all
+selected_k_all
+selected_v_all
+scores_all
+```
+
+其中 `scores_all` 在 QK stage 表示 score，在 Softmax stage 复用为 probability
+view；production trace 不定义独立的 probability aggregate tensor ID。Torch 参考
+公式可能通过 head broadcast、gather 或 layout 变换表达这些中间量；这只说明参考
+计算的张量语义。Shape Explorer 的 `logical_only=True` 标记不能反过来证明某个未
+优化 prefill device kernel 的真实缓存、workspace 或搬运策略。
 
 作为数量级校验，若把 `head_scores_all` 全量物化，它包含
 `4096*64*32768=8,589,934,592` 个元素；若把 `selected_k_all` 全量物化，它包含
@@ -337,10 +353,10 @@ core allocation、task count、context shard、launch geometry、local tensor �
 pipeline 数据；production trace 的 `device_execution.status` 是 `unavailable`，
 `version` 为空，`kernels` 为空。
 
-Shape Explorer 中对应的英文 UI copy 是：
+production Shape Explorer 的 Device execution view 逐字渲染 operator payload
+message：
 
 ```text
-No device trace for prefill
 Prefill is not optimized yet. This view intentionally shows only the
 algorithm-level matrix flow.
 ```
@@ -355,12 +371,12 @@ decomposition。
 | 流程 | 单个 Query row | 全部 `R=4096` row | contract/逻辑状态 |
 | --- | --- | --- | --- |
 | Indexer 输入 | `Q_idx [64,128]`、`K_idx [32768,128]` | `index_query [4096,64,128]`，key 由同一 request 共享 | 输入 |
-| Indexer matmul | `[64,128]x[128,32768] -> [64,32768]` | `head_scores [4096,64,32768]` | logical only |
-| Head reduction | `[64,32768] -> [32768]` | `index_scores [4096,32768]` | logical only |
+| Indexer matmul | `[64,128]x[128,32768] -> [64,32768]` | `head_scores_all [4096,64,32768]` | `logical_only=True` |
+| Head reduction | `[64,32768] -> [32768]` | `index_scores_all [4096,32768]` | `logical_only=True` |
 | Causal TopK | `[32768] -> [2048]` | `indices [4096,2048]` | workflow 绑定 |
-| Shared-KV gather | `K [2048,576]`、`V [2048,512]` | `K [4096,2048,576]`、`V [4096,2048,512]` | logical view |
-| QK | `[128,576]x[576,2048] -> [128,2048]` | `scores [4096,128,2048]` | logical only |
-| Softmax/LSE | `[128,2048] -> [128,2048], [128]` | `P [4096,128,2048]`、`LSE [4096,128]` | P logical，LSE 输出 |
+| Shared-KV gather | `K [2048,576]`、`V [2048,512]` | `selected_k_all [4096,2048,576]`、`selected_v_all [4096,2048,512]` | `logical_only=True` |
+| QK | `[128,576]x[576,2048] -> [128,2048]` | `scores_all [4096,128,2048]` | `logical_only=True` |
+| Softmax/LSE | `[128,2048] -> [128,2048], [128]` | `scores_all` 复用为 probability view；`lse_all [4096,128]` | `scores_all`: `logical_only=True`；LSE 输出 |
 | PV/output | `[128,2048]x[2048,512] -> [128,512]` | `output [4096,128,512]` | 输出 |
 
 完整 contract 路径可压缩为：
@@ -390,4 +406,5 @@ Production implementation and cases：
 - [`sparse_attention/materialize.py`](../../src/cannbench/operators/builtin/sparse_attention/materialize.py)
 - [`sparse_attention/__init__.py`](../../src/cannbench/operators/builtin/sparse_attention/__init__.py)
 - [`dsa_prefill/test/test_shape_trace.py`](../../src/cannbench/operators/builtin/dsa_prefill/test/test_shape_trace.py)
+- [`DeviceExecutionView.tsx`](../../web/src/components/DeviceExecutionView.tsx)
 - [DSA realistic case sources](../datasets/dsa-real-sources.md#deepseek-v32-flashmla-prefill)
