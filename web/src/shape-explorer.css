@@ -1,0 +1,178 @@
+.shape-matrix-equation {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 30px;
+}
+
+.shape-equation-surface {
+  min-width: 0;
+  overflow-x: auto;
+  padding: 24px 20px 18px;
+  scrollbar-color: var(--faint, #7c6f64) transparent;
+}
+
+.shape-equation {
+  display: flex;
+  width: max-content;
+  min-width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+}
+
+.shape-equation-operator {
+  flex: 0 0 auto;
+  color: var(--yellow, #fabd2f);
+  font: 600 20px var(--font-mono, "JetBrains Mono", "SFMono-Regular", Consolas, monospace);
+}
+
+.shape-matrix {
+  --shape-matrix-color: var(--teal, #83a598);
+  display: grid;
+  flex: 0 0 auto;
+  grid-template-areas:
+    "caption caption"
+    "scope scope"
+    "axis-y body"
+    ". axis-x";
+  grid-template-columns: minmax(26px, max-content) max-content;
+  grid-template-rows: auto auto max-content auto;
+  align-items: center;
+  margin: 0;
+  color: var(--text, #ebdbb2);
+  font-family: var(--font-mono, "JetBrains Mono", "SFMono-Regular", Consolas, monospace);
+}
+
+.shape-matrix-output {
+  --shape-matrix-color: var(--yellow, #fabd2f);
+}
+
+.shape-matrix-caption {
+  grid-area: caption;
+  display: flex;
+  min-height: 28px;
+  align-items: baseline;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 8px 8px;
+  color: var(--text, #ebdbb2);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.shape-matrix-caption small {
+  color: var(--faint, #7c6f64);
+  font-size: 9px;
+  font-weight: 500;
+  text-transform: uppercase;
+}
+
+.shape-matrix-scopes {
+  grid-area: scope;
+  display: flex;
+  justify-content: center;
+  gap: 5px;
+  min-height: 22px;
+  padding-bottom: 6px;
+}
+
+.shape-matrix-scope {
+  padding: 3px 6px;
+  border: 1px solid var(--line, #504945);
+  border-radius: 3px;
+  color: var(--muted, #a89984);
+  background: var(--panel-soft, #292827);
+  font-size: 9px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.shape-matrix-body {
+  position: relative;
+  grid-area: body;
+  flex: 0 0 auto;
+  border-right: 2px solid var(--shape-matrix-color);
+  border-left: 2px solid var(--shape-matrix-color);
+  background: color-mix(in srgb, var(--shape-matrix-color) 8%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--shape-matrix-color) 10%, transparent);
+}
+
+.shape-matrix-body::before,
+.shape-matrix-body::after {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  border-top: 2px solid var(--shape-matrix-color);
+  border-bottom: 2px solid var(--shape-matrix-color);
+  content: "";
+  pointer-events: none;
+}
+
+.shape-matrix-body::before {
+  left: -2px;
+}
+
+.shape-matrix-body::after {
+  right: -2px;
+}
+
+.shape-matrix-x,
+.shape-matrix-y {
+  color: var(--shape-matrix-color);
+  font-size: 10px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.shape-matrix-x {
+  grid-area: axis-x;
+  padding-top: 8px;
+  text-align: center;
+}
+
+.shape-matrix-y {
+  grid-area: axis-y;
+  justify-self: center;
+  padding: 8px 7px 8px 0;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+}
+
+.shape-matrix .contracted-axis {
+  color: var(--orange, #fe8019);
+  font-weight: 600;
+}
+
+.shape-equation-note {
+  padding: 0 20px;
+  text-align: center;
+}
+
+.shape-equation-note strong {
+  display: block;
+  color: var(--text, #ebdbb2);
+  font: 600 15px var(--font-mono, "JetBrains Mono", "SFMono-Regular", Consolas, monospace);
+}
+
+.shape-equation-note p {
+  max-width: 720px;
+  margin: 9px auto 0;
+  color: var(--muted, #a89984);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+@media (max-width: 620px) {
+  .shape-equation-surface {
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+
+  .shape-equation {
+    justify-content: flex-start;
+    gap: 18px;
+  }
+}
