@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CannBench Shape Explorer</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #1d2021;
+      --bg-raised: #282828;
+      --panel: #32302f;
+      --panel-soft: #292827;
+      --line: #504945;
+      --line-soft: rgba(235, 219, 178, .12);
+      --text: #ebdbb2;
+      --muted: #a89984;
+      --faint: #7c6f64;
+      --yellow: #fabd2f;
+      --teal: #83a598;
+      --green: #b8bb26;
+      --coral: #fb4934;
+      --orange: #fe8019;
+      --mono: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+      --sans: "IBM Plex Sans", "Aptos", "Segoe UI", sans-serif;
+      --display: "Space Grotesk", "Aptos Display", "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { min-width: 320px; background: var(--bg); }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--text);
+      background: var(--bg);
+      font-family: var(--sans);
+    }
+    button, select { font: inherit; }
+    button:focus-visible, select:focus-visible {
+      outline: 2px solid var(--yellow);
+      outline-offset: 2px;
+    }
+
+    .shell { min-height: 100vh; }
+    .topbar {
+      height: 60px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      padding: 0 clamp(18px, 4vw, 52px);
+      border-bottom: 1px solid var(--line-soft);
+      background: rgba(29, 32, 33, .94);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      backdrop-filter: blur(14px);
+    }
+    .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+    .mark {
+      width: 28px;
+      height: 28px;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 2px;
+      transform: rotate(45deg);
+    }
+    .mark span { background: var(--yellow); }
+    .mark span:nth-child(2), .mark span:nth-child(6) { background: var(--teal); }
+    .brand strong { font-family: var(--display); font-size: 16px; letter-spacing: 0; }
+    .crumb { color: var(--faint); font: 12px var(--mono); white-space: nowrap; }
+    .top-meta { color: var(--muted); font: 12px var(--mono); }
+
+    .casebar {
+      padding: 22px clamp(18px, 4vw, 52px) 18px;
+      border-bottom: 1px solid var(--line-soft);
+      background: var(--bg-raised);
+    }
+    .casebar-inner {
+      max-width: 1500px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: minmax(280px, 1fr) auto;
+      align-items: end;
+      gap: 28px;
+    }
+    .eyebrow { margin: 0 0 7px; color: var(--yellow); font: 11px var(--mono); text-transform: uppercase; }
+    h1 { margin: 0; font: 600 clamp(20px, 2.6vw, 31px)/1.18 var(--display); letter-spacing: 0; overflow-wrap: anywhere; }
+    .case-id { margin: 8px 0 0; color: var(--muted); font: 12px/1.5 var(--mono); overflow-wrap: anywhere; }
+    .selector-wrap { display: flex; gap: 8px; align-items: center; }
+    .segment {
+      display: flex;
+      padding: 3px;
+      gap: 3px;
+      border: 1px solid var(--line);
+      background: var(--bg);
+      border-radius: 6px;
+    }
+    .segment button {
+      min-height: 34px;
+      padding: 0 14px;
+      border: 0;
+      border-radius: 4px;
+      color: var(--muted);
+      background: transparent;
+      cursor: pointer;
+    }
+    .segment button.active { color: var(--bg); background: var(--yellow); font-weight: 700; }
+
+    .stats {
+      max-width: 1500px;
+      margin: 0 auto;
+      padding: 0 clamp(18px, 4vw, 52px);
+      display: grid;
+      grid-template-columns: repeat(8, minmax(80px, 1fr));
+      border-bottom: 1px solid var(--line-soft);
+    }
+    .stat { padding: 15px 14px; border-right: 1px solid var(--line-soft); }
+    .stat:first-child { border-left: 1px solid var(--line-soft); }
+    .stat span { display: block; color: var(--faint); font: 10px var(--mono); text-transform: uppercase; }
+    .stat strong { display: block; margin-top: 6px; color: var(--text); font: 600 15px var(--mono); }
+
+    .modebar {
+      max-width: 1500px;
+      margin: 0 auto;
+      padding: 20px clamp(18px, 4vw, 52px) 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 18px;
+    }
+    .tabs { display: flex; gap: 22px; border-bottom: 1px solid var(--line); }
+    .tabs button {
+      padding: 0 0 11px;
+      border: 0;
+      border-bottom: 2px solid transparent;
+      color: var(--muted);
+      background: none;
+      cursor: pointer;
+    }
+    .tabs button.active { color: var(--text); border-color: var(--yellow); }
+    .version { color: var(--muted); font: 11px var(--mono); }
+    .version b { color: var(--green); font-weight: 600; }
+
+    .timeline-wrap { max-width: 1500px; margin: 0 auto; padding: 18px clamp(18px, 4vw, 52px); }
+    .timeline-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+    .controls { display: flex; align-items: center; gap: 7px; }
+    .icon-button, .speed {
+      height: 32px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      color: var(--text);
+      background: var(--panel-soft);
+    }
+    .icon-button { min-width: 38px; padding: 0 10px; cursor: pointer; }
+    .icon-button.play { min-width: 74px; color: var(--bg); background: var(--teal); border-color: var(--teal); font-weight: 700; }
+    .speed { padding: 0 8px; }
+    .step-count { color: var(--faint); font: 11px var(--mono); }
+    .timeline { display: grid; grid-template-columns: repeat(8, 1fr); gap: 0; }
+    .step {
+      position: relative;
+      min-height: 58px;
+      padding: 9px 8px 7px 22px;
+      border: 0;
+      border-top: 2px solid var(--line);
+      color: var(--faint);
+      background: transparent;
+      text-align: left;
+      cursor: pointer;
+    }
+    .step::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: -6px;
+      width: 10px;
+      height: 10px;
+      border: 2px solid var(--line);
+      border-radius: 50%;
+      background: var(--bg);
+    }
+    .step.done { color: var(--muted); border-color: var(--teal); }
+    .step.done::before { border-color: var(--teal); background: var(--teal); }
+    .step.active { color: var(--text); border-color: var(--yellow); }
+    .step.active::before { width: 13px; height: 13px; top: -8px; border-color: var(--yellow); background: var(--bg); box-shadow: inset 0 0 0 3px var(--yellow); }
+    .step b { display: block; font: 600 11px var(--mono); }
+    .step small { display: block; margin-top: 4px; font-size: 10px; line-height: 1.3; }
+
+    .workspace {
+      max-width: 1500px;
+      margin: 0 auto;
+      padding: 0 clamp(18px, 4vw, 52px) 44px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 300px;
+      gap: 18px;
+    }
+    .stage-panel, .inspector { border: 1px solid var(--line); background: var(--bg-raised); border-radius: 6px; }
+    .panel-head {
+      min-height: 52px;
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      border-bottom: 1px solid var(--line-soft);
+    }
+    .panel-head h2 { margin: 0; font: 600 15px var(--display); }
+    .panel-head code { color: var(--teal); font: 11px var(--mono); }
+
+    .equation-stage {
+      min-height: 430px;
+      padding: clamp(26px, 4vw, 54px) clamp(22px, 4vw, 48px);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 46px;
+      overflow-x: auto;
+    }
+    .equation {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: clamp(16px, 2.5vw, 34px);
+      min-width: 680px;
+    }
+    .matrix-wrap { position: relative; padding: 30px 30px 24px 34px; }
+    .matrix {
+      width: var(--mw, 170px);
+      height: var(--mh, 118px);
+      position: relative;
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      grid-template-rows: repeat(5, 1fr);
+      gap: 3px;
+      padding: 10px;
+      border-left: 2px solid var(--color, var(--teal));
+      border-right: 2px solid var(--color, var(--teal));
+      background: rgba(131, 165, 152, .04);
+    }
+    .matrix::before, .matrix::after {
+      content: "";
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 9px;
+      border-top: 2px solid var(--color, var(--teal));
+      border-bottom: 2px solid var(--color, var(--teal));
+    }
+    .matrix::before { left: -2px; }
+    .matrix::after { right: -2px; }
+    .cell { background: color-mix(in srgb, var(--color, var(--teal)) 30%, transparent); }
+    .matrix-label { position: absolute; top: 2px; left: 50%; transform: translateX(-50%); color: var(--text); font: 600 12px var(--mono); white-space: nowrap; }
+    .axis-x { position: absolute; left: 34px; right: 30px; bottom: 2px; text-align: center; color: var(--color, var(--teal)); font: 11px var(--mono); white-space: nowrap; }
+    .axis-y { position: absolute; left: 0; top: 50%; transform: translateY(-50%) rotate(-90deg); color: var(--color, var(--teal)); font: 11px var(--mono); white-space: nowrap; }
+    .operator { color: var(--yellow); font: 600 21px var(--mono); }
+    .formula-note { text-align: center; }
+    .formula-note strong { display: block; color: var(--text); font: 600 16px var(--mono); }
+    .formula-note span { display: block; max-width: 720px; margin: 9px auto 0; color: var(--muted); font-size: 13px; line-height: 1.55; }
+    .contract-axis { color: var(--orange); }
+
+    .inspector section { padding: 16px; border-bottom: 1px solid var(--line-soft); }
+    .inspector section:last-child { border-bottom: 0; }
+    .inspector h3 { margin: 0 0 12px; color: var(--muted); font: 10px var(--mono); text-transform: uppercase; }
+    .shape-line { display: flex; justify-content: space-between; gap: 10px; margin: 8px 0; font: 12px var(--mono); }
+    .shape-line span { color: var(--faint); }
+    .shape-line b { color: var(--text); font-weight: 500; text-align: right; }
+    .callout { padding: 12px; border-left: 3px solid var(--orange); background: rgba(254, 128, 25, .07); color: var(--muted); font-size: 12px; line-height: 1.55; }
+    .legend { display: grid; grid-template-columns: 10px 1fr; gap: 9px 8px; align-items: center; color: var(--muted); font-size: 11px; }
+    .dot { width: 9px; height: 9px; border-radius: 2px; background: var(--teal); }
+    .dot.yellow { background: var(--yellow); }
+    .dot.orange { background: var(--orange); }
+
+    .device-view { display: none; }
+    .device-grid { padding: 24px; display: grid; gap: 28px; }
+    .kernel-row { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 22px; align-items: stretch; }
+    .kernel-meta { padding: 14px; border-left: 3px solid var(--teal); background: var(--panel-soft); }
+    .kernel-meta.attn { border-color: var(--yellow); }
+    .kernel-meta h3 { margin: 0 0 8px; font: 600 13px var(--display); }
+    .kernel-meta p { margin: 4px 0; color: var(--muted); font: 11px/1.45 var(--mono); }
+    .task-lane { display: grid; grid-template-columns: repeat(8, 1fr); gap: 5px; align-content: center; }
+    .task-block { min-height: 48px; padding: 7px 4px; border: 1px solid var(--teal); background: rgba(131, 165, 152, .1); text-align: center; font: 10px/1.35 var(--mono); }
+    .task-block.attn { border-color: var(--yellow); background: rgba(250, 189, 47, .08); }
+    .tile-detail { margin-top: 11px; grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; color: var(--muted); font: 11px var(--mono); }
+    .tile-chip { padding: 5px 7px; border: 1px solid var(--line); background: var(--bg); }
+    .arrow { color: var(--faint); }
+    .device-empty { display: none; min-height: 350px; place-items: center; padding: 32px; color: var(--muted); text-align: center; }
+    .device-empty strong { display: block; margin-bottom: 8px; color: var(--text); }
+
+    .review {
+      max-width: 1500px;
+      margin: 0 auto 34px;
+      padding: 0 clamp(18px, 4vw, 52px);
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+    .review button { min-height: 36px; padding: 0 14px; border: 1px solid var(--line); border-radius: 4px; color: var(--text); background: var(--panel); cursor: pointer; }
+    .review button.primary { color: var(--bg); border-color: var(--green); background: var(--green); font-weight: 700; }
+    .review button.selected { box-shadow: 0 0 0 2px var(--yellow); }
+
+    @media (max-width: 980px) {
+      .casebar-inner { grid-template-columns: 1fr; }
+      .stats { grid-template-columns: repeat(4, 1fr); }
+      .workspace { grid-template-columns: 1fr; }
+      .timeline { overflow-x: auto; grid-template-columns: repeat(8, minmax(115px, 1fr)); }
+      .kernel-row { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 620px) {
+      .crumb, .top-meta { display: none; }
+      .casebar { padding-top: 17px; }
+      .selector-wrap { align-items: stretch; }
+      .segment { width: 100%; }
+      .segment button { flex: 1; padding: 0 8px; }
+      .stats { grid-template-columns: repeat(2, 1fr); }
+      .modebar { align-items: flex-end; }
+      .timeline-head { align-items: flex-start; flex-direction: column; }
+      .equation-stage { min-height: 380px; padding-left: 12px; overflow-x: auto; }
+      .equation { justify-content: flex-start; }
+      .task-lane { grid-template-columns: repeat(4, 1fr); }
+      .review { flex-direction: column; }
+    }
+    @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="mark" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span></div>
+        <strong>CANNBench</strong>
+        <span class="crumb">/ Shape Explorer</span>
+      </div>
+      <div class="top-meta">DeepSeek V3.2 / BF16 / rank-local</div>
+    </header>
+
+    <section class="casebar">
+      <div class="casebar-inner">
+        <div>
+          <p class="eyebrow" id="phase-label">Decode workflow</p>
+          <h1 id="page-heading">Matrix flow from index selection to sparse attention</h1>
+          <p class="case-id" id="case-id">deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048</p>
+        </div>
+        <div class="selector-wrap">
+          <div class="segment" aria-label="Case phase">
+            <button class="active" data-case="decode">Decode</button>
+            <button data-case="prefill">Prefill</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="stats" id="stats"></section>
+
+    <div class="modebar">
+      <div class="tabs" role="tablist">
+        <button class="active" data-view="algorithm">Algorithm flow</button>
+        <button data-view="device">Device execution</button>
+      </div>
+      <div class="version" id="version-label"><b>SIMT v2</b> latest numeric version</div>
+    </div>
+
+    <section class="timeline-wrap" id="timeline-section">
+      <div class="timeline-head">
+        <div class="controls">
+          <button class="icon-button" id="previous" aria-label="Previous step">Prev</button>
+          <button class="icon-button play" id="play">Play</button>
+          <button class="icon-button" id="next" aria-label="Next step">Next</button>
+          <select class="speed" id="speed" aria-label="Playback speed">
+            <option value="1600">0.75x</option>
+            <option value="1100" selected>1x</option>
+            <option value="650">1.5x</option>
+          </select>
+        </div>
+        <span class="step-count" id="step-count">Step 1 of 8</span>
+      </div>
+      <div class="timeline" id="timeline"></div>
+    </section>
+
+    <main class="workspace">
+      <section class="stage-panel algorithm-view" id="algorithm-view">
+        <div class="panel-head">
+          <h2 id="stage-title">Indexer projection</h2>
+          <code id="stage-op">lightning_indexer</code>
+        </div>
+        <div class="equation-stage">
+          <div class="equation" id="equation"></div>
+          <div class="formula-note">
+            <strong id="formula"></strong>
+            <span id="description"></span>
+          </div>
+        </div>
+      </section>
+
+      <section class="stage-panel device-view" id="device-view">
+        <div class="panel-head">
+          <h2>Current device execution</h2>
+          <code>largest vN: v2</code>
+        </div>
+        <div class="device-grid" id="device-grid">
+          <div class="kernel-row">
+            <div class="kernel-meta">
+              <h3>Indexer score + radix TopK</h3>
+              <p>32 mixed tasks</p>
+              <p>2 batches x 1 query atom x 16 context shards</p>
+              <p>shard: C=2,048 / tile: C=32</p>
+            </div>
+            <div class="task-lane">
+              <div class="task-block">A0<br>C 0..2047</div><div class="task-block">A1<br>C 2048..4095</div><div class="task-block">A2<br>C 4096..6143</div><div class="task-block">A3<br>C 6144..8191</div>
+              <div class="task-block">A4<br>C 8192..10239</div><div class="task-block">A5<br>C 10240..12287</div><div class="task-block">A6<br>C 12288..14335</div><div class="task-block">A7<br>C 14336..16383</div>
+              <div class="tile-detail"><span class="tile-chip">Q atom [2,64,128]</span><span class="arrow">x</span><span class="tile-chip">K tile [32,128]^T</span><span class="arrow">-></span><span class="tile-chip">scores [2,64,32]</span></div>
+            </div>
+          </div>
+          <div class="kernel-row">
+            <div class="kernel-meta attn">
+              <h3>Sparse Attention Head64</h3>
+              <p>8 logical tasks / 8 used AIC</p>
+              <p>4 query rows x 2 head groups</p>
+              <p>P=1 direct output, no Combine</p>
+            </div>
+            <div class="task-lane">
+              <div class="task-block attn">r0 / H0..63</div><div class="task-block attn">r0 / H64..127</div><div class="task-block attn">r1 / H0..63</div><div class="task-block attn">r1 / H64..127</div>
+              <div class="task-block attn">r2 / H0..63</div><div class="task-block attn">r2 / H64..127</div><div class="task-block attn">r3 / H0..63</div><div class="task-block attn">r3 / H64..127</div>
+              <div class="tile-detail"><span class="tile-chip">Q [64,576]</span><span class="arrow">x</span><span class="tile-chip">K selected tile [128,576]^T</span><span class="arrow">-></span><span class="tile-chip">score [64,128]</span><span class="arrow">-> online softmax / PV</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="device-empty" id="device-empty"><div><strong>No device trace for prefill</strong>Prefill is not optimized yet. This view intentionally shows only the algorithm-level matrix flow.</div></div>
+      </section>
+
+      <aside class="inspector algorithm-view" id="inspector">
+        <section>
+          <h3>Selected operation</h3>
+          <div class="shape-line"><span>scope</span><b id="scope">one (batch, query) row</b></div>
+          <div class="shape-line"><span>dtype</span><b>BF16</b></div>
+          <div class="shape-line"><span>contract axis</span><b id="contract-axis">Di = 128</b></div>
+          <div class="shape-line"><span>axis ratio</span><b id="axis-ratio">Di / Hi = 2x</b></div>
+        </section>
+        <section>
+          <h3>Axis annotation</h3>
+          <div class="legend"><span class="dot"></span><span>Tensor dimensions</span><span class="dot yellow"></span><span>Current output</span><span class="dot orange"></span><span>Contracted dimension</span></div>
+        </section>
+        <section>
+          <h3>Why this shape changes</h3>
+          <div class="callout" id="callout">The shared feature dimension Di=128 contracts. Context positions become output columns.</div>
+        </section>
+      </aside>
+    </main>
+
+    <div class="review">
+      <button data-choice="needs-revision" onclick="toggleSelect(this)">Needs revision</button>
+      <button class="primary" data-choice="approve-direction" onclick="toggleSelect(this)">Approve visual direction</button>
+    </div>
+  </div>
+
+  <script>
+    const cases = {
+      decode: {
+        caseId: "deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048",
+        phase: "Decode workflow",
+        heading: "Matrix flow from index selection to sparse attention",
+        stats: [["B", "2"], ["Q", "2"], ["Hi", "64"], ["Di", "128"], ["C", "32,768"], ["H", "128"], ["S", "2,048"], ["Dqk / Dv", "576 / 512"]]
+      },
+      prefill: {
+        caseId: "deepseek_v32_flashmla_prefill_q4096_ctx32768_top2048",
+        phase: "Prefill workflow",
+        heading: "Full prefill matrix flow before device optimization",
+        stats: [["B", "1"], ["Q", "4,096"], ["Hi", "64"], ["Di", "128"], ["C", "32,768"], ["H", "128"], ["S", "2,048"], ["Dqk / Dv", "576 / 512"]]
+      }
+    };
+
+    const steps = [
+      { key: "index", short: "Index inputs", op: "lightning_indexer", title: "Indexer projection", formula: "Q_idx and K_idx enter an independent retrieval feature space", desc: "Each query token owns 64 index heads. Keys share the 128-dimensional retrieval space.", scope: "all workflow rows", contract: "Di = 128", ratio: "Di / Hi = 2x", callout: "Indexer features are not slices of the 576-dimensional attention query.", matrices: [["index_query", "R x Hi", "Di=128", 110, 150, "teal"], ["index_key^T", "Di=128", "C=32,768", 300, 62, "orange"]], operator: "inputs" },
+      { key: "dot", short: "Head scores", op: "lightning_indexer", title: "Per-head dot product", formula: "[Hi, Di] x [Di, C] -> [Hi, C]", desc: "The shared Di axis contracts. Every index head produces one score for every context position.", scope: "one (batch, query) row", contract: "Di = 128", ratio: "C / Hi = 512x", callout: "The contracted Di=128 dimension is marked in orange; C becomes the output width.", matrices: [["Q_idx", "Hi=64", "Di=128", 145, 78, "teal"], ["K_idx^T", "Di=128", "C=32,768", 300, 62, "orange"], ["head_scores", "Hi=64", "C=32,768", 300, 48, "yellow"]], operator: "multiply" },
+      { key: "reduce", short: "Reduce heads", op: "lightning_indexer", title: "ReLU, weight and head reduction", formula: "[Hi, C] -> [C]", desc: "ReLU and per-head weights apply elementwise, then Hi=64 reduces into one retrieval score per context position.", scope: "one (batch, query) row", contract: "reduce Hi = 64", ratio: "C / Hi = 512x", callout: "The head axis disappears; context position C is preserved for TopK.", matrices: [["head_scores", "Hi=64", "C=32,768", 300, 48, "teal"], ["index_scores", "1", "C=32,768", 300, 34, "yellow"]], operator: "transform" },
+      { key: "topk", short: "TopK", op: "lightning_indexer", title: "Select sparse context positions", formula: "TopK([C=32,768], k=2,048) -> indices [S=2,048]", desc: "Causal masking runs before TopK. The selected positions become the only workflow binding into Sparse Attention.", scope: "R rows", contract: "C -> S", ratio: "C / S = 16x", callout: "The workflow passes indices only; Indexer scores and features do not cross the boundary.", matrices: [["index_scores", "1", "C=32,768", 300, 34, "teal"], ["indices", "1", "S=2,048", 205, 34, "yellow"]], operator: "transform" },
+      { key: "gather", short: "Gather KV", op: "sparse_attention", title: "Gather shared KV by selected indices", formula: "shared_kv [C,576] + indices [S] -> K [S,576], V [S,512]", desc: "All 128 query heads share one gathered KV set for each query row. V is the first 512 dimensions of shared KV.", scope: "one (batch, query) row", contract: "C -> S", ratio: "C / Dqk = 56.9x", callout: "K and V share storage semantics, but QK reads 576 dimensions while PV reads 512.", matrices: [["shared_kv", "C=32,768", "Dqk=576", 82, 285, "teal"], ["K_selected", "S=2,048", "Dqk=576", 104, 205, "yellow"], ["V_selected", "S=2,048", "Dv=512", 98, 205, "orange"]], operator: "transform" },
+      { key: "qk", short: "QK", op: "sparse_attention", title: "Sparse attention score matrix", formula: "[H, Dqk] x [Dqk, S] -> scores [H, S]", desc: "The formal attention projection uses Dqk=576 and only the S=2,048 selected context positions.", scope: "one (batch, query) row", contract: "Dqk = 576", ratio: "S / H = 16x", callout: "Dqk contracts; query heads H and selected tokens S remain as score axes.", matrices: [["Q", "H=128", "Dqk=576", 178, 88, "teal"], ["K_selected^T", "Dqk=576", "S=2,048", 225, 132, "orange"], ["scores", "H=128", "S=2,048", 225, 70, "yellow"]], operator: "multiply" },
+      { key: "softmax", short: "Softmax", op: "sparse_attention", title: "Normalize selected-token scores", formula: "scores [H,S] -> P [H,S] + LSE [H]", desc: "Softmax normalizes each query head along S. LSE preserves the stable log-sum-exp for validation and tiled combination.", scope: "one (batch, query) row", contract: "normalize S = 2,048", ratio: "S / H = 16x", callout: "Shape H x S is preserved for P; reduction along S also produces one LSE value per head.", matrices: [["scores", "H=128", "S=2,048", 225, 70, "teal"], ["P", "H=128", "S=2,048", 225, 70, "yellow"], ["LSE", "1", "H=128", 130, 34, "orange"]], operator: "transform" },
+      { key: "pv", short: "PV / output", op: "sparse_attention", title: "Weighted value accumulation", formula: "[H,S] x [S,Dv] -> output [H,Dv]", desc: "S contracts after probability-weighted accumulation. The workflow returns per-head values and LSE.", scope: "one (batch, query) row", contract: "S = 2,048", ratio: "S / Dv = 4x", callout: "Selected-token axis S disappears; the final value dimension Dv=512 becomes the output width.", matrices: [["P", "H=128", "S=2,048", 225, 70, "teal"], ["V_selected", "S=2,048", "Dv=512", 104, 205, "orange"], ["output", "H=128", "Dv=512", 170, 88, "yellow"]], operator: "multiply" }
+    ];
+
+    let currentCase = "decode";
+    let currentStep = 1;
+    let currentView = "algorithm";
+    let timer = null;
+
+    const colors = { teal: "#83a598", orange: "#fe8019", yellow: "#fabd2f" };
+    const cells = () => Array.from({ length: 35 }, () => '<span class="cell"></span>').join("");
+
+    function renderMatrix(matrix) {
+      const [name, y, x, width, height, color] = matrix;
+      return `<div class="matrix-wrap" style="--color:${colors[color]};--mw:${width}px;--mh:${height}px"><div class="matrix-label">${name}</div><div class="axis-y">${y}</div><div class="matrix">${cells()}</div><div class="axis-x">${x}</div></div>`;
+    }
+
+    function renderEquation(step) {
+      const pieces = [];
+      step.matrices.forEach((matrix, index) => {
+        if (index > 0) pieces.push(`<span class="operator">${step.operator === "multiply" && index === 1 ? "x" : "->"}</span>`);
+        pieces.push(renderMatrix(matrix));
+      });
+      document.getElementById("equation").innerHTML = pieces.join("");
+    }
+
+    function renderTimeline() {
+      document.getElementById("timeline").innerHTML = steps.map((step, index) => `<button class="step ${index < currentStep ? "done" : ""} ${index === currentStep ? "active" : ""}" data-step="${index}"><b>${String(index + 1).padStart(2, "0")} ${step.short}</b><small>${step.op}</small></button>`).join("");
+      document.querySelectorAll("[data-step]").forEach(button => button.addEventListener("click", () => { stop(); currentStep = Number(button.dataset.step); renderStep(); }));
+    }
+
+    function renderStep() {
+      const step = steps[currentStep];
+      renderTimeline();
+      renderEquation(step);
+      document.getElementById("stage-title").textContent = step.title;
+      document.getElementById("stage-op").textContent = step.op;
+      document.getElementById("formula").textContent = step.formula;
+      document.getElementById("description").textContent = step.desc;
+      document.getElementById("scope").textContent = currentCase === "prefill" ? step.scope.replace("R rows", "R=4,096 rows") : step.scope.replace("R rows", "R=4 rows");
+      document.getElementById("contract-axis").textContent = step.contract;
+      document.getElementById("axis-ratio").textContent = step.ratio;
+      document.getElementById("callout").textContent = step.callout;
+      document.getElementById("step-count").textContent = `Step ${currentStep + 1} of ${steps.length}`;
+    }
+
+    function renderCase() {
+      const data = cases[currentCase];
+      document.getElementById("case-id").textContent = data.caseId;
+      document.getElementById("phase-label").textContent = data.phase;
+      document.getElementById("page-heading").textContent = data.heading;
+      document.getElementById("stats").innerHTML = data.stats.map(([label, value]) => `<div class="stat"><span>${label}</span><strong>${value}</strong></div>`).join("");
+      document.querySelectorAll("[data-case]").forEach(button => button.classList.toggle("active", button.dataset.case === currentCase));
+      if (currentCase === "prefill" && currentView === "device") showView("device");
+      renderStep();
+    }
+
+    function showView(view) {
+      currentView = view;
+      stop();
+      document.querySelectorAll("[data-view]").forEach(button => button.classList.toggle("active", button.dataset.view === view));
+      const algorithm = view === "algorithm";
+      document.getElementById("algorithm-view").style.display = algorithm ? "block" : "none";
+      document.getElementById("inspector").style.display = algorithm ? "block" : "none";
+      document.getElementById("timeline-section").style.display = algorithm ? "block" : "none";
+      document.getElementById("device-view").style.display = algorithm ? "none" : "block";
+      document.getElementById("version-label").style.visibility = algorithm ? "hidden" : "visible";
+      const empty = currentCase === "prefill";
+      document.getElementById("device-grid").style.display = empty ? "none" : "grid";
+      document.getElementById("device-empty").style.display = empty ? "grid" : "none";
+    }
+
+    function stop() {
+      if (timer) clearInterval(timer);
+      timer = null;
+      document.getElementById("play").textContent = "Play";
+    }
+
+    function play() {
+      if (timer) { stop(); return; }
+      if (currentStep === steps.length - 1) currentStep = 0;
+      document.getElementById("play").textContent = "Pause";
+      renderStep();
+      timer = setInterval(() => {
+        if (currentStep >= steps.length - 1) { stop(); return; }
+        currentStep += 1;
+        renderStep();
+      }, Number(document.getElementById("speed").value));
+    }
+
+    document.querySelectorAll("[data-case]").forEach(button => button.addEventListener("click", () => { stop(); currentCase = button.dataset.case; currentStep = 0; renderCase(); }));
+    document.querySelectorAll("[data-view]").forEach(button => button.addEventListener("click", () => showView(button.dataset.view)));
+    document.getElementById("previous").addEventListener("click", () => { stop(); currentStep = Math.max(0, currentStep - 1); renderStep(); });
+    document.getElementById("next").addEventListener("click", () => { stop(); currentStep = Math.min(steps.length - 1, currentStep + 1); renderStep(); });
+    document.getElementById("play").addEventListener("click", play);
+    document.getElementById("speed").addEventListener("change", () => { if (timer) { stop(); play(); } });
+
+    renderCase();
+    showView("algorithm");
+  </script>
+</body>
+</html>
