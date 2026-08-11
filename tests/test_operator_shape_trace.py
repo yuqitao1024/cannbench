@@ -88,6 +88,13 @@ def test_shape_trace_rejects_missing_stage_tensor_references():
         replace(trace.stages[0], input_ids=("missing",))
 
 
+def test_shape_stage_rejects_duplicate_tensor_ids():
+    trace = _valid_trace()
+    duplicate_q = replace(trace.stages[0].tensors[0], label="Duplicate Q")
+    with pytest.raises(ValueError, match="duplicate tensor id.*q"):
+        replace(trace.stages[0], tensors=(*trace.stages[0].tensors, duplicate_q))
+
+
 def test_shape_trace_key_keeps_phase_group_and_identity():
     key = ShapeTraceKey("dsa_prefill", "realistic", "case", "prefill", "deepseek-v32")
     assert shape_trace_to_payload(key) == {

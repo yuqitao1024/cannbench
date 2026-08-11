@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ShapeStage, ShapeTensor } from "../shape-trace/types";
 import { ShapeMatrix, ShapeMatrixEquation } from "./ShapeMatrix";
@@ -42,7 +42,9 @@ describe("ShapeMatrix", () => {
       Number(matrix.style.height.replace("px", ""))
     );
     expect(screen.getByText("C=32,768")).toBeInTheDocument();
+    expect(screen.getByText("C=32,768")).toHaveAccessibleName("C=32,768: context");
     expect(screen.getByText("Di=128")).toHaveClass("contracted-axis");
+    expect(screen.getByText("C / Di = 256x")).toHaveClass("shape-matrix-ratio");
   });
 
   it("renders a context-major tensor as tall", () => {
@@ -132,5 +134,68 @@ describe("ShapeMatrixEquation", () => {
     expect(screen.getByTestId("matrix-scores").closest("figure")).toHaveClass(
       "shape-matrix-output"
     );
+    expect(screen.getByLabelText(`${stage.title} tensor equation`)).toHaveAttribute(
+      "tabindex",
+      "0"
+    );
+  });
+
+  it("renders unreferenced tensors in declared order after the main equation", () => {
+    const aggregateFirst = { ...tallTensor, id: "aggregate-first", label: "All queries" };
+    const aggregateSecond = { ...vectorTensor, id: "aggregate-second", label: "All indices" };
+    const stage: ShapeStage = {
+      id: "aggregate-stage",
+      component: "generic-component",
+      title: "Aggregate stage",
+      operation: "transform",
+      formula: "K -> indices",
+      scope: "one row and all rows",
+      tensors: [aggregateFirst, vectorTensor, wideTensor, aggregateSecond],
+      input_ids: ["k"],
+      output_ids: ["indices"],
+      contracted_axes: [],
+      insight: "Shows row and aggregate shapes."
+    };
+
+    const { container } = render(<ShapeMatrixEquation stage={stage} />);
+    const matrices = Array.from(
+      container.querySelectorAll<HTMLElement>("[data-testid^='matrix-']")
+    );
+    expect(matrices.map((matrix) => matrix.dataset.testid)).toEqual([
+      "matrix-k",
+      "matrix-indices",
+      "matrix-aggregate-first",
+      "matrix-aggregate-second"
+    ]);
+
+    const supplemental = screen.getByRole("group", {
+      name: "Aggregate and supplemental tensors"
+    });
+    expect(within(supplemental).getByText("All queries")).toBeInTheDocument();
+    expect(within(supplemental).getByText("All indices")).toBeInTheDocument();
+  });
+
+  it("groups non-matmul inputs and shows one transition before fan-out outputs", () => {
+    const inputB = { ...vectorTensor, id: "mask", label: "Mask" };
+    const outputB = { ...vectorTensor, id: "counts", label: "Counts" };
+    const stage: ShapeStage = {
+      id: "fan-out",
+      component: "generic-component",
+      title: "Generic fan-out",
+      operation: "gather",
+      formula: "values, mask -> indices, counts",
+      scope: "one row",
+      tensors: [wideTensor, inputB, vectorTensor, outputB],
+      input_ids: ["k", "mask"],
+      output_ids: ["indices", "counts"],
+      contracted_axes: [],
+      insight: "One operation produces two results."
+    };
+
+    render(<ShapeMatrixEquation stage={stage} />);
+
+    expect(
+      screen.getAllByTestId("shape-equation-operator").map((operator) => operator.textContent)
+    ).toEqual(["and", "->", "and"]);
   });
 });

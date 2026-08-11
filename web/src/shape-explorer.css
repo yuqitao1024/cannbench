@@ -1,15 +1,22 @@
 .shape-matrix-equation {
+  --shape-input-color: var(--accent-2);
+  --shape-output-color: var(--accent);
+  --shape-contracted-color: var(--orange);
   display: flex;
   min-width: 0;
   flex-direction: column;
   gap: 30px;
 }
 
+.app-shell[data-theme="light"] .shape-matrix-equation {
+  --shape-output-color: #8a4f00;
+}
+
 .shape-equation-surface {
   min-width: 0;
   overflow-x: auto;
   padding: 24px 20px 18px;
-  scrollbar-color: var(--faint, #7c6f64) transparent;
+  scrollbar-color: var(--faint) transparent;
 }
 
 .shape-equation {
@@ -23,29 +30,30 @@
 
 .shape-equation-operator {
   flex: 0 0 auto;
-  color: var(--yellow, #fabd2f);
+  color: var(--shape-output-color);
   font: 600 20px var(--font-mono, "JetBrains Mono", "SFMono-Regular", Consolas, monospace);
 }
 
 .shape-matrix {
-  --shape-matrix-color: var(--teal, #83a598);
+  --shape-matrix-color: var(--shape-input-color);
   display: grid;
   flex: 0 0 auto;
   grid-template-areas:
     "caption caption"
+    "ratio ratio"
     "scope scope"
     "axis-y body"
     ". axis-x";
   grid-template-columns: minmax(26px, max-content) max-content;
-  grid-template-rows: auto auto max-content auto;
+  grid-template-rows: auto auto auto max-content auto;
   align-items: center;
   margin: 0;
-  color: var(--text, #ebdbb2);
+  color: var(--text);
   font-family: var(--font-mono, "JetBrains Mono", "SFMono-Regular", Consolas, monospace);
 }
 
 .shape-matrix-output {
-  --shape-matrix-color: var(--yellow, #fabd2f);
+  --shape-matrix-color: var(--shape-output-color);
 }
 
 .shape-matrix-caption {
@@ -56,17 +64,28 @@
   justify-content: center;
   gap: 8px;
   padding: 0 8px 8px;
-  color: var(--text, #ebdbb2);
+  color: var(--text);
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
 }
 
 .shape-matrix-caption small {
-  color: var(--faint, #7c6f64);
+  color: var(--faint);
   font-size: 9px;
   font-weight: 500;
   text-transform: uppercase;
+}
+
+.shape-matrix-ratio {
+  grid-area: ratio;
+  min-height: 20px;
+  padding: 0 8px 7px;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
 }
 
 .shape-matrix-scopes {
@@ -80,10 +99,10 @@
 
 .shape-matrix-scope {
   padding: 3px 6px;
-  border: 1px solid var(--line, #504945);
+  border: 1px solid var(--line);
   border-radius: 3px;
-  color: var(--muted, #a89984);
-  background: var(--panel-soft, #292827);
+  color: var(--muted);
+  background: var(--surface-strong);
   font-size: 9px;
   line-height: 1;
   white-space: nowrap;
@@ -142,8 +161,26 @@
 }
 
 .shape-matrix .contracted-axis {
-  color: var(--orange, #fe8019);
+  color: var(--shape-contracted-color);
   font-weight: 600;
+}
+
+.shape-equation-supplemental {
+  min-width: max-content;
+  margin-top: 28px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.shape-equation-supplemental > p {
+  margin: 0 0 18px;
+  color: var(--muted);
+  font: 600 10px var(--font-mono, "JetBrains Mono", "SFMono-Regular", Consolas, monospace);
+  text-transform: uppercase;
+}
+
+.shape-equation-supplemental-tensors {
+  justify-content: flex-start;
 }
 
 .shape-equation-note {
@@ -153,14 +190,14 @@
 
 .shape-equation-note strong {
   display: block;
-  color: var(--text, #ebdbb2);
+  color: var(--text);
   font: 600 15px var(--font-mono, "JetBrains Mono", "SFMono-Regular", Consolas, monospace);
 }
 
 .shape-equation-note p {
   max-width: 720px;
   margin: 9px auto 0;
-  color: var(--muted, #a89984);
+  color: var(--muted);
   font-size: 13px;
   line-height: 1.55;
 }

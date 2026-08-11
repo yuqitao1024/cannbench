@@ -50,9 +50,14 @@ class ShapeStage:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "tensors", tuple(self.tensors))
-        tensor_ids = {tensor.id for tensor in self.tensors}
+        tensor_ids = [tensor.id for tensor in self.tensors]
+        seen: set[str] = set()
+        for tensor_id in tensor_ids:
+            if tensor_id in seen:
+                raise ValueError(f"stage has duplicate tensor id: {tensor_id}")
+            seen.add(tensor_id)
         references = set(self.input_ids) | set(self.output_ids)
-        unknown = references - tensor_ids
+        unknown = references - seen
         if unknown:
             raise ValueError(f"stage references unknown tensor id: {sorted(unknown)}")
 

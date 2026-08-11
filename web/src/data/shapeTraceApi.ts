@@ -1,5 +1,50 @@
 import type { ShapeTrace, ShapeTraceIndexEntry } from "../shape-trace/types";
 
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function stringArray(value: unknown): string[] | null {
+  return Array.isArray(value) && value.every((item) => typeof item === "string")
+    ? value
+    : null;
+}
+
+function validateStageTensorReferences(stage: unknown): void {
+  if (!isObject(stage) || !Array.isArray(stage.tensors)) {
+    throw new Error("invalid shape trace stage payload");
+  }
+
+  const seen = new Set<string>();
+  for (const tensor of stage.tensors) {
+    if (!isObject(tensor) || typeof tensor.id !== "string" || tensor.id.length === 0) {
+      throw new Error("invalid shape trace tensor payload");
+    }
+    if (seen.has(tensor.id)) {
+      throw new Error(`duplicate tensor id: ${tensor.id}`);
+    }
+    seen.add(tensor.id);
+  }
+
+  const inputIds = stringArray(stage.input_ids);
+  const outputIds = stringArray(stage.output_ids);
+  if (inputIds === null || outputIds === null) {
+    throw new Error("invalid shape trace tensor references");
+  }
+  const missing = [...inputIds, ...outputIds].find((id) => !seen.has(id));
+  if (missing !== undefined) {
+    throw new Error(`unknown tensor id: ${missing}`);
+  }
+}
+
+function validateShapeTrace(payload: unknown): ShapeTrace {
+  if (!isObject(payload) || !Array.isArray(payload.stages)) {
+    throw new Error("invalid shape trace payload");
+  }
+  payload.stages.forEach(validateStageTensorReferences);
+  return payload as unknown as ShapeTrace;
+}
+
 export function shapeTraceKey(
   value: Pick<ShapeTraceIndexEntry, "operator" | "dataset" | "case_id">
 ): string {
@@ -29,5 +74,5 @@ export async function fetchShapeTrace(
   if (!response.ok) {
     throw new Error(`shape trace request failed: ${response.status}`);
   }
-  return (await response.json()) as ShapeTrace;
+  return validateShapeTrace(await response.json());
 }

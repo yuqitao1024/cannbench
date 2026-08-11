@@ -24,6 +24,35 @@ const trace: ShapeTrace = {
   }
 };
 
+const tensor = {
+  id: "query",
+  label: "Query",
+  logical_only: false,
+  axes: [{ symbol: "D", value: 128, meaning: "feature width", role: "preserved" as const }]
+};
+
+function traceWithStage(overrides: Record<string, unknown> = {}): unknown {
+  return {
+    ...trace,
+    stages: [
+      {
+        id: "projection",
+        component: "projection",
+        title: "Projection",
+        operation: "transform",
+        formula: "query -> output",
+        scope: "one row",
+        tensors: [tensor],
+        input_ids: ["query"],
+        output_ids: [],
+        contracted_axes: [],
+        insight: "Projects one row.",
+        ...overrides
+      }
+    ]
+  };
+}
+
 function response(payload: unknown): Response {
   return { ok: true, status: 200, json: async () => payload } as Response;
 }
@@ -51,6 +80,28 @@ describe("shapeTraceApi", () => {
   it("rejects a malformed trace index", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => response({ traces: null })));
     await expect(fetchShapeTraceIndex()).rejects.toThrow("invalid shape trace index payload");
+  });
+
+  it("rejects duplicate tensor ids at the fetched trace boundary", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => response(traceWithStage({ tensors: [tensor, { ...tensor }] })))
+    );
+
+    await expect(fetchShapeTrace("operator", "dataset", "case")).rejects.toThrow(
+      "duplicate tensor id: query"
+    );
+  });
+
+  it("rejects missing tensor references at the fetched trace boundary", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => response(traceWithStage({ output_ids: ["missing"] })))
+    );
+
+    await expect(fetchShapeTrace("operator", "dataset", "case")).rejects.toThrow(
+      "unknown tensor id: missing"
+    );
   });
 
   it("builds a stable identity key", () => {
