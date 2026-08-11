@@ -254,6 +254,15 @@ def _build_profile_kernel_selection(ctx: ProfileKernelSelectionContext):
     if ctx.implementation == "simt":
         return ProfileKernelSelection(
             kernel_name_patterns=("lightning_indexer", "aten_dsa_lightning_indexer"),
+            terminal_kernel_name_patterns=(
+                "lightning_indexer_decode_distributed_topk",
+                "lightning_indexer_decode_distributed_select_low_offsets",
+                "lightning_indexer_decode_radix_topk",
+                "lightning_indexer_radix_topk",
+                "lightning_indexer_prefill_q2",
+                "lightning_indexer_context_sharded",
+                "lightning_indexer_fused",
+            ),
             aggregate_across_files=True,
         )
     if ctx.backend == "nvidia" and ctx.implementation == "cuda_library":
@@ -268,16 +277,21 @@ def _build_profile_kernel_selection(ctx: ProfileKernelSelectionContext):
                 "copy",
                 "cast",
             ),
+            terminal_kernel_name_patterns=("topk", "radix", "sort"),
             aggregate_across_files=True,
             nvtx_range="cannbench_lightning_indexer_dynamic",
         )
     if ctx.backend == "ascend" and ctx.implementation == "vllm_ascend":
         return ProfileKernelSelection(
             kernel_name_patterns=("lightning", "indexer", "cat", "cast"),
+            terminal_kernel_name_patterns=("lightningindexer",),
             launch_count=64,
             aggregate_across_files=True,
         )
-    return ProfileKernelSelection(kernel_name_patterns=("lightning", "indexer"))
+    return ProfileKernelSelection(
+        kernel_name_patterns=("lightning", "indexer"),
+        terminal_kernel_name_patterns=("lightning", "indexer"),
+    )
 
 
 PLUGIN = OperatorPlugin(

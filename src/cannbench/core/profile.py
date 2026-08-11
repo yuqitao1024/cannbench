@@ -16,6 +16,7 @@ NVIDIA_TIME_DURATION_AVG = "gpu__time_duration.avg"
 @dataclass(frozen=True)
 class ProfileKernelSelection:
     kernel_name_patterns: tuple[str, ...] = ()
+    terminal_kernel_name_patterns: tuple[str, ...] = ()
     launch_count: int | None = None
     aggregate_across_files: bool = False
     nvtx_range: str | None = None
@@ -47,6 +48,33 @@ class DeviceProfileSummary:
             "backend": self.backend,
             "latency_ms": self.latency_ms,
             "source_files": list(self.source_files),
+        }
+
+
+@dataclass(frozen=True)
+class WorkflowProfileSummary:
+    backend: str
+    source_files: tuple[str, ...]
+    latency_ms: float
+    component_summaries: tuple[DeviceProfileSummary, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "latency_ms", float(self.latency_ms))
+
+    @property
+    def profile_summary(self) -> DeviceProfileSummary:
+        return DeviceProfileSummary(
+            backend=self.backend,
+            source_files=self.source_files,
+            latency_ms=self.latency_ms,
+        )
+
+    def to_json_dict(self) -> dict[str, object]:
+        return {
+            **self.profile_summary.to_json_dict(),
+            "components": [
+                component.to_json_dict() for component in self.component_summaries
+            ],
         }
 
 
@@ -181,6 +209,13 @@ def _looks_like_ncu_unit_row(row: dict[str, str]) -> bool:
     return value is not None and _parse_float(value) is None and _unit_from_text(value) != "ms"
 
 
+@dataclass(frozen=True)
+class _ProfileDurationRow:
+    duration_ms: float
+    kernel_name: str | None
+    source_file: str
+
+
 def _read_csv_duration_rows(path: Path, *, backend: str) -> list[tuple[float, str | None]]:
     durations: list[tuple[float, str | None]] = []
     with path.open(newline="") as handle:
@@ -198,6 +233,116 @@ def _read_csv_duration_rows(path: Path, *, backend: str) -> list[tuple[float, st
             if duration is not None:
                 durations.append((duration, _kernel_name_from_row(row)))
     return durations
+
+
+def _read_profile_duration_rows(
+    profile_dir: Path, *, backend: str
+) -> list[_ProfileDurationRow]:
+    rows: list[_ProfileDurationRow] = []
+    for csv_file in sorted(profile_dir.rglob("*.csv")):
+        source_file = str(csv_file.relative_to(profile_dir))
+        rows.extend(
+            _ProfileDurationRow(
+                duration_ms=duration,
+                kernel_name=kernel_name,
+                source_file=source_file,
+            )
+            for duration, kernel_name in _read_csv_duration_rows(
+                csv_file, backend=backend
+            )
+        )
+    return rows
+
+
+def _ordered_unique(values: list[str]) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(values))
+
+
+def read_workflow_profile(
+    profile_dir: Path,
+    *,
+    backend: str,
+    step_selections: tuple[ProfileKernelSelection, ...],
+) -> WorkflowProfileSummary:
+    if not step_selections:
+        raise ValueError("workflow profile requires at least one step selection")
+
+    rows = _read_profile_duration_rows(profile_dir, backend=backend)
+    if not rows:
+        raise ValueError(
+            f"no duration samples found in profiler CSV files under {profile_dir}"
+        )
+
+    boundaries: list[int] = []
+    for step_index, selection in enumerate(step_selections[:-1]):
+        terminal_patterns = selection.terminal_kernel_name_patterns
+        if not terminal_patterns:
+            raise ValueError(
+                f"non-final workflow step {step_index} requires terminal kernel "
+                "name patterns"
+            )
+        matching_indices = [
+            row_index
+            for row_index, row in enumerate(rows)
+            if _matches_kernel_name(row.kernel_name, terminal_patterns)
+        ]
+        if not matching_indices:
+            expected = ", ".join(terminal_patterns)
+            raise ValueError(
+                f"non-final workflow step {step_index} has no terminal kernel "
+                f"matching {expected!r}"
+            )
+        boundaries.append(matching_indices[-1])
+
+    if any(current <= previous for previous, current in zip(boundaries, boundaries[1:])):
+        raise ValueError("workflow terminal boundaries are out of workflow order")
+
+    span_ends = (*boundaries, len(rows) - 1)
+    span_start = 0
+    component_summaries: list[DeviceProfileSummary] = []
+    for step_index, (selection, span_end) in enumerate(
+        zip(step_selections, span_ends, strict=True)
+    ):
+        if span_end < span_start:
+            raise ValueError(f"workflow step {step_index} has an empty profile span")
+        span = rows[span_start : span_end + 1]
+        selected_rows = [
+            row
+            for row in span
+            if _matches_kernel_name(row.kernel_name, selection.kernel_name_patterns)
+        ]
+        if not selected_rows:
+            expected = ", ".join(selection.kernel_name_patterns)
+            raise ValueError(
+                f"workflow step {step_index} has no selected kernel rows "
+                f"matching {expected!r}"
+            )
+        component_summaries.append(
+            DeviceProfileSummary(
+                backend=backend,
+                latency_ms=sum(row.duration_ms for row in selected_rows),
+                source_files=_ordered_unique(
+                    [row.source_file for row in selected_rows]
+                ),
+            )
+        )
+        span_start = span_end + 1
+
+    source_files = _ordered_unique(
+        [
+            source_file
+            for component in component_summaries
+            for source_file in component.source_files
+        ]
+    )
+    return WorkflowProfileSummary(
+        backend=backend,
+        source_files=source_files,
+        latency_ms=sum(
+            component.latency_ms for component in component_summaries
+        ),
+        component_summaries=tuple(component_summaries),
+    )
 
 
 def read_device_profile(

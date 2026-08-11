@@ -13,6 +13,13 @@ def test_simt_profile_sums_all_sparse_attention_kernel_stages():
         "aten_dsa_sparse_attention",
     )
     assert selection.aggregate_across_files is True
+    assert selection.terminal_kernel_name_patterns == (
+        "sparse_attention_head64_combine",
+        "sparse_attention_head64_fused",
+        "sparse_attention_postprocess",
+        "sparse_attention_prefill_fused",
+        "sparse_attention_fused",
+    )
 
 
 def test_cuda_library_profile_uses_fixed_dynamic_kernel_selection():
@@ -36,6 +43,11 @@ def test_cuda_library_profile_uses_fixed_dynamic_kernel_selection():
     assert selection.launch_count is None
     assert selection.nvtx_range == "cannbench_sparse_attention_dynamic"
     assert selection.aggregate_across_files is True
+    assert selection.terminal_kernel_name_patterns == (
+        "flash_mla",
+        "flashmla",
+        "sparse_attention",
+    )
 
 
 def test_vllm_ascend_profile_includes_dynamic_lowering_and_lse():
@@ -58,3 +70,4 @@ def test_vllm_ascend_profile_includes_dynamic_lowering_and_lse():
     )
     assert selection.launch_count == 64
     assert selection.aggregate_across_files is True
+    assert selection.terminal_kernel_name_patterns == ("sparseflashattention",)

@@ -335,6 +335,13 @@ def _build_profile_kernel_selection(ctx: ProfileKernelSelectionContext):
     if ctx.implementation == "simt":
         return ProfileKernelSelection(
             kernel_name_patterns=("sparse_attention", "aten_dsa_sparse_attention"),
+            terminal_kernel_name_patterns=(
+                "sparse_attention_head64_combine",
+                "sparse_attention_head64_fused",
+                "sparse_attention_postprocess",
+                "sparse_attention_prefill_fused",
+                "sparse_attention_fused",
+            ),
             aggregate_across_files=True,
         )
     if ctx.backend == "nvidia" and ctx.implementation == "cuda_library":
@@ -349,6 +356,11 @@ def _build_profile_kernel_selection(ctx: ProfileKernelSelectionContext):
                 "index",
                 "arange",
                 "fill",
+            ),
+            terminal_kernel_name_patterns=(
+                "flash_mla",
+                "flashmla",
+                "sparse_attention",
             ),
             aggregate_across_files=True,
             nvtx_range="cannbench_sparse_attention_dynamic",
@@ -366,10 +378,14 @@ def _build_profile_kernel_selection(ctx: ProfileKernelSelectionContext):
                 "log",
                 "add",
             ),
+            terminal_kernel_name_patterns=("sparseflashattention",),
             launch_count=64,
             aggregate_across_files=True,
         )
-    return ProfileKernelSelection(kernel_name_patterns=("sparse", "attention"))
+    return ProfileKernelSelection(
+        kernel_name_patterns=("sparse", "attention"),
+        terminal_kernel_name_patterns=("sparse", "attention"),
+    )
 
 
 PLUGIN = OperatorPlugin(

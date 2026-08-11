@@ -6,6 +6,7 @@ from cannbench.core.profile import (
     ProfileKernelSelection,
     ncu_profile_options,
     read_device_profile,
+    read_workflow_profile,
     write_device_profile_summary,
 )
 from cannbench.operators import get_operator_plugin
@@ -109,6 +110,140 @@ def test_read_device_profile_can_sum_multiple_matching_kernels(tmp_path):
     )
 
     assert summary.latency_ms == 1.0
+
+
+def test_read_workflow_profile_partitions_overlapping_names_by_order(tmp_path):
+    profile_dir = tmp_path / "profile"
+    profile_dir.mkdir()
+    (profile_dir / "OpBasicInfo.csv").write_text(
+        "Op Name,Task Duration(us)\n"
+        "InitKernel,100\n"
+        "Cast_indexer,2\n"
+        "LightningIndexerMain,30\n"
+        "Cast_attention,3\n"
+        "SparseFlashAttention,50\n"
+        "UnrelatedKernel,999\n"
+    )
+
+    summary = read_workflow_profile(
+        profile_dir,
+        backend="ascend",
+        step_selections=(
+            ProfileKernelSelection(
+                kernel_name_patterns=("cast", "lightning"),
+                terminal_kernel_name_patterns=("lightningindexermain",),
+            ),
+            ProfileKernelSelection(
+                kernel_name_patterns=("cast", "sparseflashattention"),
+            ),
+        ),
+    )
+
+    assert [
+        component.latency_ms for component in summary.component_summaries
+    ] == pytest.approx([0.032, 0.053])
+    assert summary.latency_ms == pytest.approx(0.085)
+    assert summary.source_files == ("OpBasicInfo.csv",)
+
+
+def test_read_workflow_profile_requires_non_final_terminal_pattern(tmp_path):
+    profile_dir = tmp_path / "profile"
+    profile_dir.mkdir()
+    (profile_dir / "OpBasicInfo.csv").write_text(
+        "Op Name,Task Duration(us)\nIndexerMain,10\nAttentionMain,20\n"
+    )
+
+    with pytest.raises(ValueError, match="non-final workflow step 0.*terminal"):
+        read_workflow_profile(
+            profile_dir,
+            backend="ascend",
+            step_selections=(
+                ProfileKernelSelection(kernel_name_patterns=("indexer",)),
+                ProfileKernelSelection(kernel_name_patterns=("attention",)),
+            ),
+        )
+
+
+def test_read_workflow_profile_rejects_missing_terminal_kernel(tmp_path):
+    profile_dir = tmp_path / "profile"
+    profile_dir.mkdir()
+    (profile_dir / "OpBasicInfo.csv").write_text(
+        "Op Name,Task Duration(us)\nIndexerHelper,10\nAttentionMain,20\n"
+    )
+
+    with pytest.raises(ValueError, match="step 0 has no terminal kernel"):
+        read_workflow_profile(
+            profile_dir,
+            backend="ascend",
+            step_selections=(
+                ProfileKernelSelection(
+                    kernel_name_patterns=("indexer",),
+                    terminal_kernel_name_patterns=("indexerterminal",),
+                ),
+                ProfileKernelSelection(kernel_name_patterns=("attention",)),
+            ),
+        )
+
+
+def test_read_workflow_profile_rejects_out_of_order_terminals(tmp_path):
+    profile_dir = tmp_path / "profile"
+    profile_dir.mkdir()
+    (profile_dir / "OpBasicInfo.csv").write_text(
+        "Op Name,Task Duration(us)\n"
+        "SecondTerminal,10\n"
+        "FirstTerminal,20\n"
+        "FinalMain,30\n"
+    )
+
+    with pytest.raises(ValueError, match="terminal boundaries are out of workflow order"):
+        read_workflow_profile(
+            profile_dir,
+            backend="ascend",
+            step_selections=(
+                ProfileKernelSelection(
+                    kernel_name_patterns=("first",),
+                    terminal_kernel_name_patterns=("firstterminal",),
+                ),
+                ProfileKernelSelection(
+                    kernel_name_patterns=("second",),
+                    terminal_kernel_name_patterns=("secondterminal",),
+                ),
+                ProfileKernelSelection(kernel_name_patterns=("final",)),
+            ),
+        )
+
+
+def test_read_workflow_profile_reads_ncu_wide_rows_in_physical_order(tmp_path):
+    profile_dir = tmp_path / "profile"
+    profile_dir.mkdir()
+    (profile_dir / "ncu.csv").write_text(
+        '"ID","Kernel Name","gpu__time_duration.avg"\n'
+        '"","","usecond"\n'
+        '"1","topk_stage","4"\n'
+        '"2","topk_terminal","6"\n'
+        '"3","cast_attention","2"\n'
+        '"4","flash_attention","8"\n'
+    )
+
+    summary = read_workflow_profile(
+        profile_dir,
+        backend="nvidia",
+        step_selections=(
+            ProfileKernelSelection(
+                kernel_name_patterns=("topk", "cast"),
+                terminal_kernel_name_patterns=("topk_terminal",),
+            ),
+            ProfileKernelSelection(
+                kernel_name_patterns=("cast", "flash_attention"),
+            ),
+        ),
+    )
+
+    assert [component.latency_ms for component in summary.component_summaries] == [
+        0.01,
+        0.01,
+    ]
+    assert summary.latency_ms == pytest.approx(0.02)
 
 
 def test_read_device_profile_rejects_unexpected_kernel_name(tmp_path):
