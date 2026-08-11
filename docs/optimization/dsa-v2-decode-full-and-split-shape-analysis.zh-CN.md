@@ -803,3 +803,9 @@ vLLM-Ascend：
 - `csrc/attention/sparse_flash_attention/op_kernel/arch35/sparse_flash_attention_kernel_mla.h`
 - `csrc/attention/sparse_flash_attention/op_kernel/arch35/sparse_flash_attention_service_cube_mla.h`
 - `csrc/attention/sparse_flash_attention/op_kernel/arch35/sparse_flash_attention_service_vector_mla.h`
+
+## Related shape resources
+
+- [Canonical prefill full-flow shape analysis](./dsa-v2-prefill-full-shape-analysis.zh-CN.md)
+- [Shape Explorer design](../designs/dsa-v32-shape-explorer/design.md)
+- [Saved visual baseline / static mockup](../designs/dsa-v32-shape-explorer/shape-explorer-mockup.html)

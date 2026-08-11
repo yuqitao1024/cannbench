@@ -277,7 +277,9 @@ No decode tile values may be reused for prefill.
 
 ## Documentation Delivery
 
-Add a parallel V3.2 prefill analysis under `docs/optimization/`. It covers:
+The completed parallel V3.2 prefill analysis is
+[`dsa-v2-prefill-full-shape-analysis.zh-CN.md`](../../optimization/dsa-v2-prefill-full-shape-analysis.zh-CN.md).
+It covers:
 
 - symbols, causal positions, and valid lengths;
 - Indexer inputs and logical intermediates;
