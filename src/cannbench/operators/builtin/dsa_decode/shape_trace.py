@@ -186,12 +186,12 @@ def _build_symbols(
 def _build_tensors(symbols: dict[str, ShapeAxis]) -> dict[str, ShapeTensor]:
     return {
         "index_query": _tensor(symbols, "index_query", "Index query", ("Hi", "Di")),
-        "index_key": _tensor(symbols, "index_key", "Index key", ("C", "Hi", "Di")),
+        "index_key": _tensor(symbols, "index_key", "Index key", ("C", "Di")),
         "index_key_t": _tensor(
             symbols,
             "index_key_t",
             "Index key transposed",
-            ("Hi", "Di", "C"),
+            ("Di", "C"),
         ),
         "head_scores": _tensor(
             symbols,

@@ -24,7 +24,7 @@ def test_v2_device_trace_matches_current_task_and_tile_layout():
     assert "2 x 1 x 16" in index_kernel.task_formula
     assert [axis.value for axis in index_kernel.tile_tensors[1].axes] == [32, 128]
     assert (attention_kernel.task_count, attention_kernel.used_core_count) == (8, 8)
-    assert "P=1" in attention_kernel.summary
+    assert attention_kernel.summary == "Head64, P=1 direct output, no Combine"
     assert [axis.value for axis in attention_kernel.tile_tensors[-1].axes] == [64, 128]
 
 
