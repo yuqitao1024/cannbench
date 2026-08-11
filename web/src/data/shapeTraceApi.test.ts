@@ -15,11 +15,34 @@ const indexEntry: ShapeTraceIndexEntry = {
   group: "deepseek-v32"
 };
 
+const axis = { symbol: "D", value: 128, meaning: "feature width", role: "preserved" as const };
+
+const tensor = {
+  id: "query",
+  label: "Query",
+  logical_only: false,
+  axes: [axis]
+};
+
+const stage = {
+  id: "projection",
+  component: "projection",
+  title: "Projection",
+  operation: "transform",
+  formula: "query -> output",
+  scope: "one row",
+  tensors: [tensor],
+  input_ids: ["query"],
+  output_ids: [],
+  contracted_axes: [],
+  insight: "Projects one row."
+};
+
 const trace: ShapeTrace = {
   ...indexEntry,
   schema_version: 1,
-  symbols: [],
-  stages: [],
+  symbols: [axis],
+  stages: [stage],
   device_execution: {
     status: "unavailable",
     implementation: "simt",
@@ -29,31 +52,11 @@ const trace: ShapeTrace = {
   }
 };
 
-const tensor = {
-  id: "query",
-  label: "Query",
-  logical_only: false,
-  axes: [{ symbol: "D", value: 128, meaning: "feature width", role: "preserved" as const }]
-};
-
 function traceWithStage(overrides: Record<string, unknown> = {}): unknown {
   return {
     ...trace,
     stages: [
-      {
-        id: "projection",
-        component: "projection",
-        title: "Projection",
-        operation: "transform",
-        formula: "query -> output",
-        scope: "one row",
-        tensors: [tensor],
-        input_ids: ["query"],
-        output_ids: [],
-        contracted_axes: [],
-        insight: "Projects one row.",
-        ...overrides
-      }
+      { ...stage, ...overrides }
     ]
   };
 }
@@ -105,6 +108,104 @@ describe("shapeTraceApi", () => {
   it("rejects a malformed trace index", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => response({ traces: null })));
     await expect(fetchShapeTraceIndex()).rejects.toThrow("invalid shape trace index payload");
+  });
+
+  it("rejects malformed primitive fields in a trace index entry", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => response({ traces: [{ ...indexEntry, phase: 3 }] }))
+    );
+    await expect(fetchShapeTraceIndex()).rejects.toThrow("invalid shape trace index entry");
+  });
+
+  it("rejects duplicate identities in the trace index", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => response({ traces: [indexEntry, { ...indexEntry }] }))
+    );
+    await expect(fetchShapeTraceIndex()).rejects.toThrow("duplicate shape trace index identity");
+  });
+
+  it("rejects an unsupported detail schema version", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => response({ ...trace, schema_version: 2 })));
+    await expect(fetchShapeTrace("operator", "dataset", "case")).rejects.toThrow(
+      "invalid shape trace schema_version"
+    );
+  });
+
+  it.each([
+    ["axis value", { ...trace, symbols: [{ ...axis, value: 0 }] }],
+    ["tensor logical_only", traceWithStage({ tensors: [{ ...tensor, logical_only: "no" }] })],
+    ["stage component", traceWithStage({ component: 1 })],
+    ["contracted axis reference", traceWithStage({ contracted_axes: ["missing"] })]
+  ])("rejects malformed %s fields", async (_label, payload) => {
+    vi.stubGlobal("fetch", vi.fn(async () => response(payload)));
+    await expect(fetchShapeTrace("operator", "dataset", "case")).rejects.toThrow(
+      "invalid shape trace"
+    );
+  });
+
+  it("rejects duplicate stage ids", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => response({ ...trace, stages: [stage, { ...stage }] }))
+    );
+    await expect(fetchShapeTrace("operator", "dataset", "case")).rejects.toThrow(
+      "duplicate shape trace stage id"
+    );
+  });
+
+  it("rejects inconsistent device status fields", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        response({
+          ...trace,
+          device_execution: {
+            status: "available",
+            implementation: "simt",
+            version: "v1",
+            message: null,
+            kernels: []
+          }
+        })
+      )
+    );
+    await expect(fetchShapeTrace("operator", "dataset", "case")).rejects.toThrow(
+      "invalid available device execution"
+    );
+  });
+
+  it("rejects malformed device kernel counts", async () => {
+    const kernel = {
+      id: "kernel",
+      title: "Kernel",
+      summary: "Summary",
+      task_count: 0,
+      used_core_count: 1,
+      task_formula: "B",
+      task_axes: [axis],
+      tile_tensors: [tensor],
+      steps: ["Run."]
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        response({
+          ...trace,
+          device_execution: {
+            status: "available",
+            implementation: "simt",
+            version: "v1",
+            message: null,
+            kernels: [kernel]
+          }
+        })
+      )
+    );
+    await expect(fetchShapeTrace("operator", "dataset", "case")).rejects.toThrow(
+      "invalid device kernel task/core counts"
+    );
   });
 
   it("rejects duplicate tensor ids at the fetched trace boundary", async () => {

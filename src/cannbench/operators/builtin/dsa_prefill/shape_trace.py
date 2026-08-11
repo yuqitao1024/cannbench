@@ -301,6 +301,7 @@ def _build_aggregate_tensors(
 def _build_stages(
     row_tensors: dict[str, ShapeTensor],
     aggregate_tensors: dict[str, ShapeTensor],
+    causal_insight: str,
 ) -> tuple[ShapeStage, ...]:
     stages = []
     for (
@@ -332,10 +333,29 @@ def _build_stages(
                 input_ids=input_ids,
                 output_ids=output_ids,
                 contracted_axes=contracted_axes,
-                insight=formula,
+                insight=causal_insight if stage_id == "topk" else formula,
             )
         )
     return tuple(stages)
+
+
+def _build_causal_insight(
+    indexer: LightningIndexerCase,
+    sparse: SparseAttentionCase,
+) -> str:
+    start = indexer.resolved_query_start_positions[0]
+    if sparse.resolved_query_start_positions != (start,):
+        raise ValueError("Prefill component query positions do not match")
+    q_end = indexer.query_tokens - 1
+    first_valid = min(indexer.context_tokens, start + 1)
+    last_valid = min(indexer.context_tokens, start + indexer.query_tokens)
+    return (
+        f"Canonical causal prefill: q=0..{q_end}; position(q)={start}+q; "
+        f"valid_length(q)=min({indexer.context_tokens},{start}+q+1); "
+        f"valid length range {first_valid}..{last_valid}. "
+        "Indexer masks c >= valid_length(q); "
+        "Attention masks index > position(q)."
+    )
 
 
 def list_dsa_prefill_shape_trace_cases() -> tuple[ShapeTraceKey, ...]:
@@ -377,6 +397,7 @@ def build_dsa_prefill_shape_trace(dataset: str, case_id: str) -> ShapeTrace:
         stages=_build_stages(
             _build_row_tensors(symbols),
             _build_aggregate_tensors(symbols, indexer, sparse),
+            _build_causal_insight(indexer, sparse),
         ),
         device_execution=DeviceExecutionTrace(
             status="unavailable",

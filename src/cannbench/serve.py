@@ -13,7 +13,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 from cannbench.operators import get_operator_plugin, list_operator_plugins
-from cannbench.operators.shape_trace import shape_trace_to_payload
+from cannbench.operators.shape_trace import ShapeTrace, shape_trace_to_payload
 
 
 SENSITIVE_FIELDS = {
@@ -117,7 +117,14 @@ def build_shape_trace_payload(
     plugin = get_operator_plugin(operator)
     if plugin.build_shape_trace is None:
         raise LookupError(f"shape trace is not available for operator: {operator}")
-    return shape_trace_to_payload(plugin.build_shape_trace(dataset, case_id))
+    trace = plugin.build_shape_trace(dataset, case_id)
+    if not isinstance(trace, ShapeTrace) or (
+        trace.operator,
+        trace.dataset,
+        trace.case_id,
+    ) != (operator, dataset, case_id):
+        raise ValueError("shape trace identity does not match request")
+    return shape_trace_to_payload(trace)
 
 
 def _operators_builtin_root() -> Path:

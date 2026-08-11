@@ -12,9 +12,9 @@ deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048
 
 1. 不考虑 AIC/AIV 切分时，`dsa_decode` 从 Lightning Indexer 到 Sparse
    Attention 的完整输入、输出、逻辑中间张量和矩阵计算；
-2. 采用 vLLM-Ascend MLA 风格后，如何沿 Query head 和 selected token 切成
-   Head64、selected128、双 AIC 和四 AIV，以及哪些数据可以跨 Head64 group
-   复用。
+2. 当前自动 decode 路由如何沿 Query head 和 selected token 切成 Head64、
+   selected64，并沿 QK feature 维使用 128-wide compute tile；随后再单独说明
+   vLLM-Ascend 风格的 selected128 特殊候选及其跨 Head64 group 复用边界。
 
 本文中的 shape 与数据流来自 CannBench case、参考实现和已核对的
 vLLM-Ascend `a5b0ce10d84bf76dd9c5c9e7ab9a5ddeed5af7ca` 源码。资源布局中标为
@@ -329,7 +329,7 @@ actual_seq_lengths_query [B] = [2,4]
 actual_seq_lengths_kv    [B] = [32768,65536]
 ```
 
-## 7. vLLM 风格的第一层拆分：Head64 和 selected128
+## 7. 当前自动路由的第一层拆分：Head64、selected64 和 QK feature128
 
 ### 7.1 任务数
 
@@ -340,10 +340,10 @@ group 0 -> global heads [0,64)
 group 1 -> global heads [64,128)
 ```
 
-沿 selected token 每 128 行一个 tile：
+沿 selected token 每 64 行一个 tile：
 
 ```text
-selected_tile_count = S / 128 = 2048 / 128 = 16
+selected_tile_count = S / 64 = 2048 / 64 = 32
 ```
 
 不沿 selected 维生成独立 output task 时，基础 AIC 任务数为：
@@ -354,47 +354,49 @@ AIC tasks = B * Tq * ceil(H / 64)
           = 8
 ```
 
-每个 AIC task 顺序处理 16 个 selected128 tile。
+每个 AIC task 顺序处理 32 个 selected64 tile。
 
-### 7.2 单个 Head64、selected128 tile 的 shape
+### 7.2 单个 Head64、selected64 tile 的 shape
 
 固定 `(b,q,head_group,tile)`：
 
 ```text
 Q_g       [64,576]
-indices_t [128]
-K_t       [128,576]
-V_t       [128,512]
+indices_t [64]
+K_t       [64,576]
+V_t       [64,512]
 ```
 
-QK：
+QK 沿 feature 维每次收缩最多 128 个元素。完整 576 维由四个 128-wide tile
+和最后一个 64-wide tile 累加：
 
 ```text
-[64,576] x [576,128] -> Score_t [64,128]
+[64,128] x [128,64] -> Score_t [64,64]
 ```
 
 Softmax tile：
 
 ```text
-Score_t [64,128] -> P_t [64,128]
+Score_t [64,64] -> P_t [64,64]
 ```
 
 PV：
 
 ```text
-[64,128] x [128,512] -> O_t [64,512]
+[64,64] x [64,128] -> O_subtile [64,128]
+4 个 value128 subtile -> O_t [64,512]
 ```
 
 单 tile 的 QK 和 PV 乘加量为：
 
 ```text
-QK_tile = 64 * 128 * 576 = 4,718,592 MAC
-PV_tile = 64 * 128 * 512 = 4,194,304 MAC
+QK_tile = 64 * 64 * 576 = 2,359,296 MAC
+PV_tile = 64 * 64 * 512 = 2,097,152 MAC
 ```
 
 ### 7.3 为什么 tile softmax 不能各自独立归一化
 
-16 个 selected128 tile 共同组成长度 2048 的同一行 softmax。每个 tile 必须更新
+32 个 selected64 tile 共同组成长度 2048 的同一行 softmax。每个 tile 必须更新
 running max、running sum 和 running output。概念上的稳定递推为：
 
 ```text
@@ -404,8 +406,8 @@ E_t     = exp(Score_t - m_t)
 l_t     = alpha_t * l_{t-1} + rowsum(E_t)
 o_t     = alpha_t * o_{t-1} + E_t @ V_t
 
-final_output = o_15 / l_15
-final_lse    = m_15 + log(l_15)
+final_output = o_31 / l_31
+final_lse    = m_31 + log(l_31)
 ```
 
 每个 Head64 task 的持久状态 shape 为：
@@ -419,7 +421,10 @@ running_out [64,512]
 它们属于当前 Head64 group，不能与另一个 group 共享；`indices_t/K_t/V_t` 则可以
 共享。
 
-## 8. 第二层拆分：双 AIC、四 AIV
+## 8. vLLM selected128 特殊候选：双 AIC、四 AIV
+
+本节开始讨论单独 gated 的 vLLM rolling 候选。其内部 selected128 outer tile
+不改变上一节所述自动 P=1 plan 的 `kHead64SelectedTile=64` contract。
 
 ### 8.1 两个 AIC 负责不同 Query heads
 
@@ -604,7 +609,7 @@ payload                       516,096 B
 
 ## 11. 跨 Head64 group 共享 gather 的总量
 
-### 11.1 当前不共享时
+### 11.1 vLLM 特殊候选不共享时
 
 每个 `(b,q)` 有两个 Head64 group，每个 group 都完整 gather 16 个 selected128
 tile：
@@ -686,17 +691,18 @@ total        = 1,769,984 B
 
 ## 12. 当前 CannBench 与 vLLM 风格拆分的关键差异
 
-| 维度 | 当前 CannBench P=1 rolling 候选 | vLLM 风格目标 |
+| 维度 | 当前自动 P=1 路由 | vLLM selected128 特殊候选 |
 | --- | --- | --- |
 | Query head tile | 64 | 64 |
-| selected tile | 128 | 128 |
+| selected plan/outer tile | 64 | 128 |
+| QK feature tile | 128 | 128 |
 | 每 `(b,q)` AIC 数 | 2 | 2 |
 | 两个 AIV 的计算职责 | 各消费 32 Query heads | 各消费 32 Query heads |
-| 原始 KV gather | 每个 Head64 group 各 gather `[128,576]` | 两个 group 合作 gather一份 `[128,576]` |
-| Gather producer | 每组两个 AIV 各 64 selected rows | 四个 AIV 各 32 selected rows |
-| QK | `[64,576]x[576,128]` | 相同 |
-| PV | 两次 `[64,128]x[128,256]` | 逻辑上 `[64,128]x[128,512]` |
-| selected 分区 | P=1，单 task 顺序处理 16 tiles | P=1，单 task 顺序处理 16 tiles |
+| 原始 KV gather | 每个 Head64 group 各 gather `[64,576]` | 两个 group 合作 gather一份 `[128,576]` |
+| Gather producer | 每组两个 AIV 合作产生 64 selected rows | 四个 AIV 各 32 selected rows |
+| QK compute | `[64,128]x[128,64] -> [64,64]` | `[64,128]x[128,128] -> [64,128]` |
+| PV | 四次 `[64,64]x[64,128]` | 逻辑上 `[64,128]x[128,512]` |
+| selected 分区 | P=1，单 task 顺序处理 32 tiles | P=1，单 task 顺序处理 16 outer tiles |
 | 最终结果 | 直接写 output/LSE | 直接写 output/LSE |
 
 当前 main 的 P=4 路径则是另一种任务拆分：
@@ -717,7 +723,7 @@ tasks = B * Tq * head_groups * selected_partitions
 = 4 MiB
 ```
 
-P=1 rolling/vLLM 风格通过在线 softmax 在同一 task 内顺序合并 16 个 tile，避免这块
+P=1 vLLM 特殊候选通过在线 softmax 在同一 task 内顺序合并 16 个 outer tile，避免这块
 4 MiB partial output 和 Combine；与此同时 AIC task 数从 32 降为 8。前者减少 GM
 和 launch，后者降低并行度，因此不能只看其中一项预测最终性能。
 
@@ -744,7 +750,7 @@ P=1 rolling/vLLM 风格通过在线 softmax 在同一 task 内顺序合并 16 �
    P [128,2048] x V [2048,512]
      -> output [128,512]
 
-3. Attention，Head64/selected128 拆分
+3. Attention，vLLM Head64/selected128 特殊候选拆分
    heads [0,64) 和 [64,128) -> 2 个 AIC
    indices[0,0,:] -> 16 个 [128] tile
    每轮四个 AIV各 gather [32,576]
@@ -767,7 +773,7 @@ P=1 rolling/vLLM 风格通过在线 softmax 在同一 task 内顺序合并 16 �
    原始 KV gather 在数学上只需一次。
 3. Query、Score、softmax state、P 和 output 都依赖 Query head，不能跨两个
    Head64 group 共享。
-4. selected128 tile 只是在线 softmax 的一个分块，16 个 tile 必须通过 running
+4. vLLM 特殊候选的 selected128 outer tile 只是在线 softmax 的一个分块，16 个 tile 必须通过 running
    max/sum/output 合并，不能做 16 个互不相关的 softmax。
 5. 四 AIV 共享 gather 把 `[128,576]` 切成四个 `[32,576]` producer quarter；
    每个 AIV 后续消费的 `[32,128]` Score half 则沿 Query head 切分，两种 32

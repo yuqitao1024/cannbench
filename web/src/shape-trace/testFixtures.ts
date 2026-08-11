@@ -1,19 +1,29 @@
 import type { ShapeStage, ShapeTrace } from "./types";
 
 export function makeShapeTrace(phase: "decode" | "prefill" = "decode"): ShapeTrace {
-  const stages = Array.from({ length: 8 }, (_, index): ShapeStage => ({
-    id: `stage-${index}`,
-    component: index < 4 ? "lightning_indexer" : "sparse_attention",
-    title: index === 0 ? "Indexer projection" : index === 7 ? "Output" : `Stage ${index + 1}`,
-    operation: index === 7 ? "matmul" : "inputs",
-    formula: index === 7 ? "[H,S] x [S,Dv] -> [H,Dv]" : "input",
-    scope: "one query row",
-    tensors: [],
-    input_ids: [],
-    output_ids: [],
-    contracted_axes: [],
-    insight: "Fixture stage."
-  }));
+  const stages = Array.from({ length: 8 }, (_, index): ShapeStage => {
+    const tensorId = `tensor-${index}`;
+    return {
+      id: `stage-${index}`,
+      component: index < 4 ? "lightning_indexer" : "sparse_attention",
+      title: index === 0 ? "Indexer projection" : index === 7 ? "Output" : `Stage ${index + 1}`,
+      operation: index === 7 ? "matmul" : "inputs",
+      formula: index === 7 ? "[H,S] x [S,Dv] -> [H,Dv]" : "input",
+      scope: "one query row",
+      tensors: [
+        {
+          id: tensorId,
+          label: `Tensor ${index}`,
+          axes: [{ symbol: "D", value: 128, meaning: "feature width", role: "preserved" }],
+          logical_only: false
+        }
+      ],
+      input_ids: [],
+      output_ids: [tensorId],
+      contracted_axes: [],
+      insight: "Fixture stage."
+    };
+  });
   return {
     schema_version: 1,
     operator: phase === "decode" ? "dsa_decode" : "dsa_prefill",
@@ -21,7 +31,7 @@ export function makeShapeTrace(phase: "decode" | "prefill" = "decode"): ShapeTra
     case_id: `${phase}-case`,
     phase,
     group: "deepseek-v32",
-    symbols: [],
+    symbols: [{ symbol: "D", value: 128, meaning: "feature width", role: "preserved" }],
     stages,
     device_execution: {
       status: "unavailable",

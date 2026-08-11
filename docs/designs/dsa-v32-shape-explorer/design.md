@@ -230,8 +230,9 @@ For the current V3.2 BF16 `v2` implementation, the trace records:
 - Selected partitions: `P=1` for the current automatic decode route.
 - Logical tasks: `R * ceil(H/64) = 4 * 2 = 8`.
 - Used AIC count: 8 for this task count and implementation limit.
-- QK tile view: `[64,576] x [576,128] -> [64,128]`.
-- Selected plan tile: 64 with a QK subtile of 128.
+- QK compute tile: `[64,128] x [128,64] -> [64,64]`.
+- Selected-token tile: 64; QK feature tile: 128. The full 576 feature
+  dimension is contracted over successive compute tiles.
 - Online softmax/PV produces direct output for `P=1`; no partial-output Combine
   stage is shown.
 

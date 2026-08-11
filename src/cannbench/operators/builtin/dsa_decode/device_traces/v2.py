@@ -28,7 +28,8 @@ def build_v2_device_trace(
     context_per_shard = indexer.context_tokens // context_shards
     context_tile = 32
     head_tile = 64
-    selected_subtile = 128
+    selected_tile = 64
+    qk_tile = 128
     head_groups = sparse.query_heads // head_tile
     attention_tasks = sparse.batch * sparse.query_tokens * head_groups
 
@@ -120,9 +121,9 @@ def build_v2_device_trace(
                 axes=(
                     _axis("Ht", head_tile, "query heads per tile", "preserved"),
                     _axis(
-                        "Dqk",
-                        sparse.qk_head_dim,
-                        "QK feature dimension",
+                        "Dqkt",
+                        qk_tile,
+                        "QK features per compute tile",
                         "contracted",
                     ),
                 ),
@@ -132,12 +133,12 @@ def build_v2_device_trace(
                 label="Selected K transposed",
                 axes=(
                     _axis(
-                        "Dqk",
-                        sparse.qk_head_dim,
-                        "QK feature dimension",
+                        "Dqkt",
+                        qk_tile,
+                        "QK features per compute tile",
                         "contracted",
                     ),
-                    _axis("St", selected_subtile, "selected-token subtile", "produced"),
+                    _axis("St", selected_tile, "selected tokens per tile", "produced"),
                 ),
             ),
             ShapeTensor(
@@ -145,14 +146,15 @@ def build_v2_device_trace(
                 label="Score tile",
                 axes=(
                     _axis("Ht", head_tile, "query heads per tile", "preserved"),
-                    _axis("St", selected_subtile, "selected-token subtile", "produced"),
+                    _axis("St", selected_tile, "selected tokens per tile", "produced"),
                 ),
                 logical_only=True,
             ),
         ),
         steps=(
             "Load one Head64 query group.",
-            f"Stream selected tokens in subtiles of {selected_subtile}.",
+            f"Stream selected tokens in tiles of {selected_tile}.",
+            f"Contract QK features in tiles of {qk_tile}.",
             "Accumulate QK, online softmax, and PV directly to output.",
         ),
     )

@@ -248,3 +248,15 @@ it("renders a not-found state", async () => {
 
   expect(await screen.findByRole("status")).toHaveTextContent("Shape trace not found");
 });
+
+it("renders an invalid-link state for a malformed route component response", async () => {
+  window.history.pushState(
+    {},
+    "",
+    "/shape-explorer?operator=..%2Funsafe&dataset=realistic&case=case"
+  );
+  vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ error: "unsafe" }, 400));
+  render(<ShapeExplorerPage />);
+
+  expect(await screen.findByRole("status")).toHaveTextContent("Invalid shape trace link");
+});

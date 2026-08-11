@@ -420,7 +420,7 @@
             <div class="task-lane">
               <div class="task-block attn">r0 / H0..63</div><div class="task-block attn">r0 / H64..127</div><div class="task-block attn">r1 / H0..63</div><div class="task-block attn">r1 / H64..127</div>
               <div class="task-block attn">r2 / H0..63</div><div class="task-block attn">r2 / H64..127</div><div class="task-block attn">r3 / H0..63</div><div class="task-block attn">r3 / H64..127</div>
-              <div class="tile-detail"><span class="tile-chip">Q [64,576]</span><span class="arrow">x</span><span class="tile-chip">K selected tile [128,576]^T</span><span class="arrow">-></span><span class="tile-chip">score [64,128]</span><span class="arrow">-> online softmax / PV</span></div>
+              <div class="tile-detail"><span class="tile-chip">Q [64,128]</span><span class="arrow">x</span><span class="tile-chip">K^T [128,64]</span><span class="arrow">-></span><span class="tile-chip">score [64,64]</span><span class="arrow">-> online softmax / PV</span></div>
             </div>
           </div>
         </div>

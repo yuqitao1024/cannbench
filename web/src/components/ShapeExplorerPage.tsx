@@ -147,13 +147,11 @@ export function ShapeExplorerPage() {
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
         setTrace(null);
-        setStatus(
-          error instanceof ShapeTraceApiError &&
-            error.request === "detail" &&
-            error.status === 404
-            ? "not-found"
-            : "error"
-        );
+        if (error instanceof ShapeTraceApiError && error.request === "detail") {
+          setStatus(error.status === 400 ? "invalid" : error.status === 404 ? "not-found" : "error");
+        } else {
+          setStatus("error");
+        }
       });
     void fetchShapeTraceIndex(controller.signal)
       .then((nextIndex) => {

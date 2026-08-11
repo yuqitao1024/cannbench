@@ -1,9 +1,13 @@
+from dataclasses import replace
 from http import HTTPStatus
 from io import BytesIO
 from pathlib import Path
 
 import cannbench.serve as serve
 import pytest
+from cannbench.operators.builtin.dsa_decode.shape_trace import (
+    build_dsa_decode_shape_trace,
+)
 from cannbench.operators.shape_trace import ShapeTraceKey
 from cannbench.serve import (
     build_shape_trace_payload,
@@ -50,6 +54,16 @@ def _valid_gpu_upload():
     }
 
 
+def _serve_trace():
+    return replace(
+        build_dsa_decode_shape_trace(
+            "realistic", "deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048"
+        ),
+        operator="example",
+        case_id="case",
+    )
+
+
 def test_shape_trace_index_uses_plugin_hooks(monkeypatch):
     key = ShapeTraceKey("example", "realistic", "case", "decode", "group")
     plugin = type(
@@ -77,7 +91,7 @@ def test_shape_trace_payload_rejects_plugin_without_hook(monkeypatch):
 
 
 def test_shape_trace_payload_calls_generic_plugin_hook(monkeypatch):
-    trace = object()
+    trace = _serve_trace()
     plugin = type(
         "Plugin",
         (),
@@ -89,6 +103,25 @@ def test_shape_trace_payload_calls_generic_plugin_hook(monkeypatch):
     )
 
     assert build_shape_trace_payload("example", "realistic", "case")["case_id"] == "case"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (("operator", "other"), ("dataset", "other"), ("case_id", "other")),
+)
+def test_shape_trace_payload_rejects_plugin_identity_mismatch(
+    field, value, monkeypatch
+):
+    trace = replace(_serve_trace(), **{field: value})
+    plugin = type(
+        "Plugin",
+        (),
+        {"build_shape_trace": staticmethod(lambda dataset, case: trace)},
+    )()
+    monkeypatch.setattr(serve, "get_operator_plugin", lambda name: plugin)
+
+    with pytest.raises(ValueError, match="identity does not match request"):
+        build_shape_trace_payload("example", "realistic", "case")
 
 
 class _FakeGetHandler(CannBenchRequestHandler):
