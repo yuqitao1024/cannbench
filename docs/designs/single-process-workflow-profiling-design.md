@@ -77,10 +77,17 @@ require MSTX or NVTX to establish workflow step boundaries.
 
 `ProfileKernelSelection` gains terminal-kernel patterns for workflow
 attribution. A non-final step must identify at least one terminal main kernel.
-The parser reads raw launch rows in physical order, finds the last matching
-terminal kernel for each non-final step, and partitions the sequence into
-contiguous, non-overlapping step spans. It then applies the existing component
-kernel-name selection only inside that component's span.
+When one profiler CSV preserves raw launch rows in physical order, the parser
+finds the last matching terminal kernel for each non-final step and partitions
+the sequence into contiguous, non-overlapping step spans. It then applies the
+existing component kernel-name selection only inside that component's span.
+
+Ascend `msopprof` instead emits one analyzed CSV per kernel and does not retain
+physical launch order across those CSV paths. For this layout, the parser
+attributes rows globally by the plugin-owned kernel-name selections. Every
+selected row must match exactly one workflow component; an ambiguous match is
+an explicit error because path or analysis timestamp order is not launch order.
+Terminal patterns are still required and must occur in the captured rows.
 
 This rule handles generic helper names such as `cat`, `cast`, and `copy`: a row
 can match more than one component's ordinary whitelist, but its physical span
@@ -88,7 +95,8 @@ allows it to belong to only one step. No raw row can contribute to two component
 latencies.
 
 The operator plugin owns implementation-specific kernel selection and terminal
-patterns. Public profile code only implements ordered span partitioning.
+patterns. Public profile code implements ordered span partitioning and unique
+name attribution without concrete operator knowledge.
 
 The parser fails explicitly when:
 
@@ -96,6 +104,7 @@ The parser fails explicitly when:
 - none of its terminal patterns occur;
 - terminal boundaries are out of workflow order;
 - a computed span is empty;
+- a multi-CSV row matches more than one component;
 - selected workflow rows cannot produce a component summary.
 
 Unselected rows remain in the raw profile and are not silently deleted.
@@ -240,7 +249,8 @@ Unit coverage must prove:
 - a downstream step receives the producer's exact tensor object;
 - scalar and tuple/list outputs map correctly;
 - recursive prepared input bindings are not executed in workflow mode;
-- overlapping helper kernel names are assigned to one physical span only;
+- overlapping helper kernel names are assigned to one physical span in an
+  ordered CSV, while ambiguous multi-CSV attribution fails explicitly;
 - missing or out-of-order terminal kernels fail attribution;
 - local workflow CLI uses one workflow backend call;
 - remote workflow execution uploads one manifest, starts one internal workflow
@@ -272,9 +282,10 @@ open.
 ### MSTX/NVTX As The Required Boundary
 
 Explicit ranges are attractive but create different profiler integration and
-parsing paths for Ascend and NVIDIA. They are unnecessary because workflow
-steps already execute serially and terminal kernel names can partition the raw
-sequence. Ranges may remain supplementary evidence.
+parsing paths for Ascend and NVIDIA. They are unnecessary for ordered CSVs,
+where serial workflow steps and terminal kernel names partition the raw
+sequence, and do not solve Ascend's per-kernel CSV layout. Ranges may remain
+supplementary evidence.
 
 ### DSA-Specific Standalone Profiler Script
 

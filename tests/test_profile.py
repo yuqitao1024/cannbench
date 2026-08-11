@@ -146,6 +146,95 @@ def test_read_workflow_profile_partitions_overlapping_names_by_order(tmp_path):
     assert summary.source_files == ("OpBasicInfo.csv",)
 
 
+def test_read_workflow_profile_attributes_separate_kernel_csvs_by_name(tmp_path):
+    profile_dir = tmp_path / "profile"
+    profile_dir.mkdir()
+    (profile_dir / "attention.csv").write_text(
+        "Op Name,Task Duration(us)\nSparseFlashAttention,50\n"
+    )
+    (profile_dir / "indexer-main.csv").write_text(
+        "Op Name,Task Duration(us)\nLightningIndexerMain,30\n"
+    )
+    (profile_dir / "indexer-terminal.csv").write_text(
+        "Op Name,Task Duration(us)\nLightningIndexerTerminal,20\n"
+    )
+
+    summary = read_workflow_profile(
+        profile_dir,
+        backend="ascend",
+        step_selections=(
+            ProfileKernelSelection(
+                kernel_name_patterns=("lightning",),
+                terminal_kernel_name_patterns=("lightningindexerterminal",),
+            ),
+            ProfileKernelSelection(kernel_name_patterns=("sparseflashattention",)),
+        ),
+    )
+
+    assert [
+        component.latency_ms for component in summary.component_summaries
+    ] == pytest.approx([0.05, 0.05])
+    assert summary.latency_ms == pytest.approx(0.1)
+    assert summary.source_files == (
+        "indexer-main.csv",
+        "indexer-terminal.csv",
+        "attention.csv",
+    )
+
+
+def test_read_workflow_profile_rejects_ambiguous_separate_kernel_csv(tmp_path):
+    profile_dir = tmp_path / "profile"
+    profile_dir.mkdir()
+    (profile_dir / "indexer.csv").write_text(
+        "Op Name,Task Duration(us)\nIndexerTerminal,30\n"
+    )
+    (profile_dir / "attention.csv").write_text(
+        "Op Name,Task Duration(us)\nAttentionMain,50\n"
+    )
+    (profile_dir / "shared.csv").write_text(
+        "Op Name,Task Duration(us)\nSharedCast,2\n"
+    )
+
+    with pytest.raises(ValueError, match="matches multiple components"):
+        read_workflow_profile(
+            profile_dir,
+            backend="ascend",
+            step_selections=(
+                ProfileKernelSelection(
+                    kernel_name_patterns=("indexer", "sharedcast"),
+                    terminal_kernel_name_patterns=("indexerterminal",),
+                ),
+                ProfileKernelSelection(
+                    kernel_name_patterns=("attention", "sharedcast"),
+                ),
+            ),
+        )
+
+
+def test_read_workflow_profile_requires_multicsv_terminal_to_belong_to_step(tmp_path):
+    profile_dir = tmp_path / "profile"
+    profile_dir.mkdir()
+    (profile_dir / "indexer.csv").write_text(
+        "Op Name,Task Duration(us)\nIndexerHelper,30\n"
+    )
+    (profile_dir / "attention.csv").write_text(
+        "Op Name,Task Duration(us)\nAttentionTerminal,50\n"
+    )
+
+    with pytest.raises(ValueError, match="step 0 has no terminal kernel"):
+        read_workflow_profile(
+            profile_dir,
+            backend="ascend",
+            step_selections=(
+                ProfileKernelSelection(
+                    kernel_name_patterns=("indexer",),
+                    terminal_kernel_name_patterns=("attentionterminal",),
+                ),
+                ProfileKernelSelection(kernel_name_patterns=("attention",)),
+            ),
+        )
+
+
 def test_read_workflow_profile_requires_non_final_terminal_pattern(tmp_path):
     profile_dir = tmp_path / "profile"
     profile_dir.mkdir()

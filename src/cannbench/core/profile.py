@@ -284,6 +284,14 @@ def read_workflow_profile(
             f"no duration samples found in profiler CSV files under {profile_dir}"
         )
 
+    source_files = {row.source_file for row in rows}
+    if len(source_files) > 1:
+        return _attribute_workflow_rows_by_name(
+            rows,
+            backend=backend,
+            step_selections=step_selections,
+        )
+
     boundaries: list[int] = []
     for step_index, selection in enumerate(step_selections[:-1]):
         terminal_patterns = selection.terminal_kernel_name_patterns
@@ -349,6 +357,86 @@ def read_workflow_profile(
     return WorkflowProfileSummary(
         backend=backend,
         source_files=source_files,
+        latency_ms=sum(
+            component.latency_ms for component in component_summaries
+        ),
+        component_summaries=tuple(component_summaries),
+    )
+
+
+def _attribute_workflow_rows_by_name(
+    rows: list[_ProfileDurationRow],
+    *,
+    backend: str,
+    step_selections: tuple[ProfileKernelSelection, ...],
+) -> WorkflowProfileSummary:
+    for step_index, selection in enumerate(step_selections[:-1]):
+        terminal_patterns = selection.terminal_kernel_name_patterns
+        if not terminal_patterns:
+            raise ValueError(
+                f"non-final workflow step {step_index} requires terminal kernel "
+                "name patterns"
+            )
+
+    selected_by_step: list[list[_ProfileDurationRow]] = [
+        [] for _ in step_selections
+    ]
+    for row in rows:
+        matching_steps = [
+            step_index
+            for step_index, selection in enumerate(step_selections)
+            if _matches_kernel_name(
+                row.kernel_name, selection.kernel_name_patterns
+            )
+        ]
+        if len(matching_steps) > 1:
+            raise ValueError(
+                "workflow profile row matches multiple components without "
+                f"physical ordering metadata: {row.kernel_name!r}"
+            )
+        if matching_steps:
+            selected_by_step[matching_steps[0]].append(row)
+
+    component_summaries: list[DeviceProfileSummary] = []
+    for step_index, (selection, selected_rows) in enumerate(
+        zip(step_selections, selected_by_step, strict=True)
+    ):
+        terminal_patterns = selection.terminal_kernel_name_patterns
+        if step_index < len(step_selections) - 1 and not any(
+            _matches_kernel_name(row.kernel_name, terminal_patterns)
+            for row in selected_rows
+        ):
+            expected = ", ".join(terminal_patterns)
+            raise ValueError(
+                f"non-final workflow step {step_index} has no terminal kernel "
+                f"matching {expected!r}"
+            )
+        if not selected_rows:
+            expected = ", ".join(selection.kernel_name_patterns)
+            raise ValueError(
+                f"workflow step {step_index} has no selected kernel rows "
+                f"matching {expected!r}"
+            )
+        component_summaries.append(
+            DeviceProfileSummary(
+                backend=backend,
+                latency_ms=sum(row.duration_ms for row in selected_rows),
+                source_files=_ordered_unique(
+                    [row.source_file for row in selected_rows]
+                ),
+            )
+        )
+
+    attributed_source_files = _ordered_unique(
+        [
+            source_file
+            for component in component_summaries
+            for source_file in component.source_files
+        ]
+    )
+    return WorkflowProfileSummary(
+        backend=backend,
+        source_files=attributed_source_files,
         latency_ms=sum(
             component.latency_ms for component in component_summaries
         ),
