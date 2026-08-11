@@ -88,15 +88,6 @@ def build_dsa_decode_workflow(
                     dataset=component_dataset,
                     case_id=case_id,
                     seed=seed,
-                    input_bindings={
-                        "indices": _build_operator_input_binding(
-                            op="lightning_indexer",
-                            dtype=dtype,
-                            dataset=component_dataset,
-                            case_id=case_id,
-                            seed=seed,
-                        )
-                    },
                 ),
             ),
         ),
@@ -200,12 +191,6 @@ def _build_prepared_operator_input(**kwargs):
     from cannbench.core.prepared_input import build_prepared_operator_input
 
     return build_prepared_operator_input(**kwargs)
-
-
-def _build_operator_input_binding(**kwargs):
-    from cannbench.core.prepared_input import OperatorInputBinding
-
-    return OperatorInputBinding(**kwargs)
 
 
 PLUGIN = OperatorPlugin(
