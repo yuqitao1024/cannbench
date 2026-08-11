@@ -57,6 +57,24 @@ it("plays forward and stops at Output", async () => {
   expect(screen.getByRole("button", { name: "Play shape trace" })).toBeInTheDocument();
 });
 
+it("restarts at the first stage and plays when Play is clicked at Output", async () => {
+  vi.useFakeTimers();
+  vi.stubGlobal("matchMedia", () => ({ matches: false }));
+  const setIndex = vi.fn();
+  render(<ControlledTimeline initialIndex={stages.length - 1} onChange={setIndex} />);
+
+  fireEvent.click(screen.getByRole("button", { name: "Play shape trace" }));
+
+  expect(setIndex).toHaveBeenCalledWith(0);
+  expect(screen.getByText(`Step 1 of ${stages.length}`)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Pause shape trace" })).toBeInTheDocument();
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1_100);
+  });
+  expect(setIndex).toHaveBeenLastCalledWith(1);
+});
+
 it("supports previous next and direct stage selection", async () => {
   vi.stubGlobal("matchMedia", () => ({ matches: false }));
   const user = userEvent.setup();

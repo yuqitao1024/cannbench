@@ -69,3 +69,12 @@ it("renders prefill unavailable without decode facts", () => {
   expect(screen.queryByText("32 mixed tasks")).not.toBeInTheDocument();
   expect(screen.queryByText("Head64")).not.toBeInTheDocument();
 });
+
+it("does not invent unavailable copy when the payload message is absent", () => {
+  const { container } = render(
+    <DeviceExecutionView execution={{ ...prefillUnavailableExecution, message: null }} />
+  );
+
+  expect(container).toBeEmptyDOMElement();
+  expect(screen.queryByText("No device trace is available for this phase.")).not.toBeInTheDocument();
+});

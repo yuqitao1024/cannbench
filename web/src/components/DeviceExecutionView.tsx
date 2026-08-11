@@ -37,9 +37,10 @@ function tensorShape(kernel: DeviceKernelTrace, tensorIndex: number): string {
 
 export function DeviceExecutionView({ execution }: DeviceExecutionViewProps) {
   if (execution.status === "unavailable") {
+    if (execution.message === null) return null;
     return (
       <section className="shape-device-unavailable" role="status">
-        <p>{execution.message ?? "No device trace is available for this phase."}</p>
+        <p>{execution.message}</p>
       </section>
     );
   }

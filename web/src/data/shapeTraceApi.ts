@@ -1,5 +1,17 @@
 import type { ShapeTrace, ShapeTraceIndexEntry } from "../shape-trace/types";
 
+export type ShapeTraceApiRequest = "index" | "detail";
+
+export class ShapeTraceApiError extends Error {
+  constructor(
+    public readonly request: ShapeTraceApiRequest,
+    public readonly status: number
+  ) {
+    super(`shape trace ${request} request failed: ${status}`);
+    this.name = "ShapeTraceApiError";
+  }
+}
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -66,7 +78,7 @@ export function shapeTraceKey(
 export async function fetchShapeTraceIndex(signal?: AbortSignal): Promise<ShapeTraceIndexEntry[]> {
   const response = await fetch("/api/shape-traces", { signal });
   if (!response.ok) {
-    throw new Error(`shape trace index request failed: ${response.status}`);
+    throw new ShapeTraceApiError("index", response.status);
   }
   const payload = (await response.json()) as { traces?: ShapeTraceIndexEntry[] };
   if (!Array.isArray(payload.traces)) {
@@ -84,7 +96,7 @@ export async function fetchShapeTrace(
   const params = new URLSearchParams({ operator, dataset, case: caseId });
   const response = await fetch(`/api/shape-trace?${params.toString()}`, { signal });
   if (!response.ok) {
-    throw new Error(`shape trace request failed: ${response.status}`);
+    throw new ShapeTraceApiError("detail", response.status);
   }
   return validateShapeTrace(await response.json());
 }

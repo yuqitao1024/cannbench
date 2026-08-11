@@ -194,6 +194,74 @@ describe("ShapeMatrixEquation", () => {
     expect(within(supplemental).getByText("All indices")).toBeInTheDocument();
   });
 
+  it("renders canonical prefill QK aggregate tensors as supplemental matrices", () => {
+    const axis = (
+      symbol: string,
+      value: number,
+      meaning: string,
+      role: "preserved" | "contracted" | "produced"
+    ) => ({ symbol, value, meaning, role });
+    const h = axis("H", 128, "query attention heads", "preserved");
+    const dqk = axis("Dqk", 576, "QK feature dimension", "contracted");
+    const s = axis("S", 2048, "selected context tokens", "produced");
+    const r = axis("R", 4096, "flattened query rows", "produced");
+    const stage: ShapeStage = {
+      id: "qk",
+      component: "sparse_attention",
+      title: "Sparse attention score matrix",
+      operation: "matmul",
+      formula: "[H,Dqk] x [Dqk,S] -> [H,S]",
+      scope: "one flattened query row; aggregate shapes cover all R rows",
+      tensors: [
+        { id: "query", label: "Query", axes: [h, dqk], logical_only: false },
+        {
+          id: "selected_k_t",
+          label: "Selected K transposed",
+          axes: [dqk, s],
+          logical_only: true
+        },
+        { id: "scores", label: "Attention scores", axes: [h, s], logical_only: true },
+        {
+          id: "query_all",
+          label: "All attention queries",
+          axes: [r, h, dqk],
+          logical_only: false
+        },
+        {
+          id: "scores_all",
+          label: "All attention scores / probabilities",
+          axes: [r, h, s],
+          logical_only: true
+        }
+      ],
+      input_ids: ["query", "selected_k_t"],
+      output_ids: ["scores"],
+      contracted_axes: ["Dqk"],
+      insight: "[H,Dqk] x [Dqk,S] -> [H,S]"
+    };
+
+    const { container } = render(<ShapeMatrixEquation stage={stage} />);
+    const matrices = Array.from(
+      container.querySelectorAll<HTMLElement>("[data-testid^='matrix-']")
+    );
+    expect(matrices.map((matrix) => matrix.dataset.testid)).toEqual([
+      "matrix-query",
+      "matrix-selected_k_t",
+      "matrix-scores",
+      "matrix-query_all",
+      "matrix-scores_all"
+    ]);
+
+    const supplemental = screen.getByRole("group", {
+      name: "Aggregate and supplemental tensors"
+    });
+    expect(within(supplemental).getByText("All attention queries")).toBeInTheDocument();
+    expect(
+      within(supplemental).getByText("All attention scores / probabilities")
+    ).toBeInTheDocument();
+    expect(within(supplemental).getAllByText("R=4,096")).toHaveLength(2);
+  });
+
   it("groups non-matmul inputs and shows one transition before fan-out outputs", () => {
     const inputB = { ...vectorTensor, id: "mask", label: "Mask" };
     const outputB = { ...vectorTensor, id: "counts", label: "Counts" };

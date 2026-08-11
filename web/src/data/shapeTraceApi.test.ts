@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ShapeTrace, ShapeTraceIndexEntry } from "../shape-trace/types";
-import { fetchShapeTrace, fetchShapeTraceIndex, shapeTraceKey } from "./shapeTraceApi";
+import {
+  fetchShapeTrace,
+  fetchShapeTraceIndex,
+  ShapeTraceApiError,
+  shapeTraceKey
+} from "./shapeTraceApi";
 
 const indexEntry: ShapeTraceIndexEntry = {
   operator: "dsa_decode",
@@ -57,6 +62,10 @@ function response(payload: unknown): Response {
   return { ok: true, status: 200, json: async () => payload } as Response;
 }
 
+function errorResponse(status: number): Response {
+  return { ok: false, status } as Response;
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -75,6 +84,22 @@ describe("shapeTraceApi", () => {
       "/api/shape-trace?operator=dsa+decode&dataset=realistic&case=case%2F1",
       { signal: undefined }
     );
+  });
+
+  it("reports an index request failure with typed request context", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => errorResponse(404)));
+
+    const request = fetchShapeTraceIndex();
+    await expect(request).rejects.toBeInstanceOf(ShapeTraceApiError);
+    await expect(request).rejects.toMatchObject({ request: "index", status: 404 });
+  });
+
+  it("reports a detail request failure with typed request context", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => errorResponse(404)));
+
+    const request = fetchShapeTrace("operator", "dataset", "case");
+    await expect(request).rejects.toBeInstanceOf(ShapeTraceApiError);
+    await expect(request).rejects.toMatchObject({ request: "detail", status: 404 });
   });
 
   it("rejects a malformed trace index", async () => {

@@ -2,7 +2,11 @@ import { Moon, Sun } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import logoDarkUrl from "../assets/brand/cannbench-logo-dark.png";
 import logoLightUrl from "../assets/brand/cannbench-logo-light.png";
-import { fetchShapeTrace, fetchShapeTraceIndex } from "../data/shapeTraceApi";
+import {
+  fetchShapeTrace,
+  fetchShapeTraceIndex,
+  ShapeTraceApiError
+} from "../data/shapeTraceApi";
 import type { ShapeStage, ShapeTrace, ShapeTraceIndexEntry } from "../shape-trace/types";
 import { DeviceExecutionView } from "./DeviceExecutionView";
 import { ShapeMatrixEquation } from "./ShapeMatrix";
@@ -27,11 +31,6 @@ function titleCase(value: string): string {
 
 function formatSymbolValue(value: number): string {
   return value.toLocaleString("en-US");
-}
-
-function implementationLabel(execution: ShapeTrace["device_execution"]): string {
-  if (execution.status === "unavailable") return "Device trace unavailable";
-  return `${execution.implementation.toUpperCase()} ${execution.version ?? ""}`.trim();
 }
 
 function Inspector({ stage }: { stage: ShapeStage }) {
@@ -129,29 +128,39 @@ export function ShapeExplorerPage() {
   useEffect(() => {
     if (!hasValidIdentity) {
       setTrace(null);
+      setTraceIndex([]);
       setStatus("invalid");
       return;
     }
 
     const controller = new AbortController();
     setTrace(null);
+    setTraceIndex([]);
     setStatus("loading");
-    Promise.all([
-      fetchShapeTrace(operator, dataset, caseId, controller.signal),
-      fetchShapeTraceIndex(controller.signal)
-    ])
-      .then(([nextTrace, nextIndex]) => {
+    void fetchShapeTrace(operator, dataset, caseId, controller.signal)
+      .then((nextTrace) => {
         if (controller.signal.aborted) return;
         setTrace(nextTrace);
-        setTraceIndex(nextIndex);
         setActiveStageIndex(0);
         setStatus("ready");
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
         setTrace(null);
-        const message = error instanceof Error ? error.message : "";
-        setStatus(message.includes(": 404") ? "not-found" : "error");
+        setStatus(
+          error instanceof ShapeTraceApiError &&
+            error.request === "detail" &&
+            error.status === 404
+            ? "not-found"
+            : "error"
+        );
+      });
+    void fetchShapeTraceIndex(controller.signal)
+      .then((nextIndex) => {
+        if (!controller.signal.aborted) setTraceIndex(nextIndex);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setTraceIndex([]);
       });
     return () => controller.abort();
   }, [caseId, dataset, hasValidIdentity, navigationRevision, operator]);
@@ -237,22 +246,24 @@ export function ShapeExplorerPage() {
           <h1 id="shape-explorer-title">Matrix flow from index selection to sparse attention</h1>
           <p className="shape-case-id">{trace.case_id}</p>
         </div>
-        <div className="shape-phase-segment" aria-label="Case phase">
-          {phaseOptions.map((entry) => (
-            <button
-              type="button"
-              aria-pressed={
-                entry.operator === trace.operator &&
-                entry.dataset === trace.dataset &&
-                entry.case_id === trace.case_id
-              }
-              onClick={() => selectPhase(entry)}
-              key={`${entry.operator}\u0000${entry.dataset}\u0000${entry.case_id}`}
-            >
-              {titleCase(entry.phase)}
-            </button>
-          ))}
-        </div>
+        {phaseOptions.length > 0 ? (
+          <div className="shape-phase-segment" aria-label="Case phase">
+            {phaseOptions.map((entry) => (
+              <button
+                type="button"
+                aria-pressed={
+                  entry.operator === trace.operator &&
+                  entry.dataset === trace.dataset &&
+                  entry.case_id === trace.case_id
+                }
+                onClick={() => selectPhase(entry)}
+                key={`${entry.operator}\u0000${entry.dataset}\u0000${entry.case_id}`}
+              >
+                {titleCase(entry.phase)}
+              </button>
+            ))}
+          </div>
+        ) : null}
       </section>
 
       <section className="shape-symbol-strip" aria-label="Shape symbols">
@@ -276,7 +287,6 @@ export function ShapeExplorerPage() {
             id="shape-algorithm-tab"
             ref={algorithmTabRef}
             role="tab"
-            aria-label="Algorithm"
             aria-controls="shape-algorithm-panel"
             aria-selected={activeView === "algorithm"}
             tabIndex={activeView === "algorithm" ? 0 : -1}
@@ -289,7 +299,6 @@ export function ShapeExplorerPage() {
             id="shape-device-tab"
             ref={deviceTabRef}
             role="tab"
-            aria-label="Device"
             aria-controls="shape-device-panel"
             aria-selected={activeView === "device"}
             tabIndex={activeView === "device" ? 0 : -1}
@@ -298,7 +307,6 @@ export function ShapeExplorerPage() {
             Device execution
           </button>
         </div>
-        <span className="shape-version-label">{implementationLabel(trace.device_execution)}</span>
       </div>
 
       {activeView === "algorithm" ? (

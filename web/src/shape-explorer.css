@@ -241,11 +241,6 @@
   color: var(--text);
 }
 
-.shape-version-label {
-  color: var(--green);
-  font: 11px var(--font-mono);
-}
-
 .shape-timeline-wrap {
   padding-top: 18px;
   padding-bottom: 18px;

@@ -63,6 +63,14 @@ export function ShapeTimeline({
     setPlaying(false);
     onActiveIndexChange(index);
   };
+  const togglePlayback = () => {
+    if (playing) {
+      setPlaying(false);
+      return;
+    }
+    if (activeIndex >= finalIndex) onActiveIndexChange(0);
+    setPlaying(true);
+  };
 
   return (
     <section className="shape-timeline-wrap" aria-label="Shape trace timeline">
@@ -90,7 +98,7 @@ export function ShapeTimeline({
                   : "Play shape trace"
             }
             aria-label={playing ? "Pause shape trace" : "Play shape trace"}
-            onClick={() => setPlaying((current) => !current)}
+            onClick={togglePlayback}
           >
             {playing ? <Pause aria-hidden="true" /> : <Play aria-hidden="true" />}
           </button>
