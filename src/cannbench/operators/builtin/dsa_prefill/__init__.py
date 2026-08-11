@@ -25,6 +25,10 @@ from .cases import (
     get_dsa_prefill_dataset,
 )
 from .materialize import materialize_dsa_prefill_inputs
+from .shape_trace import (
+    build_dsa_prefill_shape_trace,
+    list_dsa_prefill_shape_trace_cases,
+)
 
 DsaFusedWorkflow = OperatorWorkflow
 DsaWorkflowStep = OperatorWorkflowStep
@@ -208,6 +212,8 @@ PLUGIN = OperatorPlugin(
     build_workflow=build_dsa_prefill_workflow,
     list_workflows=list_dsa_prefill_workflows,
     component_operator_names=COMPONENT_OPERATORS,
+    build_shape_trace=build_dsa_prefill_shape_trace,
+    list_shape_trace_cases=list_dsa_prefill_shape_trace_cases,
 )
 
 __all__ = [
@@ -216,8 +222,10 @@ __all__ = [
     "DsaPrefillDataset",
     "DsaWorkflowStep",
     "PLUGIN",
+    "build_dsa_prefill_shape_trace",
     "build_dsa_prefill_workflow",
     "get_dsa_prefill_case",
     "get_dsa_prefill_dataset",
+    "list_dsa_prefill_shape_trace_cases",
     "list_dsa_prefill_workflows",
 ]
