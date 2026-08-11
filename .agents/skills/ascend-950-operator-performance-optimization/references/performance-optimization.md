@@ -77,6 +77,13 @@ compatible tiling. Reject or limit fusion when it:
 
 Test an unfused twin to separate algorithmic benefit from compiler side effects.
 
+When one worker owns both tiled phases, derive tile lifetime across the fused
+boundary before accepting the natural traversal order. If semantics permit,
+handling an irregular tail first and arranging a reusable full tile last can
+leave that tile resident in UB for the next phase and remove one GM reread
+without increasing capacity. Measure launch fusion first, then add lifetime
+reuse as a separate candidate so their effects remain attributable.
+
 ## Tune Launch Geometry And Reductions
 
 - Map independent rows, heads, batches, or context shards before adding cores.
@@ -131,6 +138,15 @@ Loop unrolling, manual load grouping, and hand ordering can improve or regress
 performance because they change registers, spills, instruction scheduling, and
 compiler decisions. Compare generated artifacts or instruction timelines when
 available, but use repeated device time as the acceptance metric.
+
+For exact-shape specializations, do not assume the compiler propagates caller
+guards through runtime kernel or VF arguments. Prove the dispatch invariant,
+express fixed loop bounds and element validity as compile-time facts, and remove
+only guards that are then impossible to fail. Narrow tile-local loop and offset
+indices only after proving their maximum value; retain wide types for GM and
+outer-tensor offsets. If guard removal and index narrowing ship together, report
+their gain as a combined candidate unless a controlled factorial A/B separates
+them.
 
 Use a controlled matrix such as:
 
