@@ -46,14 +46,14 @@ GM input
   -> two-slot MTE3 copy from output UB to GM
 ```
 
-One 32-lane warp owns two rows. Each lane owns four elements per row, so a
-1024-thread VF processes 64 rows per tile. This preserves the useful row
-parallelism of the current generic path while replacing lane-level GM accesses
-with aligned bulk transfers.
+One 32-lane warp owns one row. Each lane owns four elements, so a 1024-thread
+VF processes 32 rows per tile. This replaces lane-level GM accesses with
+aligned bulk transfers while keeping the VF small enough for trustworthy
+`BasicInfo` profiling on the target toolchain.
 
-The input and output double buffers each hold two `64 x 128` FP16/FP32 tiles.
-The maximum combined allocation is 128 KiB for FP32 and remains below the
-available 224 KiB UB budget. The FP16 path uses 64 KiB.
+The input and output double buffers each hold two `32 x 128` FP16/FP32 tiles.
+The maximum combined allocation is 64 KiB for FP32 and remains below the
+available 224 KiB UB budget. The FP16 path uses 32 KiB.
 
 Because the path accepts only width 128, element bounds and warp iteration
 counts are compile-time facts. VF loop and address indices use `int32_t`; outer
@@ -64,18 +64,21 @@ row and GM offsets remain `int64_t`.
 `row_persistent_fallback.asc` dispatches exact width 128 to the new FP16 or
 FP32 entry point. All other dimensions retain their current behavior.
 
-The initial candidate uses the dedicated path for every `outer_size`. If the
-remote paired benchmark shows a material regression for `gptj_attention`, an
-`outer_size` threshold may select the old generic path for small workloads.
-Such a threshold must be derived from measured crossover data and expressed in
-terms of shape, never a concrete case name.
+The dedicated path is used for every `outer_size`. Both paired collections
+improved the 2,048-row case, so no shape threshold is required.
 
 ## Alternatives Rejected
 
-Extending the existing 256 bucket down to width 128 is simpler but allocates
-eight values per lane while only four are live, performs inactive iterations,
-and processes 32 rather than 64 rows per tile. It is retained as a quick
-control experiment, not the preferred production design.
+Extending the existing 256 bucket down to width 128 was built as a control. It
+allocates eight values per lane while only four are live and performs inactive
+iterations. Its synchronized 65,536-row latency was 59.19 us versus 34.74 us
+for the direct-GM baseline, so it was rejected.
+
+The first dedicated candidate assigned two rows to every warp and processed
+64 rows per tile. Its synchronized 65,536-row latency improved to 27.57 us,
+but `msopprof BasicInfo` expanded the three large realistic cases to about
+389 us. The retained single-row VF measured 24.59 us on the synchronized
+boundary and about 24.4 us on `BasicInfo`, avoiding that measurement cliff.
 
 Changing only generic launch geometry preserves direct-GM traffic. It is a
 useful control for attribution but has a lower expected ceiling and does not
@@ -91,7 +94,7 @@ Validation covers:
 
 - all five realistic FP16 width-128 cases;
 - representative FP32 width-128 input;
-- tail row counts below and not divisible by 64;
+- tail row counts below and not divisible by 32;
 - exact dispatch selection for width 128;
 - unchanged dispatch for widths 127, 129, 256, 512, and 1024;
 - the complete existing Softmax accuracy suite before retention.
@@ -130,6 +133,36 @@ Retain the specialized path only when:
 Do not retain a candidate based only on compiler resources or one profiler
 sample. Compiler register and Stack reports are diagnostic evidence; repeated
 device time and correctness decide retention.
+
+## Measured Result
+
+The retained candidate was built on `Ascend950PR_9589` with CANN 9.2.0,
+Bisheng 15.0.5, `dav-3510`, and `torch_npu 2.11.0.dev20260414`. No CannBench
+warmup, iteration, or metric overrides were passed. The selected kernel count
+was one for every target case, and every retained row reported 1650 MHz current
+and rated frequency.
+
+| Case | Baseline R1 | Candidate R1 | Baseline R2 | Candidate R2 |
+| --- | ---: | ---: | ---: | ---: |
+| `bert_pytorch_attention` | 20.312 us | 11.059 us | 19.987 us | 11.187 us |
+| `gptj_attention` | 5.428 us | 3.997 us | 5.396 us | 4.132 us |
+| `gptneo_attention` | 48.986 us | 24.471 us | 49.090 us | 24.407 us |
+| `mobilebert_attention` | 48.733 us | 24.689 us | 48.632 us | 24.383 us |
+| `pegasus_attention` | 48.298 us | 24.636 us | 48.412 us | 24.486 us |
+
+The candidate passed 40/40 FP16 canonical accuracy cases. FP32 `(63,128)`
+passed with `max_abs_error=7.45e-09`; FP16 `(65,128)` matched exactly.
+
+Provenance and raw evidence:
+
+- baseline remote root: `/root/cannbench-softmax-dim128-baseline-Ptf8R0`;
+- candidate remote root: `/root/cannbench-softmax-dim128-single-row-jFxg8x`;
+- baseline extension SHA-256: `d8edbb47a67dd98f89e0a521418fadf6648b5f54f43391b3b2b5d44ef9a8806f`;
+- candidate extension SHA-256: `4d3c14450189a3c0e36aecf02eac9a96bea67ea7ce81f4cf035500c6cd14bf49`;
+- paired R1 local roots: `/tmp/cannbench-softmax-dim128-single-row-r1-5j1Cd1`
+  and `/tmp/cannbench-softmax-dim128-baseline-clean-r2-0XEsho`;
+- paired R2 local roots: `/tmp/cannbench-softmax-dim128-baseline-paired-r2-QpDC69`
+  and `/tmp/cannbench-softmax-dim128-single-row-r2-3hRGxi`.
 
 ## Publication
 

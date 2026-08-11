@@ -208,6 +208,31 @@ def test_ascend_softmax_v3_256_and_1024_persistent_paths_prefetch_next_tile():
         assert "asc_sync_wait(PIPE_MTE3, PIPE_V, event_id)" in source
 
 
+def test_ascend_softmax_v3_dispatches_exact_128_to_single_row_ub_pipeline():
+    dispatch = _read_v3_simt_source("row_persistent_fallback.asc")
+    persistent_128 = _read_v3_simt_source("persistent_128.asc")
+    exact_128_start = dispatch.index("if (dim_size == 128)")
+    exact_128_end = dispatch.index(
+        "if (dim_size >= 129 && dim_size <= 256)", exact_128_start
+    )
+    exact_128_dispatch = dispatch[exact_128_start:exact_128_end]
+
+    assert "if (dim_size == 128)" in dispatch
+    assert "dispatch_row_persistent_forward_kernel_128_fp16(" in exact_128_dispatch
+    assert "dispatch_row_persistent_forward_kernel_128_fp32(" in exact_128_dispatch
+    assert '#include "c_api/asc_simd.h"' in persistent_128
+    assert "constexpr int32_t kElements = 128" in persistent_128
+    assert "constexpr int32_t kRowsPerWarp = 1" in persistent_128
+    assert "constexpr int32_t kRowsPerTile = 32" in persistent_128
+    assert "__launch_bounds__(1024)" in persistent_128
+    assert "input_tile_ub[2]" in persistent_128
+    assert "output_tile_ub[2]" in persistent_128
+    assert "asc_copy_gm2ub_align" in persistent_128
+    assert "asc_copy_ub2gm_align" in persistent_128
+    assert "basic_api/" not in persistent_128
+    assert "kernel_operator.h" not in persistent_128
+
+
 def test_ascend_softmax_v3_dispatches_129_through_256_to_ub_pipeline():
     source = _read_v3_simt_source("row_persistent_fallback.asc")
 

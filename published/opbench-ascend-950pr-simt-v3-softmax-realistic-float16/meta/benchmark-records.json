@@ -24,7 +24,7 @@
       "source_file": "torchbench_train/BERT_pytorch_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms": 0.019950001000000002
+        "latency_ms": 0.011186999999999999
       },
       "accuracy": {
         "passed": true,
@@ -283,7 +283,7 @@
       "source_file": "hf_train/GPTJForCausalLM_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms": 0.006193
+        "latency_ms": 0.004131999999999999
       },
       "accuracy": {
         "passed": true,
@@ -316,7 +316,7 @@
       "source_file": "hf_train/GPTNeoForCausalLM_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms": 0.050688000000000004
+        "latency_ms": 0.024407
       },
       "accuracy": {
         "passed": true,
@@ -543,7 +543,7 @@
       "source_file": "hf_train/MobileBertForMaskedLM_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms": 0.051035999
+        "latency_ms": 0.024382999000000002
       },
       "accuracy": {
         "passed": true,
@@ -637,7 +637,7 @@
       "source_file": "hf_train/PegasusForConditionalGeneration_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms": 0.052382999
+        "latency_ms": 0.024486
       },
       "accuracy": {
         "passed": true,

@@ -98,7 +98,9 @@ if inner_size != 1:
 else:
     if dim_size <= 2048 and dim_size * sizeof(dtype) <= 8192:
         persistent path
-        if dim_size == 512:
+        if dim_size == 128:
+            128 专用单行 GM/UB 双缓冲 kernel
+        elif dim_size == 512:
             512 专用 GM/UB 双缓冲 kernel
         elif dim_size == 1024:
             1024 专用 GM/UB 双缓冲 kernel
@@ -132,6 +134,7 @@ direct fast kernel 不再由主分发命中。它的 ILP、x4/x2 和 scalar 访�
 
 | `dim_size` | 当前路径 |
 | ---: | --- |
+| `128` | `persistent_128` 专用单行 GM/UB 双缓冲 |
 | `512` | `persistent_512` 专用 GM/UB 双缓冲 |
 | `1024` | `persistent_1024` 专用 GM/UB 双缓冲 |
 | `32128` | fast row 下的 whole-row UB recompute |
@@ -338,6 +341,20 @@ bulk 输入和输出不再由 SIMT 线程直接访问 GM。GM workspace 仍保�
 的代表性对比基本持平：`longformer_logits` 为 `0.896138 -> 0.898242 ms`，
 `m2m100_logits` 为 `1.464791 -> 1.464915 ms`。
 
+### 4.13 为精确 `dim_size=128` 增加单行 GM/UB 流水
+
+**已实现。** `persistent_128.asc` 将 exact-128 从通用 direct-GM fallback
+分离出来。1024-thread VF 包含 32 个 warp，每个 warp 处理一行；每 lane
+固定读写四个元素，max、exp-sum 和 normalize 均使用 FP32 累加。每 tile
+处理 32 行，输入和输出分别使用两个 UB slot：FP16 共占 32 KiB，FP32 共占
+64 KiB。
+
+该实现保留两槽 MTE2/V/MTE3 prefetch，但不在 VF 中保留 runtime element
+边界判断。单行 ownership 是设备 A/B 后的结果：每 warp 双行候选在直接同步
+计时中有收益，但在 65,536-row `BasicInfo` 下出现约 389 us 的 instrumentation
+cliff；复用 256 bucket 则在直接同步边界回退到 59.19 us。单行 exact-128
+同时通过直接同步和 `BasicInfo` 两个边界。
+
 ## 5. 已实现优化方法归纳
 
 | 优化维度 | V3 做法 | 对应 commit |
@@ -351,6 +368,7 @@ bulk 输入和输出不再由 SIMT 线程直接访问 GM。GM workspace 仍保�
 | 寄存器驻留 | 每线程 2..8 个元素时缓存输入 | `03695a9` |
 | 编译器隔离 | 512/1024 模板实例拆分翻译单元 | `5a565c7`, `ea0eeab` |
 | UB staging | 512/1024 使用双缓冲 GM/UB 流水 | `bb1c443` |
+| exact-128 UB staging | 每 warp 一行、每 tile 32 行的双缓冲 GM/UB 流水 | 当前变更 |
 | 分发正确性 | 专用 512/1024 与通用 fallback 明确分离 | `15efd0e` |
 | 大 row 片上计算 | 能放入 UB 时 whole-row recompute | `af01f6f` |
 | 超大 row 分阶段 | MTE/UB tiled stats/write 两 kernel + 行级 workspace | `18059f8` 后续优化 |
@@ -399,6 +417,24 @@ whole-row 区间的快照结果不完全一致：`convbert_logits` 从 2.277790 
 当前数据提示 `8192` 和 UB 容量上限需要受控 A/B 重新标定；仅凭这些混合
 快照，还不能证明当前阈值或 whole-row 路径本身导致了变化。
 
+### 6.3 `dim_size=128` 受控 A/B
+
+在 Ascend 950PR、CANN 9.2.0、Bisheng 15.0.5、1650 MHz 上，使用 seed-0
+prepared input 和 CannBench 默认 `BasicInfo` 参数做了两组成对采集。表中为
+第 2 组 baseline/candidate；第 1 组同样全部改善。
+
+| case | outer rows | baseline (us) | exact-128 (us) | 改善 |
+| --- | ---: | ---: | ---: | ---: |
+| `bert_pytorch_attention` | 24,576 | 19.987 | 11.187 | 44.0% |
+| `gptj_attention` | 2,048 | 5.396 | 4.132 | 23.4% |
+| `gptneo_attention` | 65,536 | 49.090 | 24.407 | 50.3% |
+| `mobilebert_attention` | 65,536 | 48.632 | 24.383 | 49.9% |
+| `pegasus_attention` | 65,536 | 48.412 | 24.486 | 49.4% |
+
+五个 case 每次都只选择一个 Softmax kernel，current/rated frequency 均为
+1650/1650 MHz。最终候选通过 40/40 个 FP16 accuracy case、FP32 `(63,128)`
+和 FP16 `(65,128)` row-tail 检查。
+
 ## 7. 当前局限与风险
 
 ### 7.1 分发阈值仍以经验常量为主
@@ -407,10 +443,10 @@ whole-row 区间的快照结果不完全一致：`convbert_logits` 从 2.277790 
 形成可工作的策略，但还缺少由 device 属性、UB 可用容量和 occupancy
 统一推导的 cost model。
 
-### 7.2 专用 UB 流水只覆盖精确 `512/1024`
+### 7.2 专用 UB 流水只覆盖精确 `128/512/1024`
 
-其他 persistent shape 仍走通用 GM register/shuffle 路径。例如 128、196、
-256 等 realistic shape 的 row 数很多，也可能从小 row tile + 搬运流水中
+其他 persistent shape 仍走通用 GM register/shuffle 路径。例如 196、256
+等 realistic shape 的 row 数很多，也可能从小 row tile + 搬运流水中
 受益。
 
 ### 7.3 whole-row recompute 的收益依赖 shape
