@@ -84,6 +84,7 @@ class ProfileArtifacts:
     profile_summary: DeviceProfileSummary
     profile_artifacts: tuple[tuple[str, bytes], ...]
     perf_artifacts: tuple[tuple[str, bytes], ...]
+    component_summaries: tuple[DeviceProfileSummary, ...] = ()
 
 
 @dataclass(frozen=True)

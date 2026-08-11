@@ -1,6 +1,7 @@
 import argparse
 import json
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 
 from cannbench.backends import get_backend
@@ -16,9 +17,10 @@ from cannbench.core.batch import (
 )
 from cannbench.core.benchmark_records import (
     build_benchmark_record,
+    build_workflow_benchmark_record,
     write_benchmark_records_json,
 )
-from cannbench.core.config import OperatorBenchmarkRequest
+from cannbench.core.config import OperatorBenchmarkRequest, WorkflowBenchmarkRequest
 from cannbench.core.layout import build_run_layout
 from cannbench.core.publish import publish_run_artifacts
 from cannbench.serve import serve_cannbench
@@ -36,9 +38,13 @@ from cannbench.core.profile import (
 )
 from cannbench.core.prepared_input import (
     PreparedOperatorInput,
+    PreparedWorkflowInput,
     build_prepared_operator_input,
+    prepare_workflow_input,
     read_prepared_operator_input,
+    read_prepared_workflow_input,
     write_prepared_operator_input,
+    write_prepared_workflow_input,
 )
 from cannbench.core.remote import (
     collect_remote_artifacts,
@@ -48,6 +54,7 @@ from cannbench.core.remote import (
 from cannbench.core.output import (
     build_benchmark_artifact_stem,
     write_benchmark_outputs,
+    write_workflow_benchmark_outputs,
 )
 from cannbench.core.execution import (
     BenchCaseExecutionResult,
@@ -55,6 +62,16 @@ from cannbench.core.execution import (
     RemoteBenchExecutor,
 )
 from cannbench.operators import get_operator_plugin, list_operator_names
+
+
+@dataclass(frozen=True)
+class PreparedWorkflowPlan:
+    op: str
+    dataset: str
+    case_id: str
+    dtype: str
+    seed: int
+    prepared: PreparedWorkflowInput
 
 
 class _StoreWithPresence(argparse.Action):
@@ -191,6 +208,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     internal_run = subparsers.add_parser("internal-run")
     _benchmark_args(internal_run)
+
+    internal_workflow = subparsers.add_parser("internal-run-workflow")
+    internal_workflow.add_argument(
+        "--backend", choices=["nvidia", "ascend"], required=True
+    )
+    internal_workflow.add_argument(
+        "--implementation",
+        choices=["cann_ops_library", "simt", "cuda_library", "vllm_ascend"],
+    )
+    internal_workflow.add_argument("--implementation-version")
+    internal_workflow.add_argument("--prepared-workflow", type=Path, required=True)
+    internal_workflow.add_argument("--output-dir", type=Path, default=Path("results"))
+    internal_workflow.add_argument("--run-name")
 
     prepare = subparsers.add_parser("prepare")
     prepare.add_argument("--op", choices=list_operator_names(), required=True)
@@ -392,6 +422,26 @@ def _prepared_reference_for_plan(
     return prepared_path, _relative_artifact_path(layout_root, prepared_path) or prepared_path.name
 
 
+def _prepared_reference_for_workflow_plan(
+    prepared_dir: Path,
+    layout_root: Path,
+    plan: PreparedWorkflowPlan,
+) -> tuple[Path, str]:
+    prepared_path = _prepared_manifest_path(
+        prepared_dir,
+        plan.op,
+        plan.dataset,
+        plan.case_id,
+        plan.dtype,
+        plan.seed,
+    )
+    write_prepared_workflow_input(prepared_path, plan.prepared)
+    return (
+        prepared_path,
+        _relative_artifact_path(layout_root, prepared_path) or prepared_path.name,
+    )
+
+
 def _single_case_plan_from_args(args: argparse.Namespace) -> PreparedInputPlan:
     if args.prepared_input is not None:
         plans = expand_prepared_input_plans(
@@ -435,7 +485,9 @@ def _plan_from_workflow_step(step) -> PreparedInputPlan:
     )
 
 
-def _plans_from_workflow_operator_selection(args: argparse.Namespace) -> list[PreparedInputPlan]:
+def _plans_from_workflow_operator_selection(
+    args: argparse.Namespace,
+) -> list[PreparedWorkflowPlan]:
     plugin = _workflow_plugin(args.op)
     if plugin is None or plugin.build_workflow is None or plugin.list_workflows is None:
         raise ValueError(f"{args.op} is not a workflow operator")
@@ -461,10 +513,42 @@ def _plans_from_workflow_operator_selection(args: argparse.Namespace) -> list[Pr
     if not workflows:
         raise ValueError(f"No runnable workflows for {args.op} dataset {dataset}")
 
+    plans: list[PreparedWorkflowPlan] = []
+    for workflow in workflows:
+        prepared = prepare_workflow_input(workflow)
+        dtype_values = {step.prepared.dtype for step in prepared.steps}
+        seed_values = {step.prepared.seed for step in prepared.steps}
+        if len(dtype_values) != 1 or len(seed_values) != 1:
+            raise ValueError(
+                f"workflow {prepared.workflow} steps must share dtype and seed"
+            )
+        plans.append(
+            PreparedWorkflowPlan(
+                op=prepared.workflow,
+                dataset=prepared.dataset,
+                case_id=prepared.case_id,
+                dtype=next(iter(dtype_values)),
+                seed=next(iter(seed_values)),
+                prepared=prepared,
+            )
+        )
+    return plans
+
+
+def _component_plans_from_workflow_plans(
+    plans: list[PreparedWorkflowPlan],
+) -> list[PreparedInputPlan]:
     return [
-        _plan_from_workflow_step(step)
-        for workflow in workflows
-        for step in workflow.steps
+        PreparedInputPlan(
+            op=step.prepared.op,
+            dataset=step.prepared.dataset,
+            case_id=step.prepared.case.case_id,
+            dtype=step.prepared.dtype,
+            seed=step.prepared.seed,
+            prepared=step.prepared,
+        )
+        for plan in plans
+        for step in plan.prepared.steps
     ]
 
 
@@ -478,9 +562,10 @@ def _validate_unique_batch_artifact_stems(plans: list) -> None:
             dtype=plan.dtype,
             seed=plan.seed,
         )
+        source_path = getattr(plan, "source_path", None)
         plan_ref = (
-            plan.source_path.as_posix()
-            if plan.source_path is not None
+            source_path.as_posix()
+            if source_path is not None
             else f"{plan.op}/{plan.dataset}/{plan.case_id}"
         )
         previous_ref = seen.get(stem)
@@ -563,6 +648,43 @@ def _finalize_local_execution_artifacts(
         artifact_stem,
         execution_result.artifacts.profile,
     )
+    return profiled_result_path or result_path
+
+
+def _finalize_local_workflow_artifacts(
+    *,
+    layout,
+    artifact_stem: str,
+    plan: PreparedWorkflowPlan,
+    execution_result: BenchCaseExecutionResult,
+) -> Path | None:
+    result_path = execution_result.result_path
+    profile = execution_result.artifacts.profile
+    if profile is None:
+        return result_path
+    if len(profile.component_summaries) != len(plan.prepared.steps):
+        raise RuntimeError(
+            "workflow profile component summary count mismatch: "
+            f"expected {len(plan.prepared.steps)}, "
+            f"got {len(profile.component_summaries)}"
+        )
+    profiled_result_path = _finalize_profile_artifacts(
+        layout,
+        artifact_stem,
+        profile,
+    )
+    profile_dir = layout.profile_dir / artifact_stem / "components"
+    for step_index, (step, summary) in enumerate(
+        zip(
+            plan.prepared.steps,
+            profile.component_summaries,
+            strict=True,
+        )
+    ):
+        write_device_profile_summary(
+            profile_dir / f"{step_index}-{step.prepared.op}.json",
+            summary,
+        )
     return profiled_result_path or result_path
 
 
@@ -899,6 +1021,132 @@ def _run_local_bench_with_plans(
         )
 
 
+def _run_local_workflow_bench(
+    args: argparse.Namespace,
+    *,
+    plans: list[PreparedWorkflowPlan],
+    run_name: str,
+) -> None:
+    _validate_unique_batch_artifact_stems(plans)
+    layout = _prepare_batch_run_layout(args.output_dir, run_name)
+    executor = LocalBenchExecutor(
+        get_backend(args.backend),
+        write_benchmark_outputs,
+        write_workflow_outputs=write_workflow_benchmark_outputs,
+    )
+    summary_rows: list[BatchResultRecord] = []
+    benchmark_records: list[dict[str, object]] = []
+    failure_rows: list[BatchFailureRecord] = []
+    _emit_run_event(
+        f"[run] bench started run_name={run_name} backend={args.backend} "
+        f"mode=local-workflow cases={len(plans)}"
+    )
+
+    implementation_version = _resolve_implementation_version(
+        args.implementation,
+        args.implementation_version,
+    )
+    for index, plan in enumerate(plans, start=1):
+        _, prepared_reference = _prepared_reference_for_workflow_plan(
+            layout.prepared_dir,
+            layout.root,
+            plan,
+        )
+        artifact_stem = build_benchmark_artifact_stem(
+            op=plan.op,
+            dataset=plan.dataset,
+            case_id=plan.case_id,
+            dtype=plan.dtype,
+            seed=plan.seed,
+        )
+        request = WorkflowBenchmarkRequest(
+            backend=args.backend,
+            prepared=plan.prepared,
+            implementation=args.implementation,
+            implementation_version=implementation_version,
+            aic_metrics=args.aic_metrics,
+        )
+        _emit_run_event(
+            f"[case] start {index}/{len(plans)} case_id={plan.case_id} "
+            f"dataset={plan.dataset} dtype={plan.dtype} backend={args.backend}"
+        )
+        try:
+            execution_result = executor.execute_workflow(
+                request,
+                output_dir=layout.perf_dir,
+                run_name=artifact_stem,
+            )
+            result_path = _finalize_local_workflow_artifacts(
+                layout=layout,
+                artifact_stem=artifact_stem,
+                plan=plan,
+                execution_result=execution_result,
+            )
+            profile = execution_result.artifacts.profile
+            if profile is not None:
+                benchmark_records.append(
+                    build_workflow_benchmark_record(
+                        run_id=f"{run_name}/{artifact_stem}",
+                        backend=args.backend,
+                        implementation=args.implementation,
+                        implementation_version=implementation_version,
+                        prepared=plan.prepared,
+                        device_name=profile.device_name,
+                        profile_summary=profile.profile_summary,
+                    )
+                )
+            summary_rows.append(
+                _build_success_row(
+                    plan=plan,
+                    prepared_reference=prepared_reference,
+                    layout_root=layout.root,
+                    result_path=result_path,
+                )
+            )
+            _emit_run_event(
+                f"[case] success case_id={plan.case_id} backend={args.backend}"
+            )
+        except Exception as exc:
+            summary_rows.append(
+                _build_failure_row(
+                    plan=plan,
+                    prepared_reference=prepared_reference,
+                )
+            )
+            failure_rows.append(
+                _build_failure_record(
+                    plan=plan,
+                    prepared_reference=prepared_reference,
+                    error=exc,
+                )
+            )
+            _emit_run_event(
+                f"[case] failed case_id={plan.case_id} "
+                f"backend={args.backend} error={exc}"
+            )
+
+    failures_path = _write_bench_metadata(
+        layout=layout,
+        backend=args.backend,
+        run_name=run_name,
+        implementation=args.implementation,
+        summary_rows=summary_rows,
+        failure_rows=failure_rows,
+        benchmark_records=benchmark_records,
+    )
+    _emit_run_event(
+        f"[run] bench completed run_name={run_name} backend={args.backend} "
+        f"successes={len(summary_rows) - len(failure_rows)} "
+        f"failures={len(failure_rows)}"
+    )
+    if failure_rows:
+        label = "single" if len(plans) == 1 else "batch"
+        raise RuntimeError(
+            f"{label} workflow bench completed with {len(failure_rows)} failures; "
+            f"see {failures_path}"
+        )
+
+
 def _run_remote_bench_with_plans(
     args: argparse.Namespace,
     *,
@@ -1097,7 +1345,7 @@ def _run_workflow_operator_bench(args: argparse.Namespace) -> None:
     plans = _plans_from_workflow_operator_selection(args)
     run_name = _resolve_bench_run_name(args, plans)
     if args.endpoint is None:
-        _run_local_bench_with_plans(
+        _run_local_workflow_bench(
             args,
             plans=plans,
             run_name=run_name,
@@ -1107,7 +1355,7 @@ def _run_workflow_operator_bench(args: argparse.Namespace) -> None:
     endpoint = read_remote_endpoint(args.endpoint)
     _run_remote_bench_with_plans(
         args,
-        plans=plans,
+        plans=_component_plans_from_workflow_plans(plans),
         run_name=run_name,
         endpoint=endpoint,
         parent_run_id=run_name,
@@ -1133,6 +1381,25 @@ def _run_internal_command(args: argparse.Namespace) -> None:
     result = backend.run_operator(request)
     write_benchmark_outputs(
         args.output_dir, args.run_name or "internal-run-benchmark", result
+    )
+
+
+def _run_internal_workflow_command(args: argparse.Namespace) -> None:
+    prepared = read_prepared_workflow_input(args.prepared_workflow)
+    request = WorkflowBenchmarkRequest(
+        backend=args.backend,
+        prepared=prepared,
+        implementation=args.implementation,
+        implementation_version=_resolve_implementation_version(
+            args.implementation,
+            args.implementation_version,
+        ),
+    )
+    result = get_backend(args.backend).run_workflow(request)
+    write_workflow_benchmark_outputs(
+        args.output_dir,
+        args.run_name or "internal-run-workflow-benchmark",
+        result,
     )
 
 
@@ -1178,13 +1445,19 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    if args.command in {"bench", "internal-run"}:
+    if args.command in {"bench", "internal-run", "internal-run-workflow"}:
         try:
-            _validate_benchmark_selection(args, allow_batch=args.command == "bench")
+            if args.command != "internal-run-workflow":
+                _validate_benchmark_selection(
+                    args, allow_batch=args.command == "bench"
+                )
             if args.command == "bench":
                 _run_bench_command(args)
                 return 0
-            _run_internal_command(args)
+            if args.command == "internal-run":
+                _run_internal_command(args)
+            else:
+                _run_internal_workflow_command(args)
         except (RuntimeError, ValueError) as exc:
             parser.error(str(exc))
     elif args.command == "prepare":

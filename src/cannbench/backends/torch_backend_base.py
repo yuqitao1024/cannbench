@@ -55,6 +55,20 @@ class TorchOperatorBackend(OperatorBackend):
             aic_metrics=request.aic_metrics,
         )
 
+    def _request_for_workflow_step(self, request, step):
+        prepared = step.prepared
+        return OperatorBenchmarkRequest(
+            backend=request.backend,
+            op=prepared.op,
+            dtype=prepared.dtype,
+            dataset=prepared.dataset,
+            case_id=prepared.case.case_id,
+            implementation=request.implementation,
+            seed=prepared.seed,
+            implementation_version=request.implementation_version,
+            aic_metrics=request.aic_metrics,
+        )
+
     def _resolve_input_bindings(self, torch, request, *, device):
         bound_inputs = {}
         for name, binding in request.input_bindings.items():
@@ -242,18 +256,7 @@ class TorchOperatorBackend(OperatorBackend):
         outputs: dict[str, object] = {}
         step_results: list[OperatorBenchmarkResult] = []
         for step in request.prepared.steps:
-            prepared = step.prepared
-            step_request = OperatorBenchmarkRequest(
-                backend=request.backend,
-                op=prepared.op,
-                dtype=prepared.dtype,
-                dataset=prepared.dataset,
-                case_id=prepared.case.case_id,
-                implementation=request.implementation,
-                seed=prepared.seed,
-                implementation_version=request.implementation_version,
-                aic_metrics=request.aic_metrics,
-            )
+            step_request = self._request_for_workflow_step(request, step)
             self.validate_request(step_request)
             self._before_run_operator(step_request)
             spec = get_operator_spec(step_request.op)

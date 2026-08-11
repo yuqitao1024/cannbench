@@ -9,20 +9,27 @@ from importlib.resources import as_file, files
 from pathlib import Path
 
 from cannbench.backends.torch_backend_base import TorchOperatorBackend
-from cannbench.core.config import OperatorBenchmarkRequest
+from cannbench.core.config import OperatorBenchmarkRequest, WorkflowBenchmarkRequest
 from cannbench.core.execution import read_artifact_tree
-from cannbench.core.prepared_input import build_prepared_operator_input, write_prepared_operator_input
+from cannbench.core.prepared_input import (
+    build_prepared_operator_input,
+    write_prepared_operator_input,
+    write_prepared_workflow_input,
+)
 from cannbench.core.profile import (
     ProfileArtifacts,
     LocalDeviceProfileResult,
+    ProfileKernelSelection,
     ncu_profile_options,
     read_device_profile,
+    read_workflow_profile,
 )
 from cannbench.core.result import OperatorBenchmarkResult, OperatorCase
 from cannbench.operators import get_operator_plugin
 from cannbench.operators.materialize import materialized_values_to_buffer
 
 _SKIP_SIMT_INSTALL_ENV = "CANNBENCH_SKIP_SIMT_INSTALL"
+_WORKFLOW_DEFAULT_LAUNCH_BUDGET = 64
 
 
 def _subprocess_pythonpath() -> str:
@@ -46,6 +53,24 @@ def _ascend_msopprof_options(
         f"--aic-metrics={aic_metrics}",
         f"--launch-count={kernel_selection.launch_count or 10}",
     ]
+
+
+def _workflow_step_selections(request: WorkflowBenchmarkRequest):
+    return tuple(
+        get_operator_plugin(step.prepared.op).profile_kernel_selection(
+            backend=request.backend,
+            implementation=request.implementation,
+            implementation_version=request.implementation_version,
+        )
+        for step in request.prepared.steps
+    )
+
+
+def _workflow_launch_count(selections) -> int:
+    return sum(
+        selection.launch_count or _WORKFLOW_DEFAULT_LAUNCH_BUDGET
+        for selection in selections
+    )
 
 
 class NvidiaBackend(TorchOperatorBackend):
@@ -220,6 +245,101 @@ class NvidiaBackend(TorchOperatorBackend):
             profile=profile,
         )
 
+    def profile_workflow_device_time(
+        self, request: WorkflowBenchmarkRequest
+    ) -> ProfileArtifacts:
+        torch = self._torch_module()
+        if not self._is_available(torch):
+            raise RuntimeError(self._availability_error())
+        selections = _workflow_step_selections(request)
+        workflow_selection = ProfileKernelSelection(
+            launch_count=_workflow_launch_count(selections)
+        )
+        with tempfile.TemporaryDirectory(
+            prefix="cannbench-ncu-workflow-"
+        ) as temp_dir_name:
+            temp_dir = Path(temp_dir_name)
+            prepared_path = temp_dir / "prepared-workflow.json"
+            profile_dir = temp_dir / "profile"
+            perf_dir = temp_dir / "perf"
+            profile_dir.mkdir(parents=True, exist_ok=True)
+            perf_dir.mkdir(parents=True, exist_ok=True)
+            write_prepared_workflow_input(prepared_path, request.prepared)
+            command = [
+                "ncu",
+                "--target-processes",
+                "all",
+                "--force-overwrite",
+                *ncu_profile_options(workflow_selection),
+                "--export",
+                str(profile_dir / "ncu-report"),
+                sys.executable,
+                "-m",
+                "cannbench",
+                "internal-run-workflow",
+                "--backend",
+                "nvidia",
+                "--prepared-workflow",
+                str(prepared_path),
+                "--output-dir",
+                str(perf_dir),
+                "--run-name",
+                "benchmark",
+            ]
+            if request.implementation is not None:
+                command.extend(("--implementation", request.implementation))
+            if request.implementation_version is not None:
+                command.extend(
+                    ("--implementation-version", request.implementation_version)
+                )
+            result = subprocess.run(
+                command,
+                cwd=temp_dir,
+                env={**os.environ, "PYTHONPATH": _subprocess_pythonpath()},
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(
+                    "ncu workflow profiling failed "
+                    f"(exit {result.returncode}): {result.stderr.strip()}"
+                )
+            render_result = subprocess.run(
+                [
+                    "ncu",
+                    "--import",
+                    str(profile_dir / "ncu-report.ncu-rep"),
+                    "--page",
+                    "raw",
+                    "--csv",
+                ],
+                cwd=temp_dir,
+                env={**os.environ, "PYTHONPATH": _subprocess_pythonpath()},
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            if render_result.returncode != 0:
+                raise RuntimeError(
+                    "ncu workflow report render failed "
+                    f"(exit {render_result.returncode}): "
+                    f"{render_result.stderr.strip()}"
+                )
+            (profile_dir / "ncu.csv").write_text(render_result.stdout)
+            summary = read_workflow_profile(
+                profile_dir,
+                backend="nvidia",
+                step_selections=selections,
+            )
+            return ProfileArtifacts(
+                device_name=self._device_name(torch, self._device(torch)),
+                profile_summary=summary.profile_summary,
+                profile_artifacts=read_artifact_tree(profile_dir),
+                perf_artifacts=read_artifact_tree(perf_dir),
+                component_summaries=summary.component_summaries,
+            )
+
 class AscendBackend(TorchOperatorBackend):
     def __init__(self) -> None:
         super().__init__(name="ascend", device_type="npu")
@@ -346,6 +466,84 @@ class AscendBackend(TorchOperatorBackend):
             ),
             profile=profile,
         )
+
+    def profile_workflow_device_time(
+        self, request: WorkflowBenchmarkRequest
+    ) -> ProfileArtifacts:
+        torch = self._torch_module()
+        if not self._is_available(torch):
+            raise RuntimeError(self._availability_error())
+        for step in request.prepared.steps:
+            self._before_run_operator(self._request_for_workflow_step(request, step))
+        selections = _workflow_step_selections(request)
+        workflow_selection = ProfileKernelSelection(
+            launch_count=_workflow_launch_count(selections)
+        )
+        with tempfile.TemporaryDirectory(
+            prefix="cannbench-msopprof-workflow-"
+        ) as temp_dir_name:
+            temp_dir = Path(temp_dir_name)
+            prepared_path = temp_dir / "prepared-workflow.json"
+            profile_dir = temp_dir / "profile"
+            perf_dir = temp_dir / "perf"
+            profile_dir.mkdir(parents=True, exist_ok=True)
+            perf_dir.mkdir(parents=True, exist_ok=True)
+            write_prepared_workflow_input(prepared_path, request.prepared)
+            command = [
+                "msopprof",
+                *_ascend_msopprof_options(
+                    profile_dir,
+                    workflow_selection,
+                    request.aic_metrics,
+                ),
+                sys.executable,
+                "-m",
+                "cannbench",
+                "internal-run-workflow",
+                "--backend",
+                "ascend",
+                "--prepared-workflow",
+                str(prepared_path),
+                "--output-dir",
+                str(perf_dir),
+                "--run-name",
+                "benchmark",
+            ]
+            if request.implementation is not None:
+                command.extend(("--implementation", request.implementation))
+            if request.implementation_version is not None:
+                command.extend(
+                    ("--implementation-version", request.implementation_version)
+                )
+            result = subprocess.run(
+                command,
+                cwd=temp_dir,
+                env={
+                    **os.environ,
+                    "PYTHONPATH": _subprocess_pythonpath(),
+                    _SKIP_SIMT_INSTALL_ENV: "1",
+                },
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(
+                    "msopprof workflow profiling failed "
+                    f"(exit {result.returncode}): {result.stderr.strip()}"
+                )
+            summary = read_workflow_profile(
+                profile_dir,
+                backend="ascend",
+                step_selections=selections,
+            )
+            return ProfileArtifacts(
+                device_name=self._device_name(torch, self._device(torch)),
+                profile_summary=summary.profile_summary,
+                profile_artifacts=read_artifact_tree(profile_dir),
+                perf_artifacts=read_artifact_tree(perf_dir),
+                component_summaries=summary.component_summaries,
+            )
 
     def _ensure_vllm_ascend_custom_ops_loaded(self) -> None:
         try:

@@ -2,7 +2,7 @@ import csv
 import json
 from pathlib import Path
 
-from cannbench.core.result import OperatorBenchmarkResult
+from cannbench.core.result import OperatorBenchmarkResult, WorkflowBenchmarkResult
 
 
 def build_benchmark_artifact_stem(
@@ -58,3 +58,14 @@ def write_benchmark_outputs(
     created["csv"] = csv_path
 
     return created
+
+
+def write_workflow_benchmark_outputs(
+    output_dir: Path,
+    run_name: str,
+    result: WorkflowBenchmarkResult,
+) -> dict[str, Path]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    json_path = output_dir / f"{run_name}.json"
+    json_path.write_text(json.dumps(result.to_json_dict(), indent=2) + "\n")
+    return {"json": json_path}

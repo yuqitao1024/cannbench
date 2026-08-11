@@ -5,11 +5,16 @@ from pathlib import Path
 from cannbench.core.benchmark_records import (
     build_benchmark_record,
     build_collect_benchmark_record,
+    build_workflow_benchmark_record,
     read_profile_summary,
     write_benchmark_records_json,
 )
-from cannbench.core.prepared_input import build_prepared_operator_input
+from cannbench.core.prepared_input import (
+    build_prepared_operator_input,
+    prepare_workflow_input,
+)
 from cannbench.core.profile import DeviceProfileSummary, write_device_profile_summary
+from cannbench.operators.builtin.dsa_decode import build_dsa_decode_workflow
 
 
 def test_build_collect_benchmark_record_for_ascend_simt():
@@ -245,3 +250,40 @@ def test_read_profile_summary_and_write_benchmark_records_json(tmp_path: Path):
     assert summary.source_files == ("ncu.csv",)
     assert result == payload_path
     assert '"records": "ok"' in payload_path.read_text()
+
+
+def test_build_workflow_benchmark_record_preserves_published_contract():
+    prepared = prepare_workflow_input(
+        build_dsa_decode_workflow(
+            dataset="stress",
+            case_id="vllm_ascend_a5_decode_b1_ctx512_top512",
+            dtype="bfloat16",
+            seed=0,
+        )
+    )
+
+    record = build_workflow_benchmark_record(
+        run_id=(
+            "dsa-decode-profiled/"
+            "dsa_decode-stress-vllm_ascend_a5_decode_b1_ctx512_top512-"
+            "bfloat16-seed0"
+        ),
+        backend="nvidia",
+        implementation="cuda_library",
+        prepared=prepared,
+        device_name="NVIDIA H800 PCIe",
+        profile_summary=DeviceProfileSummary(
+            backend="nvidia",
+            latency_ms=0.01,
+            source_files=("ncu.csv",),
+        ),
+    )
+
+    assert record["operator"] == "dsa_decode"
+    assert record["dataset"] == "stress"
+    assert record["family"] == "decode_workflow"
+    assert record["shape"] == [1, 64, 512]
+    assert record["implementation"] == "cuda_library"
+    assert record["implementation_version"] == "cuda-library"
+    assert record["metrics"] == {"latency_ms": 0.01}
+    assert record["diff_ref"] is None

@@ -31,3 +31,6 @@ class OperatorBackend:
         self, request: OperatorBenchmarkRequest
     ) -> LocalDeviceProfileResult:
         raise NotImplementedError
+
+    def profile_workflow_device_time(self, request: WorkflowBenchmarkRequest):
+        raise NotImplementedError

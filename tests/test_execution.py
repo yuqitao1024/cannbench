@@ -7,6 +7,7 @@ from cannbench.core.execution import (
     BenchCaseExecutionResult,
     BenchExecutionArtifacts,
     BenchProfileArtifacts,
+    LocalBenchExecutor,
     read_artifact_tree,
 )
 from cannbench.core.profile import DeviceProfileSummary
@@ -84,3 +85,59 @@ def test_bench_execution_artifacts_can_represent_sparse_attention_tuple_outputs(
     )
 
     assert len(artifacts.output_artifacts) == 2
+
+
+def test_local_executor_runs_and_profiles_workflow_once(tmp_path: Path):
+    calls: list[tuple[str, object]] = []
+    workflow_result = object()
+    profile = BenchProfileArtifacts(
+        backend="nvidia",
+        device_name="Fake GPU",
+        profile_summary=DeviceProfileSummary(
+            backend="nvidia",
+            latency_ms=0.01,
+            source_files=("ncu.csv",),
+        ),
+        profile_artifacts=(("ncu.csv", b"csv"),),
+        perf_artifacts=(("benchmark.json", b"{}"),),
+        component_summaries=(
+            DeviceProfileSummary("nvidia", ("ncu.csv",), 0.003),
+            DeviceProfileSummary("nvidia", ("ncu.csv",), 0.007),
+        ),
+    )
+
+    class FakeBackend:
+        def run_workflow(self, request):
+            calls.append(("run", request))
+            return workflow_result
+
+        def profile_workflow_device_time(self, request):
+            calls.append(("profile", request))
+            return profile
+
+        def run_operator(self, request):
+            raise AssertionError("workflow execution must not run a component case")
+
+    def write_workflow_outputs(output_dir, run_name, result):
+        assert result is workflow_result
+        path = output_dir / f"{run_name}.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{}\n")
+        return {"json": path}
+
+    executor = LocalBenchExecutor(
+        FakeBackend(),
+        lambda *args: {},
+        write_workflow_outputs=write_workflow_outputs,
+    )
+    request = object()
+
+    result = executor.execute_workflow(
+        request,
+        output_dir=tmp_path,
+        run_name="workflow",
+    )
+
+    assert calls == [("run", request), ("profile", request)]
+    assert result.artifacts.profile is profile
+    assert result.result_path == tmp_path / "workflow.json"

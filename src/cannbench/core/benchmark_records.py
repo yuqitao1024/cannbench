@@ -4,7 +4,11 @@ import json
 from pathlib import Path
 from typing import Any
 
-from cannbench.core.prepared_input import PreparedOperatorInput
+from cannbench.core.prepared_input import (
+    PreparedOperatorInput,
+    PreparedWorkflowInput,
+    build_prepared_operator_input,
+)
 from cannbench.core.profile import DeviceProfileSummary
 
 
@@ -169,6 +173,50 @@ def build_local_benchmark_record(
         device_name=device_name,
         profile_summary=profile_summary,
     )
+
+
+def build_workflow_benchmark_record(
+    *,
+    run_id: str,
+    backend: str,
+    implementation: str | None,
+    prepared: PreparedWorkflowInput,
+    device_name: str,
+    profile_summary: DeviceProfileSummary,
+    implementation_version: str | None = None,
+) -> dict[str, Any]:
+    component_prepared = prepared.steps[-1].prepared
+    record = build_benchmark_record(
+        run_id=run_id,
+        backend=backend,
+        implementation=implementation,
+        implementation_version=implementation_version,
+        prepared=component_prepared,
+        device_name=device_name,
+        profile_summary=profile_summary,
+    )
+    workflow_case = build_prepared_operator_input(
+        op=prepared.workflow,
+        dtype=component_prepared.dtype,
+        dataset=prepared.dataset,
+        case_id=prepared.case_id,
+        seed=component_prepared.seed,
+    ).case
+    record.update(
+        {
+            "operator": prepared.workflow,
+            "dataset": prepared.dataset,
+            "case_id": prepared.case_id,
+            "family": workflow_case.family,
+            "source_kind": workflow_case.source_kind,
+            "source_project": workflow_case.source_project,
+            "source_model": workflow_case.source_model,
+            "source_file": workflow_case.source_file,
+            "source_op": workflow_case.source_op,
+            "diff_ref": None,
+        }
+    )
+    return record
 
 
 def read_perf_result(path: Path) -> dict[str, Any]:

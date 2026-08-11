@@ -14,6 +14,7 @@ class BenchProfileArtifacts:
     profile_summary: DeviceProfileSummary
     profile_artifacts: tuple[tuple[str, bytes], ...]
     perf_artifacts: tuple[tuple[str, bytes], ...]
+    component_summaries: tuple[DeviceProfileSummary, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -34,9 +35,16 @@ class BenchCaseExecutor:
 
 
 class LocalBenchExecutor(BenchCaseExecutor):
-    def __init__(self, backend, write_outputs) -> None:
+    def __init__(
+        self,
+        backend,
+        write_outputs,
+        *,
+        write_workflow_outputs=None,
+    ) -> None:
         self._backend = backend
         self._write_outputs = write_outputs
+        self._write_workflow_outputs = write_workflow_outputs
 
     def execute_case(
         self,
@@ -56,6 +64,29 @@ class LocalBenchExecutor(BenchCaseExecutor):
             profile = None
         else:
             profile = profile_result.profile
+        return BenchCaseExecutionResult(
+            artifacts=BenchExecutionArtifacts(profile=profile),
+            result_path=result_path,
+        )
+
+    def execute_workflow(
+        self,
+        request,
+        *,
+        output_dir: Path,
+        run_name: str,
+    ) -> BenchCaseExecutionResult:
+        if self._write_workflow_outputs is None:
+            raise RuntimeError("workflow output writer is not configured")
+        result = self._backend.run_workflow(request)
+        outputs = self._write_workflow_outputs(output_dir, run_name, result)
+        result_path = outputs.get("json")
+        if result_path is None and outputs:
+            result_path = next(iter(outputs.values()))
+        try:
+            profile = self._backend.profile_workflow_device_time(request)
+        except (NotImplementedError, AttributeError):
+            profile = None
         return BenchCaseExecutionResult(
             artifacts=BenchExecutionArtifacts(profile=profile),
             result_path=result_path,

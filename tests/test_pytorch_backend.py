@@ -201,6 +201,135 @@ def test_torch_backend_rejects_workflow_output_arity_mismatch(monkeypatch):
         )
 
 
+def test_nvidia_backend_profiles_entire_workflow_in_one_internal_process(
+    tmp_path, monkeypatch
+):
+    import cannbench.backends.pytorch_backend as backend_module
+    from cannbench.backends.pytorch_backend import NvidiaBackend
+
+    captured: dict[str, object] = {}
+    fake_torch = SimpleNamespace(
+        cuda=SimpleNamespace(
+            is_available=lambda: True,
+            synchronize=lambda: None,
+            get_device_name=lambda device: "NVIDIA H800 PCIe",
+        ),
+        device=lambda name: name,
+    )
+    backend = NvidiaBackend()
+    monkeypatch.setattr(backend, "_torch_module", lambda: fake_torch)
+
+    def fake_run(command, cwd=None, env=None, **kwargs):
+        del env, kwargs
+        if "--target-processes" in command:
+            captured["profile_command"] = command
+            (cwd / "profile" / "ncu-report.ncu-rep").write_text("report")
+            (cwd / "perf").mkdir(parents=True, exist_ok=True)
+            (cwd / "perf" / "benchmark.json").write_text("{}\n")
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if "--import" in command:
+            return SimpleNamespace(
+                returncode=0,
+                stdout=(
+                    "Kernel Name,Metric Name,Metric Unit,Metric Value\n"
+                    "topk_stage,gpu__time_duration.avg,usecond,3\n"
+                    "topk_terminal,gpu__time_duration.avg,usecond,2\n"
+                    "cast_attention,gpu__time_duration.avg,usecond,1\n"
+                    "sparse_attention,gpu__time_duration.avg,usecond,4\n"
+                ),
+                stderr="",
+            )
+        raise AssertionError(f"unexpected subprocess command: {command}")
+
+    monkeypatch.setattr(backend_module.subprocess, "run", fake_run)
+    prepared = prepare_workflow_input(
+        build_dsa_decode_workflow(
+            dataset="stress",
+            case_id="vllm_ascend_a5_decode_b1_ctx512_top512",
+            dtype="bfloat16",
+            seed=0,
+        )
+    )
+
+    profile = backend.profile_workflow_device_time(
+        WorkflowBenchmarkRequest(
+            backend="nvidia",
+            prepared=prepared,
+            implementation="cuda_library",
+        )
+    )
+
+    command = captured["profile_command"]
+    assert command.count("internal-run-workflow") == 1
+    assert "internal-run" not in command
+    assert command[command.index("--launch-count") + 1] == "128"
+    assert profile.profile_summary.latency_ms == pytest.approx(0.01)
+    assert [item.latency_ms for item in profile.component_summaries] == pytest.approx(
+        [0.005, 0.005]
+    )
+
+
+def test_ascend_backend_profiles_entire_workflow_in_one_internal_process(
+    monkeypatch,
+):
+    import cannbench.backends.pytorch_backend as backend_module
+    from cannbench.backends.pytorch_backend import AscendBackend
+
+    captured: dict[str, object] = {}
+    fake_torch = SimpleNamespace(
+        npu=SimpleNamespace(
+            is_available=lambda: True,
+            synchronize=lambda: None,
+            get_device_name=lambda device: "Ascend 950PR",
+        ),
+        device=lambda name: name,
+    )
+    backend = AscendBackend()
+    monkeypatch.setattr(backend, "_torch_module", lambda: fake_torch)
+
+    def fake_run(command, cwd=None, env=None, **kwargs):
+        del env, kwargs
+        captured["profile_command"] = command
+        (cwd / "profile" / "OpBasicInfo.csv").write_text(
+            "Op Name,Task Duration(us)\n"
+            "Cast_indexer,2\n"
+            "LightningIndexer_main,30\n"
+            "Cast_attention,3\n"
+            "SparseFlashAttention_main,50\n"
+        )
+        (cwd / "perf").mkdir(parents=True, exist_ok=True)
+        (cwd / "perf" / "benchmark.json").write_text("{}\n")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(backend_module.subprocess, "run", fake_run)
+    prepared = prepare_workflow_input(
+        build_dsa_decode_workflow(
+            dataset="stress",
+            case_id="vllm_ascend_a5_decode_b1_ctx512_top512",
+            dtype="bfloat16",
+            seed=0,
+        )
+    )
+
+    profile = backend.profile_workflow_device_time(
+        WorkflowBenchmarkRequest(
+            backend="ascend",
+            prepared=prepared,
+            implementation="vllm_ascend",
+            aic_metrics="PipeTimeline",
+        )
+    )
+
+    command = captured["profile_command"]
+    assert command.count("internal-run-workflow") == 1
+    assert "--aic-metrics=PipeTimeline" in command
+    assert "--launch-count=128" in command
+    assert profile.profile_summary.latency_ms == pytest.approx(0.085)
+    assert [item.latency_ms for item in profile.component_summaries] == pytest.approx(
+        [0.032, 0.053]
+    )
+
+
 def test_backend_raises_clear_error_when_torch_is_missing(monkeypatch):
     original_import = builtins.__import__
 

@@ -21,12 +21,16 @@ from cannbench.core.remote import RemoteCollectionResult, RemoteEndpoint
 from cannbench.core.result import (
     OperatorBenchmarkResult,
     OperatorCase,
+    WorkflowBenchmarkResult,
 )
 from cannbench.core.prepared_input import (
     build_prepared_operator_input,
+    prepare_workflow_input,
     read_prepared_operator_input,
+    write_prepared_workflow_input,
     write_prepared_operator_input,
 )
+from cannbench.operators.builtin.dsa_decode import build_dsa_decode_workflow
 from cannbench.datasets import get_operator_dataset
 
 
@@ -98,6 +102,18 @@ def result_for_request(request) -> OperatorBenchmarkResult:
     )
 
 
+def workflow_result_for_request(request) -> WorkflowBenchmarkResult:
+    return WorkflowBenchmarkResult(
+        backend=request.backend,
+        device_name="Fake GPU",
+        workflow=request.prepared.workflow,
+        phase=request.prepared.phase,
+        dataset=request.prepared.dataset,
+        case_id=request.prepared.case_id,
+        steps=(),
+    )
+
+
 def remote_collect_result(
     *,
     endpoint: RemoteEndpoint,
@@ -166,6 +182,30 @@ def test_build_parser_exposes_internal_run_subcommand():
     assert args.op == "softmax"
     assert args.dataset == "realistic"
     assert args.case_id == "t5_attention"
+
+
+def test_build_parser_exposes_internal_run_workflow_subcommand():
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "internal-run-workflow",
+            "--backend",
+            "ascend",
+            "--implementation",
+            "simt",
+            "--implementation-version",
+            "v2",
+            "--prepared-workflow",
+            "prepared-workflow.json",
+            "--output-dir",
+            "results",
+        ]
+    )
+
+    assert args.command == "internal-run-workflow"
+    assert args.prepared_workflow == Path("prepared-workflow.json")
+    assert args.implementation == "simt"
+    assert args.implementation_version == "v2"
 
 
 def test_build_parser_exposes_bench_subcommand():
@@ -676,6 +716,64 @@ def test_main_runs_internal_run_and_writes_outputs(tmp_path, monkeypatch):
     assert captured["output_dir"] == tmp_path
     assert captured["run_name"] == "softmax-run"
     assert captured["result"] is result
+
+
+def test_main_runs_internal_workflow_once_and_writes_one_result(tmp_path, monkeypatch):
+    prepared = prepare_workflow_input(
+        build_dsa_decode_workflow(
+            dataset="stress",
+            case_id="vllm_ascend_a5_decode_b1_ctx512_top512",
+            dtype="bfloat16",
+            seed=7,
+        )
+    )
+    prepared_path = write_prepared_workflow_input(
+        tmp_path / "prepared-workflow.json", prepared
+    )
+    captured: dict[str, object] = {}
+    result = WorkflowBenchmarkResult(
+        backend="ascend",
+        device_name="Ascend 950PR",
+        workflow=prepared.workflow,
+        phase=prepared.phase,
+        dataset=prepared.dataset,
+        case_id=prepared.case_id,
+        steps=(),
+    )
+
+    class FakeBackend:
+        def run_workflow(self, request):
+            captured["request"] = request
+            return result
+
+        def run_operator(self, request):
+            raise AssertionError("workflow execution must not run component cases")
+
+    monkeypatch.setattr("cannbench.cli.get_backend", lambda name: FakeBackend())
+
+    exit_code = main(
+        [
+            "internal-run-workflow",
+            "--backend",
+            "ascend",
+            "--implementation",
+            "simt",
+            "--implementation-version",
+            "v2",
+            "--prepared-workflow",
+            str(prepared_path),
+            "--output-dir",
+            str(tmp_path / "results"),
+            "--run-name",
+            "benchmark",
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured["request"].prepared == prepared
+    assert captured["request"].implementation_version == "v2"
+    payload = json.loads((tmp_path / "results" / "benchmark.json").read_text())
+    assert payload == result.to_json_dict()
 
 
 def test_main_runs_bench_and_maps_simt_to_simt_op_deployment(tmp_path, monkeypatch):
@@ -2547,16 +2645,19 @@ def test_main_runs_batch_bench_from_selection_and_writes_summary(tmp_path, monke
     assert failures["records"] == []
 
 
-def test_main_runs_dsa_decode_workflow_as_two_local_cases(tmp_path, monkeypatch, capsys):
+def test_main_runs_dsa_decode_workflow_as_one_local_case(tmp_path, monkeypatch, capsys):
     captured_requests: list[object] = []
 
     class FakeBackend:
-        def run_operator(self, request):
+        def run_workflow(self, request):
             captured_requests.append(request)
-            return result_for_request(request)
+            return workflow_result_for_request(request)
 
-        def profile_operator_device_time(self, request):
+        def profile_workflow_device_time(self, request):
             raise NotImplementedError
+
+        def run_operator(self, request):
+            raise AssertionError("workflow execution must not run component cases")
 
     monkeypatch.setattr("cannbench.cli.get_backend", lambda name: FakeBackend())
 
@@ -2588,36 +2689,27 @@ def test_main_runs_dsa_decode_workflow_as_two_local_cases(tmp_path, monkeypatch,
     captured = capsys.readouterr()
 
     assert exit_code == 0
-    assert [request.op for request in captured_requests] == [
+    assert len(captured_requests) == 1
+    assert [step.prepared.op for step in captured_requests[0].prepared.steps] == [
         "lightning_indexer",
         "sparse_attention",
     ]
-    assert [request.case_id for request in captured_requests] == [
-        "vllm_ascend_a5_decode_b1_ctx512_top512",
-        "vllm_ascend_a5_decode_b1_ctx512_top512",
-    ]
-    assert all(request.implementation == "vllm_ascend" for request in captured_requests)
-    assert all(request.seed == 7 for request in captured_requests)
+    assert captured_requests[0].prepared.case_id == (
+        "vllm_ascend_a5_decode_b1_ctx512_top512"
+    )
+    assert captured_requests[0].implementation == "vllm_ascend"
+    assert all(step.prepared.seed == 7 for step in captured_requests[0].prepared.steps)
     assert summary["metadata"]["run_name"] == run_name
-    assert summary["metadata"]["total_cases"] == 2
-    assert [row["op"] for row in summary["records"]] == [
-        "lightning_indexer",
-        "sparse_attention",
-    ]
+    assert summary["metadata"]["total_cases"] == 1
+    assert [row["op"] for row in summary["records"]] == ["dsa_decode"]
     assert (
         layout.prepared_dir
-        / "lightning_indexer"
-        / "stress"
-        / "vllm_ascend_a5_decode_b1_ctx512_top512-bfloat16-seed7.json"
-    ).exists()
-    assert (
-        layout.prepared_dir
-        / "sparse_attention"
+        / "dsa_decode"
         / "stress"
         / "vllm_ascend_a5_decode_b1_ctx512_top512-bfloat16-seed7.json"
     ).exists()
     assert "[run] bench started run_name=" in captured.out
-    assert "mode=local-batch cases=2" in captured.out
+    assert "mode=local-workflow cases=1" in captured.out
 
 
 def test_main_preinstalls_each_remote_simt_workflow_component(tmp_path, monkeypatch):
@@ -2697,32 +2789,41 @@ def test_main_runs_profiled_dsa_workflow_and_writes_workflow_benchmark_record(
     captured_requests: list[object] = []
 
     class FakeBackend:
-        def run_operator(self, request):
+        def run_workflow(self, request):
             captured_requests.append(request)
-            return result_for_request(request)
+            return workflow_result_for_request(request)
 
-        def profile_operator_device_time(self, request):
-            latency = 0.003 if request.op == "lightning_indexer" else 0.007
-            return LocalDeviceProfileResult(
-                benchmark_result=result_for_request(request),
-                profile=ProfileArtifacts(
-                    device_name="NVIDIA H800 PCIe",
-                    profile_summary=DeviceProfileSummary(
-                        backend="nvidia",
-                        latency_ms=latency,
-                        source_files=("ncu.csv",),
-                    ),
-                    profile_artifacts=(("ncu.csv", b"Kernel Name,Metric Name,Metric Unit,Metric Value\n"),),
-                    perf_artifacts=(
-                        (
-                            "benchmark.json",
-                            (
-                                json.dumps(result_for_request(request).to_json_dict()) + "\n"
-                            ).encode("utf-8"),
-                        ),
+        def profile_workflow_device_time(self, request):
+            return ProfileArtifacts(
+                device_name="NVIDIA H800 PCIe",
+                profile_summary=DeviceProfileSummary(
+                    backend="nvidia",
+                    latency_ms=0.01,
+                    source_files=("ncu.csv",),
+                ),
+                profile_artifacts=(
+                    (
+                        "ncu.csv",
+                        b"Kernel Name,Metric Name,Metric Unit,Metric Value\n",
                     ),
                 ),
+                perf_artifacts=(
+                    (
+                        "benchmark.json",
+                        (
+                            json.dumps(workflow_result_for_request(request).to_json_dict())
+                            + "\n"
+                        ).encode("utf-8"),
+                    ),
+                ),
+                component_summaries=(
+                    DeviceProfileSummary("nvidia", ("ncu.csv",), 0.003),
+                    DeviceProfileSummary("nvidia", ("ncu.csv",), 0.007),
+                ),
             )
+
+        def run_operator(self, request):
+            raise AssertionError("workflow execution must not run component cases")
 
     monkeypatch.setattr("cannbench.cli.get_backend", lambda name: FakeBackend())
 
@@ -2753,11 +2854,8 @@ def test_main_runs_profiled_dsa_workflow_and_writes_workflow_benchmark_record(
     benchmark_records = json.loads((layout.meta_dir / "benchmark-records.json").read_text())
 
     assert exit_code == 0
-    assert [request.op for request in captured_requests] == [
-        "lightning_indexer",
-        "sparse_attention",
-    ]
-    assert summary["metadata"]["total_cases"] == 2
+    assert len(captured_requests) == 1
+    assert summary["metadata"]["total_cases"] == 1
     assert len(benchmark_records["records"]) == 1
     record = benchmark_records["records"][0]
     assert record["run_id"] == (
@@ -2772,18 +2870,30 @@ def test_main_runs_profiled_dsa_workflow_and_writes_workflow_benchmark_record(
     assert record["implementation"] == "cuda_library"
     assert record["implementation_version"] == "cuda-library"
     assert record["metrics"]["latency_ms"] == 0.01
+    profile_dir = (
+        layout.profile_dir
+        / "dsa_decode-stress-vllm_ascend_a5_decode_b1_ctx512_top512-"
+        "bfloat16-seed0"
+    )
+    assert (profile_dir / "ncu.csv").exists()
+    assert (profile_dir / "profile-summary.json").exists()
+    assert (profile_dir / "components" / "0-lightning_indexer.json").exists()
+    assert (profile_dir / "components" / "1-sparse_attention.json").exists()
 
 
 def test_main_runs_dsa_prefill_workflow_selection_as_batch(tmp_path, monkeypatch):
     captured_requests: list[object] = []
 
     class FakeBackend:
-        def run_operator(self, request):
+        def run_workflow(self, request):
             captured_requests.append(request)
-            return result_for_request(request)
+            return workflow_result_for_request(request)
 
-        def profile_operator_device_time(self, request):
+        def profile_workflow_device_time(self, request):
             raise NotImplementedError
+
+        def run_operator(self, request):
+            raise AssertionError("workflow execution must not run component cases")
 
     monkeypatch.setattr("cannbench.cli.get_backend", lambda name: FakeBackend())
 
@@ -2810,16 +2920,13 @@ def test_main_runs_dsa_prefill_workflow_selection_as_batch(tmp_path, monkeypatch
     summary = json.loads((layout.meta_dir / "summary.json").read_text())
 
     assert exit_code == 0
-    assert [request.op for request in captured_requests] == [
+    assert len(captured_requests) == 1
+    assert [step.prepared.op for step in captured_requests[0].prepared.steps] == [
         "lightning_indexer",
         "sparse_attention",
     ]
-    assert [request.case_id for request in captured_requests] == [
-        "vllm_ascend_a5_prefill_b1_q512_ctx512_top512",
-        "vllm_ascend_a5_prefill_b1_q512_ctx512_top512",
-    ]
     assert summary["metadata"]["run_name"] == run_name
-    assert summary["metadata"]["total_cases"] == 2
+    assert summary["metadata"]["total_cases"] == 1
 
 
 def test_main_defaults_dsa_decode_fused_operator_to_realistic_dataset(
@@ -2828,11 +2935,11 @@ def test_main_defaults_dsa_decode_fused_operator_to_realistic_dataset(
     captured_requests: list[object] = []
 
     class FakeBackend:
-        def run_operator(self, request):
+        def run_workflow(self, request):
             captured_requests.append(request)
-            return result_for_request(request)
+            return workflow_result_for_request(request)
 
-        def profile_operator_device_time(self, request):
+        def profile_workflow_device_time(self, request):
             raise NotImplementedError
 
     monkeypatch.setattr("cannbench.cli.get_backend", lambda name: FakeBackend())
@@ -2856,16 +2963,14 @@ def test_main_defaults_dsa_decode_fused_operator_to_realistic_dataset(
     summary = json.loads((layout.meta_dir / "summary.json").read_text())
 
     assert exit_code == 0
-    assert len(captured_requests) == 6
-    assert {request.dataset for request in captured_requests} == {"realistic_decode"}
-    assert [request.op for request in captured_requests[:4]] == [
-        "lightning_indexer",
-        "sparse_attention",
-        "lightning_indexer",
-        "sparse_attention",
-    ]
+    assert len(captured_requests) == 3
+    assert {
+        step.prepared.dataset
+        for request in captured_requests
+        for step in request.prepared.steps
+    } == {"realistic_decode"}
     assert summary["metadata"]["run_name"] == run_name
-    assert summary["metadata"]["total_cases"] == 6
+    assert summary["metadata"]["total_cases"] == 3
 
 
 def test_main_defaults_dsa_prefill_fused_operator_to_realistic_dataset(
@@ -2874,11 +2979,11 @@ def test_main_defaults_dsa_prefill_fused_operator_to_realistic_dataset(
     captured_requests: list[object] = []
 
     class FakeBackend:
-        def run_operator(self, request):
+        def run_workflow(self, request):
             captured_requests.append(request)
-            return result_for_request(request)
+            return workflow_result_for_request(request)
 
-        def profile_operator_device_time(self, request):
+        def profile_workflow_device_time(self, request):
             raise NotImplementedError
 
     monkeypatch.setattr("cannbench.cli.get_backend", lambda name: FakeBackend())
@@ -2902,16 +3007,14 @@ def test_main_defaults_dsa_prefill_fused_operator_to_realistic_dataset(
     summary = json.loads((layout.meta_dir / "summary.json").read_text())
 
     assert exit_code == 0
-    assert len(captured_requests) == 6
-    assert {request.dataset for request in captured_requests} == {"realistic_prefill"}
-    assert [request.op for request in captured_requests[:4]] == [
-        "lightning_indexer",
-        "sparse_attention",
-        "lightning_indexer",
-        "sparse_attention",
-    ]
+    assert len(captured_requests) == 3
+    assert {
+        step.prepared.dataset
+        for request in captured_requests
+        for step in request.prepared.steps
+    } == {"realistic_prefill"}
     assert summary["metadata"]["run_name"] == run_name
-    assert summary["metadata"]["total_cases"] == 6
+    assert summary["metadata"]["total_cases"] == 3
 
 
 def test_main_runs_batch_bench_once_per_prepared_case(tmp_path, monkeypatch):
