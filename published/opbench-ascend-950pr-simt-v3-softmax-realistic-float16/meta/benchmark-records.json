@@ -510,7 +510,7 @@
       "source_file": "hf_train/M2M100ForConditionalGeneration_train.json",
       "source_op": "aten._log_softmax.default",
       "metrics": {
-        "latency_ms": 1.262426025
+        "latency_ms": 0.940441040
       },
       "accuracy": {
         "passed": true,
@@ -574,7 +574,7 @@
       "source_file": "hf_train/MT5ForConditionalGeneration_train.json",
       "source_op": "aten._log_softmax.default",
       "metrics": {
-        "latency_ms": 2.451584961
+        "latency_ms": 1.732471069
       },
       "accuracy": {
         "passed": true,
@@ -925,7 +925,7 @@
       "source_file": "hf_train/XGLMForCausalLM_train.json",
       "source_op": "aten._log_softmax.default",
       "metrics": {
-        "latency_ms": 1.237669983
+        "latency_ms": 0.911580994
       },
       "accuracy": {
         "passed": true,

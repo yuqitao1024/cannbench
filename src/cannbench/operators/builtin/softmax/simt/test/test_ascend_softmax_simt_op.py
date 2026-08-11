@@ -422,6 +422,34 @@ def test_ascend_softmax_v3_large_rows_use_mte_tiled_workspace_pipeline():
     assert "row_inv_sum.mutable_data_ptr<float>()" in spatial_source
 
 
+def test_ascend_softmax_v3_huge_fp16_rows_fuse_stats_and_write_per_row():
+    source = _read_v3_simt_source("row_fast.asc")
+
+    assert "row_softmax_fast_large_ub_fused_pipeline_impl" in source
+    assert "row_softmax_fast_large_ub_fused_pipeline_kernel<" in source
+    assert "launch_row_fast_large_fused_forward_kernel<" in source
+    assert "if constexpr (std::is_same_v<scalar_t, __fp16>)" in source
+    assert "launch_row_fast_large_fused_forward_kernel<" in source
+    assert "row_softmax_fast_large_ub_tiled_stats_pipeline_kernel<" in source
+    assert "row_softmax_fast_large_ub_tiled_write_pipeline_kernel<" in source
+
+
+def test_ascend_softmax_v3_huge_fp16_fused_path_reuses_one_full_ub_tile():
+    source = _read_v3_simt_source("row_fast.asc")
+    fused_start = source.index("row_softmax_fast_large_ub_fused_pipeline_impl")
+    fused_end = source.index(
+        "row_softmax_fast_large_ub_fused_pipeline_kernel", fused_start
+    )
+    fused_source = source[fused_start:fused_end]
+
+    assert "const int64_t stats_tile_idx = stats_iter == 0" in fused_source
+    assert "? tile_count - 1" in fused_source
+    assert ": stats_iter - 1;" in fused_source
+    assert "const int64_t retained_tile_idx = tile_count - 2;" in fused_source
+    assert "const int64_t retained_slot = (tile_count - 1) & 1;" in fused_source
+    assert "const int64_t remaining_write_count = tile_count - 1;" in fused_source
+
+
 def test_ascend_softmax_v3_fp16_50k_rows_use_single_inplace_ub_pipeline():
     row_fast_source = _read_v3_simt_source("row_fast.asc")
     spatial_source = _read_v3_simt_source("spatial_softmax.asc")

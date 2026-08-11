@@ -42,8 +42,9 @@ row shape 的多路径实现：
 4. 针对高频的 `dim_size=512/1024`，先隔离编译单元规避编译器 UB
    估算问题，再引入 GM -> UB -> SIMT 计算 -> GM 的双缓冲流水。
 5. 针对 logits 大 row，按“一整行能否放入 UB”继续分流：能放入时使用
-   whole-row UB recompute；放不下时使用两个 MTE/UB tiled kernel 和行级
-   GM workspace。
+   whole-row UB recompute；放不下时，FP16 使用单 kernel 融合 tiled stats/write
+   并复用一块完整 UB tile，FP32 保留两个 MTE/UB tiled kernel fallback。两种
+   路径都使用行级 GM workspace。
 
 这条路径与 PyTorch CUDA 的经验一致：Softmax 的关键不是找到一个覆盖所有
 shape 的万能 kernel，而是围绕 row 长度、对齐、片上存储容量和寄存器压力
@@ -113,7 +114,10 @@ else:
         elif fp32 and 8192 <= dim_size <= 28160:
             whole-row UB recompute path
         elif row 超过对应 whole-row UB 上限:
-            两 kernel MTE/UB tiled workspace path
+            if fp16:
+                单 kernel MTE/UB tiled stats/write + 完整 tile 复用
+            else:
+                两 kernel MTE/UB tiled stats/write fallback
         elif 2 <= ceil(dim_size / 1024) <= 8:
             register-cache path
         else:
@@ -139,6 +143,7 @@ direct fast kernel 不再由主分发命中。它的 ILP、x4/x2 和 scalar 访�
 | `1024` | `persistent_1024` 专用 GM/UB 双缓冲 |
 | `32128` | fast row 下的 whole-row UB recompute |
 | `50265` | fast row 下的 whole-row UB 双缓冲流水 |
+| `128112` | fast row 下的 FP16 单 kernel tiled stats/write + 完整 tile 复用 |
 
 ## 4. 按提交记录梳理优化演进
 
@@ -324,7 +329,7 @@ scratch、在线统计、对齐和编译器开销。对应上限为：
 - fp16：`56320` 元素；
 - fp32：`28160` 元素。
 
-超过整行上限后，fp16/fp32 共用两 kernel 流水：
+超过整行上限后，FP32 使用两 kernel 流水：
 
 ```text
 kernel 1: MTE2 分块 GM -> UB，SIMT 在线合并 tile max/sum -> 行级 workspace
@@ -335,11 +340,14 @@ bulk 输入和输出不再由 SIMT 线程直接访问 GM。GM workspace 仍保�
 `row_max` 和 `row_inv_sum`，共 8 字节；它用于两个 kernel 之间的全局阶段边界，
 不是大 tensor 搬运路径。
 
+FP16 原先也使用同样的两 kernel 拆分，后续已由 4.14 的单 kernel 融合路径
+替代。FP32 仍保留这一实现作为 fallback。
+
 在 Ascend 950PR、CANN 9.2、1650 MHz 上用仓库标准 `msopprof BasicInfo`
 验证 `(1024, 49152)` fp32：历史 direct-GM 三 kernel 合计 `0.853744 ms`，
 当前 MTE/UB 两 kernel 合计 `0.436659 ms`，约为 `1.95x`。FP16 已发布大 shape
-的代表性对比基本持平：`longformer_logits` 为 `0.896138 -> 0.898242 ms`，
-`m2m100_logits` 为 `1.464791 -> 1.464915 ms`。
+在融合前两-kernel 阶段的历史代表性对比基本持平：`longformer_logits` 为
+`0.896138 -> 0.898242 ms`，`m2m100_logits` 为 `1.464791 -> 1.464915 ms`。
 
 ### 4.13 为精确 `dim_size=128` 增加单行 GM/UB 流水
 
@@ -355,6 +363,23 @@ bulk 输入和输出不再由 SIMT 线程直接访问 GM。GM workspace 仍保�
 cliff；复用 256 bucket 则在直接同步边界回退到 59.19 us。单行 exact-128
 同时通过直接同步和 `BasicInfo` 两个边界。
 
+### 4.14 融合 FP16 超大 row 的 stats/write 并复用完整 tile
+
+**已实现。** 当 FP16 row 超过 `56320` 元素时，原实现先启动 stats kernel，
+再启动 normalize/write kernel。两个阶段 tile 结构相同，但 kernel 边界带来
+额外 launch，第二阶段还要重新读取整行输入。
+
+当前实现把每一行的在线 max/sum 统计与 normalize/write 合并到一个 physical
+kernel 中，继续使用 1024-thread VF、64 个物理 block、两槽 MTE2/V/MTE3
+流水和行级 `row_max`/`row_inv_sum` workspace。统计阶段先读取 tail tile，随后
+按正序处理完整 tile，使最后一个 stats slot 保留一块 `56320` 元素的完整
+FP16 tile。得到最终统计量后，这一 tile 直接在 UB 中 normalize 并写回，
+避免每行从 GM 重读一块完整 tile；其他 tile 再通过原双槽流水完成写回。
+
+FP32 没有复用这一路径：其 tile 宽度、UB 占用和已有收益证据不同，仍走 4.12
+的两 kernel fallback。这个 dtype 分流是受控 A/B 的保守边界，不代表 FP32
+融合在其他 shape 或工具链上一定无收益。
+
 ## 5. 已实现优化方法归纳
 
 | 优化维度 | V3 做法 | 对应 commit |
@@ -368,10 +393,11 @@ cliff；复用 256 bucket 则在直接同步边界回退到 59.19 us。单行 ex
 | 寄存器驻留 | 每线程 2..8 个元素时缓存输入 | `03695a9` |
 | 编译器隔离 | 512/1024 模板实例拆分翻译单元 | `5a565c7`, `ea0eeab` |
 | UB staging | 512/1024 使用双缓冲 GM/UB 流水 | `bb1c443` |
-| exact-128 UB staging | 每 warp 一行、每 tile 32 行的双缓冲 GM/UB 流水 | 当前变更 |
+| exact-128 UB staging | 每 warp 一行、每 tile 32 行的双缓冲 GM/UB 流水 | `17b38fb` |
 | 分发正确性 | 专用 512/1024 与通用 fallback 明确分离 | `15efd0e` |
 | 大 row 片上计算 | 能放入 UB 时 whole-row recompute | `af01f6f` |
-| 超大 row 分阶段 | MTE/UB tiled stats/write 两 kernel + 行级 workspace | `18059f8` 后续优化 |
+| FP16 超大 row 融合 | stats/write 单 kernel + 完整 UB tile 复用 + 行级 workspace | 当前变更 |
+| FP32 超大 row 分阶段 | MTE/UB tiled stats/write 两 kernel + 行级 workspace | `18059f8` 后续优化 |
 
 ## 6. 发布数据中的代表性变化
 
@@ -435,6 +461,23 @@ prepared input 和 CannBench 默认 `BasicInfo` 参数做了两组成对采集�
 1650/1650 MHz。最终候选通过 40/40 个 FP16 accuracy case、FP32 `(63,128)`
 和 FP16 `(65,128)` row-tail 检查。
 
+### 6.4 FP16 超大 logits 融合与 tile 复用的受控 A/B
+
+在同一 Ascend 950PR、CANN 9.2.0、Bisheng 15.0.5、`dav-3510`、1650 MHz
+环境中，使用相同 seed-0 prepared input 和 CannBench 默认 `BasicInfo` 参数
+完成两组成对采集。没有传入 warmup、iterations 或 AIC metrics 覆盖。表中
+同时列出两组结果，改善按各组自己的 baseline 计算。
+
+| case | shape | baseline R1 (us) | candidate R1 (us) | 改善 R1 | baseline R2 (us) | candidate R2 (us) | 改善 R2 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `m2m100_logits` | `(2048, 128112)` | 1256.064 | 943.492 | 24.89% | 1256.522 | 940.441 | 25.16% |
+| `mt5_logits` | `(2048, 250112)` | 2444.042 | 1734.864 | 29.02% | 2445.533 | 1732.471 | 29.16% |
+| `xglm_logits` | `(1024, 256008)` | 1232.719 | 913.192 | 25.92% | 1228.231 | 911.581 | 25.78% |
+
+候选对 FP16 `(2,56321)`、`(65,128112)`、`(64,250112)`、`(63,256008)`
+以及 FP32 fallback `(4,28161)`、`(3,49152)` 均通过 `torch.softmax` 对比，
+最大绝对误差不超过 `1.19e-7`，且没有 NaN/Inf。发布数据采用第 2 组 candidate。
+
 ## 7. 当前局限与风险
 
 ### 7.1 分发阈值仍以经验常量为主
@@ -455,10 +498,11 @@ prepared input 和 CannBench 默认 `BasicInfo` 参数做了两组成对采集�
 也有成本。混合快照提示该区间值得进一步分析，但是否由该路径导致、在哪些
 shape 上稳定获益，仍需同环境的受控 A/B 才能确认。
 
-### 7.4 超大 row 路径有额外 launch 和分配成本
+### 7.4 超大 row 路径仍有 workspace 分配成本
 
-每次调用会创建 `row_max` 与 `row_inv_sum` 两个 tensor，并启动两个 kernel。
-当 `outer_size` 较小或 row 仅略超 UB 上限时，固定开销可能抵消访存收益。
+每次调用仍会创建 `row_max` 与 `row_inv_sum` 两个 tensor。FP16 已融合为一个
+kernel，但行级 metadata 仍经 GM 保存和读取；FP32 还保留两个 kernel。当
+`outer_size` 较小或 row 仅略超 UB 上限时，固定开销仍可能抵消访存收益。
 
 ### 7.5 编译器行为是实现约束的一部分
 
@@ -520,14 +564,13 @@ estimated_cost =
 新增 bucket 仍应保持独立编译或至少按资源规模分组，以防编译器 UB 估算问题
 回归。
 
-### P1：优化 large-row 的阶段数和 workspace
+### P1：减少 large-row metadata workspace
 
-当前 GM 路径需要 max、sum、write 三次 launch。可以评估在线 Softmax
-归约，把 `(max, sum)` 作为可合并的归约对，在一次读取中得到最终 max 和
-归一化 sum，再用第二个 kernel 写回，从三阶段降为两阶段。
-
-该方向的难点是构造数值稳定、可并行归约的 pair combine，并验证不同归约
-顺序下的 fp32 累加误差。它应作为独立原型验证，不能直接替换现有稳定路径。
+FP16 已把 stats 和 write 合并为一个 physical kernel，但仍通过 GM
+`row_max`/`row_inv_sum` 保存同一 block 内的行级统计量。可以评估让最终统计量
+继续驻留在 UB 或其他 operator-local 片上状态中，前提是不增加跨 core 协调，
+也不破坏 MTE2/V/MTE3 的事件顺序。FP32 是否适合相同融合必须单独 A/B，不能
+从 FP16 的收益直接推断。
 
 ### P1：减少临时 tensor 分配开销
 
@@ -601,7 +644,8 @@ row sum 检查。
 - `512` 专用 persistent；
 - `1024` 专用 persistent；
 - fast register-cache；
-- large-row MTE/UB tiled stats/write；
+- FP16 large-row 单 kernel MTE/UB tiled stats/write；
+- FP32 large-row 两 kernel MTE/UB tiled stats/write；
 - whole-row UB recompute；
 - large-row 行级 workspace；
 - spatial。
@@ -629,6 +673,8 @@ row sum 检查。
 | 2026-07-14 | `15efd0e` | 修复 persistent fallback 并拆分源文件 |
 | 2026-07-25 | `af01f6f` | whole-row UB logits 路径 |
 | 2026-07-25 | `18059f8` | 超大 logits 三 kernel GM workspace 路径 |
+| 2026-08-11 | `17b38fb` | exact-128 单行 GM/UB 流水 |
+| 2026-08-11 | 当前变更 | FP16 超大 logits 单 kernel 融合与完整 UB tile 复用 |
 
 补充证据：`cebbb3d` 添加了 persistent 单翻译单元与拆分翻译单元的编译器
 最小复现。它不属于 V3 目录本身的提交历史，直接支持 `5a565c7` 的问题
@@ -643,5 +689,6 @@ row sum 检查。
 - [Softmax V3 Compiler Repro](../test/compiler_repro/README.md)：persistent
   多模板实例的编译器最小复现。
 - [V3 realistic fp16 发布数据](../../../../../../../published/opbench-ascend-950pr-simt-v3-softmax-realistic-float16/meta/benchmark-records.json)。
+- [Softmax Huge Logits Fused Pipeline Design](../../../../../../../docs/designs/softmax-huge-logits-fused-pipeline-design.md)。
 - PyTorch CUDA `aten/src/ATen/native/cuda/SoftMax.cu`。
 - PyTorch CUDA `aten/src/ATen/native/cuda/PersistentSoftmax.cuh`。
