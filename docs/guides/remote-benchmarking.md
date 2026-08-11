@@ -64,6 +64,11 @@ cannbench bench \
 
 The controller uploads each prepared manifest, starts remote execution, and downloads generated artifacts into the local run directory.
 
+For a workflow operator, the controller uploads one prepared workflow manifest
+per case. The remote profiler wraps one `internal-run-workflow` process; it does
+not start separate component processes. SIMT component packages are
+preinstalled once per unique component before the workflow batch starts.
+
 ## Profiling Behavior
 
 `bench` is expected to collect device-side time by default.
@@ -72,6 +77,24 @@ The controller uploads each prepared manifest, starts remote execution, and down
 - NVIDIA remote profiling uses `ncu`.
 - Raw profiler outputs are stored under `profile/`.
 - Parsed frontend-facing records are stored under `meta/benchmark-records.json`.
+
+Workflow profiling captures all component kernels in one raw tree. CannBench
+partitions ordered profiler rows using terminal kernel patterns owned by the
+component plugins, writes per-component summaries under `components/`, and
+writes the summed workflow latency to `profile-summary.json`:
+
+```text
+profile/<workflow-artifact-stem>/
+  <raw profiler tree>
+  profile-summary.json
+  components/
+    0-<first-operator>.json
+    1-<second-operator>.json
+```
+
+`BasicInfo` is the performance comparison metric. `PipeTimeline` and
+`InstrTimeline` are detailed attribution collections; their durations should
+not be compared directly with `BasicInfo` latency.
 
 Raw profiler outputs are collection artifacts, not published data. Use `publish` to copy only frontend-facing data into `published/`.
 

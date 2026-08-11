@@ -2,7 +2,40 @@
 
 ## Status
 
-Open
+Resolved
+
+## Resolution
+
+Workflow-capable plugins now produce one prepared workflow manifest per case.
+Local and remote `bench` paths pass that manifest to the generic workflow
+runner, which executes every step in one Python process and keeps produced
+device objects in an in-memory output map. The downstream step therefore
+receives the exact tensor object returned by its producer; prepared workflow
+steps do not use recursive `input_bindings`.
+
+Profiling wraps one `internal-run-workflow` invocation and captures the full
+launch sequence. Component plugins provide ordinary kernel-name patterns and
+terminal main-kernel patterns. The common parser uses the last terminal match
+for each non-final step to partition physical CSV rows into ordered,
+non-overlapping spans, then applies each component's ordinary selection only
+inside its own span.
+
+Each workflow case now writes:
+
+```text
+profile/<workflow-artifact-stem>/
+  <raw profiler tree>
+  profile-summary.json
+  components/
+    0-<first-operator>.json
+    1-<second-operator>.json
+```
+
+The workflow latency is the exact sum of the selected component rows from that
+single raw profile. The published benchmark record remains one workflow record
+with the existing schema, canonical run name, and `metrics.latency_ms` field.
+Ascend SIMT, vllm-ascend, and NVIDIA CUDA library implementations all use the
+same workflow path.
 
 ## Context
 
@@ -75,16 +108,16 @@ The profiler output must still expose auditable component boundaries:
 - Input materialization, initialization, and profiler replay are classified
   explicitly and are not silently attributed to either component.
 
-## Proposed Direction
+## Implemented Direction
 
-Add a workflow execution path owned by the DSA workflow plugin that:
+The workflow execution path now:
 
 1. Materializes the component inputs once.
 2. Builds both component callables in the same process and on the same device.
 3. Calls Lightning Indexer once and passes its returned NPU tensor directly to
    Sparse Attention.
-4. Marks the two component regions explicitly, or records a launch sequence
-   that can be attributed without rerunning the producer.
+4. Records one launch sequence and attributes it through plugin-owned terminal
+   kernel patterns without rerunning the producer.
 5. Reduces the single raw profile according to the two component plugins'
    selection policies.
 6. Preserves the current published benchmark-record schema and canonical run

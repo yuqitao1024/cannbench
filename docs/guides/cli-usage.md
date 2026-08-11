@@ -12,7 +12,8 @@ CannBench exposes these primary commands:
 - `publish`: copy frontend-facing run artifacts into `published/`.
 - `serve`: host the static frontend and published result files.
 
-`internal-run` is reserved for CannBench remote execution internals and should not be used directly in normal workflows.
+`internal-run` and `internal-run-workflow` are reserved for CannBench execution
+internals and should not be used directly in normal workflows.
 
 ## Operator Benchmarking
 
@@ -159,7 +160,26 @@ Important files:
 - `summary.json` and `summary.csv`: human-readable batch summaries.
 - `profile/`: raw profiler artifacts; not published.
 
-Workflow operators such as `dsa_decode` and `dsa_prefill` are expanded by the workflow plugin into component steps during `bench`. They do not consume `--prepared-input` or `--prepared-dir` directly.
+Workflow operators such as `dsa_decode` and `dsa_prefill` produce one workflow
+plan per selected case. All component steps execute in one Python process, and
+the exact live tensor produced by one step is passed to the next step. Workflow
+operators do not consume `--prepared-input` or `--prepared-dir` directly.
+
+A profiled workflow case uses this layout:
+
+```text
+profile/<workflow-artifact-stem>/
+  <raw profiler tree>
+  profile-summary.json
+  components/
+    0-<first-operator>.json
+    1-<second-operator>.json
+```
+
+The raw tree contains one physical workflow launch sequence. Component
+summaries are non-overlapping reductions of that tree, and the workflow latency
+is their sum. `meta/benchmark-records.json` still contains one record per
+workflow case with the existing published schema and canonical run name.
 
 ## Prepared Inputs
 
