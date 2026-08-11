@@ -5,6 +5,7 @@ from typing import Any, Callable
 
 from cannbench.core.profile import ProfileKernelSelection
 from cannbench.core.result import OperatorCase
+from cannbench.operators.shape_trace import ShapeTrace, ShapeTraceKey
 from cannbench.operators.spec import OperatorSpec
 
 
@@ -67,6 +68,8 @@ class OperatorPlugin:
     list_workflows: Callable[..., tuple[Any, ...]] | None = None
     component_operator_names: tuple[str, ...] = ()
     payload_summary_key_order: tuple[str, ...] = ()
+    build_shape_trace: Callable[[str, str], ShapeTrace] | None = None
+    list_shape_trace_cases: Callable[[], tuple[ShapeTraceKey, ...]] | None = None
 
     def build_result_case(self, case: Any) -> OperatorCase:
         return OperatorCase(
