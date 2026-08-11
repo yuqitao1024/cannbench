@@ -38,6 +38,9 @@ where = ["src"]
 pythonpath = ["src"]
 testpaths = [
   "tests",
+  "src/cannbench/operators/builtin/dsa_decode/test",
+  "src/cannbench/operators/builtin/dsa_decode/device_traces/test",
+  "src/cannbench/operators/builtin/dsa_prefill/test",
   "src/cannbench/operators/builtin/softmax/simt/test",
   "src/cannbench/operators/builtin/index_add/simt/test",
   "src/cannbench/operators/builtin/lightning_indexer/simt/test",
