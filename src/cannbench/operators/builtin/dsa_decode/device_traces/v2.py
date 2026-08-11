@@ -28,8 +28,8 @@ def build_v2_device_trace(
     context_per_shard = indexer.context_tokens // context_shards
     context_tile = 32
     head_tile = 64
-    selected_tile = 64
-    qk_tile = 128
+    selected_tile = 128
+    qk_tile = 256
     head_groups = sparse.query_heads // head_tile
     attention_tasks = sparse.batch * sparse.query_tokens * head_groups
 

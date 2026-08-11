@@ -12,13 +12,13 @@ deepseek_v32_flashmla_decode_b2_q2_ctx32768_top2048
 
 1. 不考虑 AIC/AIV 切分时，`dsa_decode` 从 Lightning Indexer 到 Sparse
    Attention 的完整输入、输出、逻辑中间张量和矩阵计算；
-2. 当前自动 decode 路由如何沿 Query head 和 selected token 切成 Head64、
-   selected64，并沿 QK feature 维使用 128-wide compute tile；随后再单独说明
-   vLLM-Ascend 风格的 selected128 特殊候选及其跨 Head64 group 复用边界。
+2. 当前自动 decode 路由如何生成 `selected_tile=64` 的 Head64 P=1 plan，以及
+   direct-output fused launch 如何进一步进入 active vLLM rolling 分支，实际使用
+   selected128 outer tile、QK feature256 和 value256 compute tile。
 
 本文中的 shape 与数据流来自 CannBench case、参考实现和已核对的
-vLLM-Ascend `a5b0ce10d84bf76dd9c5c9e7ab9a5ddeed5af7ca` 源码。资源布局中标为
-“候选设计”的部分是当前优化方案，不代表已经验证有性能收益。
+vLLM-Ascend `a5b0ce10d84bf76dd9c5c9e7ab9a5ddeed5af7ca` 源码。明确标为
+“非当前 active 路径”或“候选设计”的部分只作对照，不代表当前执行路径。
 
 ## 2. 符号和 case 参数
 
@@ -329,7 +329,7 @@ actual_seq_lengths_query [B] = [2,4]
 actual_seq_lengths_kv    [B] = [32768,65536]
 ```
 
-## 7. 当前自动路由的第一层拆分：Head64、selected64 和 QK feature128
+## 7. 当前自动 P=1 plan 与 active fused vLLM rolling 路径
 
 ### 7.1 任务数
 
@@ -340,10 +340,11 @@ group 0 -> global heads [0,64)
 group 1 -> global heads [64,128)
 ```
 
-沿 selected token 每 64 行一个 tile：
+Host plan 仍以每 64 个 selected token 为一个计划单位：
 
 ```text
-selected_tile_count = S / 64 = 2048 / 64 = 32
+plan.selected_tile                     = 64
+plan.selected_partition_tile_capacity = S / 64 = 2048 / 64 = 32
 ```
 
 不沿 selected 维生成独立 output task 时，基础 AIC 任务数为：
@@ -354,49 +355,53 @@ AIC tasks = B * Tq * ceil(H / 64)
           = 8
 ```
 
-每个 AIC task 顺序处理 32 个 selected64 tile。
+该 canonical plan 同时满足 `selected_partitions=1` 和 direct BF16 output，因此 host
+进入 `run_sparse_attention_head64_fused_hd576_bf16`，再启动 rolling-restored fused
+kernel。设备侧的精确 vLLM rolling predicate 命中这个 8-task、causal、P=1 plan。
+这里的 plan `selected_tile=64` 是路由 contract，不是 active fused 分支实际执行的
+outer tile；后者为 128，每个 task 顺序处理 `2048/128=16` 个 outer tile。
 
-### 7.2 单个 Head64、selected64 tile 的 shape
+### 7.2 单个 active Head64、selected128 outer tile 的 shape
 
 固定 `(b,q,head_group,tile)`：
 
 ```text
 Q_g       [64,576]
-indices_t [64]
-K_t       [64,576]
-V_t       [64,512]
+indices_t [128]
+K_t       [128,576]
+V_t       [128,512]
 ```
 
-QK 沿 feature 维每次收缩最多 128 个元素。完整 576 维由四个 128-wide tile
-和最后一个 64-wide tile 累加：
+QK 沿 feature 维每次收缩最多 256 个元素。完整 576 维按 `256+256+64`
+累加；前两轮的代表性 Cube 计算为：
 
 ```text
-[64,128] x [128,64] -> Score_t [64,64]
+[64,256] x [256,128] -> Score_t [64,128]
 ```
 
 Softmax tile：
 
 ```text
-Score_t [64,64] -> P_t [64,64]
+Score_t [64,128] -> P_t [64,128]
 ```
 
-PV：
+PV 使用 value256 tile：
 
 ```text
-[64,64] x [64,128] -> O_subtile [64,128]
-4 个 value128 subtile -> O_t [64,512]
+[64,128] x [128,256] -> O_subtile [64,256]
+2 个 value256 subtile -> O_t [64,512]
 ```
 
 单 tile 的 QK 和 PV 乘加量为：
 
 ```text
-QK_tile = 64 * 64 * 576 = 2,359,296 MAC
-PV_tile = 64 * 64 * 512 = 2,097,152 MAC
+QK_tile = 64 * 128 * 576 = 4,718,592 MAC
+PV_tile = 64 * 128 * 512 = 4,194,304 MAC
 ```
 
 ### 7.3 为什么 tile softmax 不能各自独立归一化
 
-32 个 selected64 tile 共同组成长度 2048 的同一行 softmax。每个 tile 必须更新
+16 个 selected128 outer tile 共同组成长度 2048 的同一行 softmax。每个 tile 必须更新
 running max、running sum 和 running output。概念上的稳定递推为：
 
 ```text
@@ -406,8 +411,8 @@ E_t     = exp(Score_t - m_t)
 l_t     = alpha_t * l_{t-1} + rowsum(E_t)
 o_t     = alpha_t * o_{t-1} + E_t @ V_t
 
-final_output = o_31 / l_31
-final_lse    = m_31 + log(l_31)
+final_output = o_15 / l_15
+final_lse    = m_15 + log(l_15)
 ```
 
 每个 Head64 task 的持久状态 shape 为：
@@ -421,10 +426,11 @@ running_out [64,512]
 它们属于当前 Head64 group，不能与另一个 group 共享；`indices_t/K_t/V_t` 则可以
 共享。
 
-## 8. vLLM selected128 特殊候选：双 AIC、四 AIV
+## 8. 当前 active vLLM rolling 分支：双 AIC、四 AIV
 
-本节开始讨论单独 gated 的 vLLM rolling 候选。其内部 selected128 outer tile
-不改变上一节所述自动 P=1 plan 的 `kHead64SelectedTile=64` contract。
+`sparse_attention_head64_fused_mix12_restored_kernel` 对上述精确 P=1 canonical
+predicate 分别 dispatch `sparse_attention_head64_fused_vllm_aic/aiv`。其内部
+selected128 outer tile 不改变 host plan 的 `kHead64SelectedTile=64` contract。
 
 ### 8.1 两个 AIC 负责不同 Query heads
 
@@ -443,7 +449,7 @@ K_t       [128,576]
 V_t       [128,512]
 ```
 
-所以共享边界应该放在 KV gather，而不是 QK、softmax 或 PV 结果上。
+因此当前实现把共享边界放在 KV gather，而不是 QK、softmax 或 PV 结果上。
 
 ### 8.2 四个 AIV 的 gather quarter
 
@@ -554,7 +560,7 @@ PV 阶段:
 这里只是字节容量相等，`K_rope` 和 `P` 的逻辑二维布局不同；搬运和 Cube 输入必须
 分别按对应的物理格式解释该尾部地址。
 
-当前 CannBench rolling 候选的 PV 仍沿输出 dim 拆成两次：
+当前 active CannBench rolling 路径的 PV 沿输出 dim 拆成两次 value256 MMAD：
 
 ```text
 [64,128] x [128,256] -> [64,256]  # Dv [0,256)
@@ -592,7 +598,7 @@ tile t-2:   running output update
 | 16 | softmax 15, update 14 | PV 15 |
 | 17 | update 15, final store | drain |
 
-若每个 L1 slot 暂存完整 `KV_t [128,576]`，候选三槽的主要 L1 shape 为：
+每个 L1 slot 暂存完整 `KV_t [128,576]`，当前三槽路径的主要 L1 shape 为：
 
 ```text
 Query       [64,576]      =  73,728 B
@@ -604,15 +610,14 @@ payload                       516,096 B
 ```
 
 在 512 KiB L1 下只剩 `8,192 B`，所以三槽方案依赖上一节的尾部复用，不能再为
-完整 Score 或 P 单独申请 L1 区域。这是当前候选设计的 capacity 约束，不应外推成
+完整 Score 或 P 单独申请 L1 区域。这是当前实现的 capacity 约束，不应外推成
 所有 vLLM-Ascend 版本的固定物理布局。
 
 ## 11. 跨 Head64 group 共享 gather 的总量
 
-### 11.1 vLLM 特殊候选不共享时
+### 11.1 不共享时的对照（非当前 active 路径）
 
-每个 `(b,q)` 有两个 Head64 group，每个 group 都完整 gather 16 个 selected128
-tile：
+若每个 `(b,q)` 的两个 Head64 group 各自完整 gather 16 个 selected128 tile：
 
 ```text
 完整 KV tile gather 次数
@@ -635,10 +640,10 @@ tile：
 128 * 128 * 512 * 2 B = 16 MiB
 ```
 
-合计为 34 MiB 原始离散 KV 读取。这个 34 MiB 描述的是当前 Key/Value 分别 gather
-的实现边界，不是 Sparse Attention 数学语义要求。
+合计为 34 MiB 原始离散 KV 读取。这个 34 MiB 是非共享、Key/Value 分别 gather
+的对照，不是当前 active 路径，也不是 Sparse Attention 数学语义要求。
 
-### 11.2 跨 group 共享后
+### 11.2 当前 active 的跨 group 共享
 
 两个 Head64 group 共用一份 tile：
 
@@ -677,7 +682,7 @@ data area    = 4 pairs * 3 slots * 128 * 576 * 2 B
 total        = 1,769,984 B
 ```
 
-候选布局为：
+当前实现布局为：
 
 ```text
 [0, 512)             ready/consumed counters
@@ -687,25 +692,26 @@ total        = 1,769,984 B
 ...                  pair 1..3
 ```
 
-这是候选共享协议的物理 workspace，不是 Sparse Attention 对外 contract 的输出。
+这是当前共享协议的物理 workspace，不是 Sparse Attention 对外 contract 的输出。
 
-## 12. 当前 CannBench 与 vLLM 风格拆分的关键差异
+## 12. Plan/generic 常量与当前 active fused 路径的边界
 
-| 维度 | 当前自动 P=1 路由 | vLLM selected128 特殊候选 |
+| 维度 | Plan 元数据/非 active generic tile | 当前 active P=1 fused vLLM rolling |
 | --- | --- | --- |
 | Query head tile | 64 | 64 |
 | selected plan/outer tile | 64 | 128 |
-| QK feature tile | 128 | 128 |
+| QK feature tile | generic 128 | 256，完整 576 按 `256+256+64` |
+| Value feature tile | generic 128 | 256，完整 512 分两次 |
 | 每 `(b,q)` AIC 数 | 2 | 2 |
 | 两个 AIV 的计算职责 | 各消费 32 Query heads | 各消费 32 Query heads |
 | 原始 KV gather | 每个 Head64 group 各 gather `[64,576]` | 两个 group 合作 gather一份 `[128,576]` |
 | Gather producer | 每组两个 AIV 合作产生 64 selected rows | 四个 AIV 各 32 selected rows |
-| QK compute | `[64,128]x[128,64] -> [64,64]` | `[64,128]x[128,128] -> [64,128]` |
-| PV | 四次 `[64,64]x[64,128]` | 逻辑上 `[64,128]x[128,512]` |
-| selected 分区 | P=1，单 task 顺序处理 32 tiles | P=1，单 task 顺序处理 16 outer tiles |
+| QK compute | generic `[64,128]x[128,64] -> [64,64]` | `[64,256]x[256,128] -> [64,128]` |
+| PV | generic 四次 `[64,64]x[64,128]` | 两次 `[64,128]x[128,256] -> [64,256]` |
+| selected 分区 | plan capacity 为 32 个 selected64 单位 | P=1，单 task 顺序处理 16 个 outer128 tile |
 | 最终结果 | 直接写 output/LSE | 直接写 output/LSE |
 
-当前 main 的 P=4 路径则是另一种任务拆分：
+显式 P=4 路径是另一种非 canonical-active 的任务拆分：
 
 ```text
 tasks = B * Tq * head_groups * selected_partitions
@@ -723,7 +729,7 @@ tasks = B * Tq * head_groups * selected_partitions
 = 4 MiB
 ```
 
-P=1 vLLM 特殊候选通过在线 softmax 在同一 task 内顺序合并 16 个 outer tile，避免这块
+当前 P=1 vLLM rolling 分支通过在线 softmax 在同一 task 内顺序合并 16 个 outer tile，避免这块
 4 MiB partial output 和 Combine；与此同时 AIC task 数从 32 降为 8。前者减少 GM
 和 launch，后者降低并行度，因此不能只看其中一项预测最终性能。
 
@@ -750,15 +756,16 @@ P=1 vLLM 特殊候选通过在线 softmax 在同一 task 内顺序合并 16 个 
    P [128,2048] x V [2048,512]
      -> output [128,512]
 
-3. Attention，vLLM Head64/selected128 特殊候选拆分
+3. Attention，当前 active vLLM Head64/selected128 rolling 拆分
    heads [0,64) 和 [64,128) -> 2 个 AIC
    indices[0,0,:] -> 16 个 [128] tile
    每轮四个 AIV各 gather [32,576]
      -> 合成共享 KV [128,576]
    两个 AIC分别执行：
-     QK [64,576] x [576,128] -> [64,128]
+     QK feature 依次按 256 + 256 + 64 收缩
+       代表计算 [64,256] x [256,128] -> [64,128]
      online softmax -> P [64,128]
-     PV [64,128] x [128,512] -> [64,512]
+     PV value256 分两次 [64,128] x [128,256] -> [64,256]
    16 轮后各自完成 64 heads 的 running output/LSE
    拼回 out[0,0,:,:] [128,512] 和 lse[0,0,:] [128]
 ```
@@ -773,16 +780,16 @@ P=1 vLLM 特殊候选通过在线 softmax 在同一 task 内顺序合并 16 个 
    原始 KV gather 在数学上只需一次。
 3. Query、Score、softmax state、P 和 output 都依赖 Query head，不能跨两个
    Head64 group 共享。
-4. vLLM 特殊候选的 selected128 outer tile 只是在线 softmax 的一个分块，16 个 tile 必须通过 running
+4. 当前 vLLM rolling 分支的 selected128 outer tile 只是在线 softmax 的一个分块，16 个 tile 必须通过 running
    max/sum/output 合并，不能做 16 个互不相关的 softmax。
 5. 四 AIV 共享 gather 把 `[128,576]` 切成四个 `[32,576]` producer quarter；
    每个 AIV 后续消费的 `[32,128]` Score half 则沿 Query head 切分，两种 32
    属于不同维度。
 6. QK 后 `K_rope [128,64]` 与 `P [64,128]` 字节数相等，允许做 L1 生命周期
    复用；这不代表两者布局相同。
-7. 共享 gather 和三槽流水目前仍是候选优化边界。随机读取减少多少可以由 shape
-   算出，最终延迟收益必须把 workspace 连续读写、同步和完整 operator 时间一起
-   测量。
+7. 共享 gather 和三槽流水属于当前 active 实现。随机读取减少多少可以由 shape
+   算出，但最终延迟收益仍必须把 workspace 连续读写、同步和完整 operator 时间
+   一起测量。
 
 新实现仍应遵守仓库的 operator API 边界：Vector 算术使用 SIMT API，Cube 算术
 使用 Tensor API，搬运使用允许的 C API/Tensor API；不得因为 vLLM-Ascend 上游
