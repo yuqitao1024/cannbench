@@ -1,2 +1,0 @@
-backend,device_name,op,dtype,case_id,family,payload,source_model
-ascend,Ascend950PR_9589,softmax,float16,camembert_logits,lm_logits,"dimensions=8192x32005, dim=1",CamemBert

@@ -1,2 +1,0 @@
-backend,device_name,op,dtype,case_id,family,payload,source_model
-ascend,Ascend950PR_9589,softmax,float16,t5_attention,attention,"dimensions=4x8x1024x1024, dim=-1",T5Small

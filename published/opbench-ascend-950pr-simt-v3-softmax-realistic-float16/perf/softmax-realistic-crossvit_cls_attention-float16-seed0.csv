@@ -1,2 +1,0 @@
-backend,device_name,op,dtype,case_id,family,payload,source_model
-ascend,Ascend950PR_9589,softmax,float16,crossvit_cls_attention,vision_attention,"dimensions=256x4x1x197, dim=-1",crossvit_9_240

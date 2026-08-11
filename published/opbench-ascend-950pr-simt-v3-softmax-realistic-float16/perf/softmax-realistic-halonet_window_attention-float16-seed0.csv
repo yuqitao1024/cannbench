@@ -1,2 +1,0 @@
-backend,device_name,op,dtype,case_id,family,payload,source_model
-ascend,Ascend950PR_9589,softmax,float16,halonet_window_attention,vision_attention,"dimensions=1024x4x64x144, dim=-1",eca_halonext26ts

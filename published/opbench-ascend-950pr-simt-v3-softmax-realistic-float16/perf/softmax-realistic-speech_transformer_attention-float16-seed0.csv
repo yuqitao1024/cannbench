@@ -1,2 +1,0 @@
-backend,device_name,op,dtype,case_id,family,payload,source_model
-ascend,Ascend950PR_9589,softmax,float16,speech_transformer_attention,attention,"dimensions=80x204x204, dim=2",speech_transformer

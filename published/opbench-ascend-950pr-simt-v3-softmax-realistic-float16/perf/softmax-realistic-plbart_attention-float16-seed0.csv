@@ -1,2 +1,0 @@
-backend,device_name,op,dtype,case_id,family,payload,source_model
-ascend,Ascend950PR_9589,softmax,float16,plbart_attention,attention,"dimensions=96x1024x1024, dim=-1",PLBartForCausalLM

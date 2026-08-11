@@ -1,2 +1,0 @@
-backend,device_name,op,dtype,case_id,family,payload,source_model
-ascend,Ascend950PR_9589,softmax,float16,mobilebert_attention,attention,"dimensions=128x4x128x128, dim=-1",MobileBertForMaskedLM

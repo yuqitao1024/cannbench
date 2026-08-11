@@ -1,2 +1,0 @@
-backend,device_name,op,dtype,case_id,family,payload,source_model
-ascend,Ascend950PR_9589,softmax,float16,electra_attention,attention,"dimensions=32x4x512x512, dim=-1",ElectraForCausalLM

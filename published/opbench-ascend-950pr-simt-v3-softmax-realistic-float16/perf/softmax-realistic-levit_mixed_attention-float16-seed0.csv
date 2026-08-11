@@ -1,2 +1,0 @@
-backend,device_name,op,dtype,case_id,family,payload,source_model
-ascend,Ascend950PR_9589,softmax,float16,levit_mixed_attention,vision_attention,"dimensions=1024x8x49x196, dim=-1",levit_128
