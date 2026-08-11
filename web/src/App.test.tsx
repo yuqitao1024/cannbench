@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
+import { jsonResponse, makeShapeTrace } from "./shape-trace/testFixtures";
 
 const publishedRuns = {
   runs: [
@@ -159,6 +160,7 @@ beforeAll(() => {
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  window.history.replaceState({}, "", "/");
 });
 
 beforeEach(() => {
@@ -424,5 +426,41 @@ describe("App", () => {
     await waitFor(() => {
       expect(screen.getByRole("status")).toHaveTextContent(/Failed to load benchmark records\./i);
     });
+  });
+
+  it("routes a deep-linked shape trace to the explorer", async () => {
+    const trace = makeShapeTrace();
+    window.history.pushState(
+      {},
+      "",
+      "/shape-explorer?operator=dsa_decode&dataset=realistic&case=decode-case"
+    );
+    vi.stubGlobal("matchMedia", () => ({ matches: false }));
+    vi.mocked(fetch).mockImplementation(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === "/api/shape-traces") {
+        return jsonResponse({
+          traces: [
+            {
+              operator: trace.operator,
+              dataset: trace.dataset,
+              case_id: trace.case_id,
+              phase: trace.phase,
+              group: trace.group
+            }
+          ]
+        });
+      }
+      if (url.startsWith("/api/shape-trace?")) return jsonResponse(trace);
+      return jsonResponse({ error: "missing" }, 404);
+    });
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Matrix flow from index selection to sparse attention"
+      })
+    ).toBeInTheDocument();
   });
 });

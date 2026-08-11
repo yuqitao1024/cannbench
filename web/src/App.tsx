@@ -6,6 +6,7 @@ import { CudaTreasureMapModal } from "./components/CudaTreasureMapModal";
 import { GpuBenchmarkImport } from "./components/GpuBenchmarkImport";
 import { OperatorRail } from "./components/OperatorRail";
 import { RunFilters } from "./components/RunFilters";
+import { ShapeExplorerPage } from "./components/ShapeExplorerPage";
 import logoDarkUrl from "./assets/brand/cannbench-logo-dark.png";
 import logoLightUrl from "./assets/brand/cannbench-logo-light.png";
 import { buildBenchmarkViewModel, metricOptions } from "./data/benchmarkData";
@@ -31,7 +32,7 @@ function defaultDatasetName(records: BenchmarkRecord[], operator: string): strin
   return datasets.includes("ALL") ? "ALL" : (datasets[0] ?? "");
 }
 
-export function App() {
+function BenchmarkWorkspace() {
   const [benchmarkRecords, setBenchmarkRecords] = useState<BenchmarkRecord[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [gpuUploadEnabled, setGpuUploadEnabled] = useState(false);
@@ -273,4 +274,11 @@ export function App() {
       <CudaTreasureMapModal open={treasureMapOpen} onClose={() => setTreasureMapOpen(false)} />
     </main>
   );
+}
+
+export function App() {
+  if (window.location.pathname === "/shape-explorer") {
+    return <ShapeExplorerPage />;
+  }
+  return <BenchmarkWorkspace />;
 }
