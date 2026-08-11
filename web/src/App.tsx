@@ -10,6 +10,7 @@ import logoDarkUrl from "./assets/brand/cannbench-logo-dark.png";
 import logoLightUrl from "./assets/brand/cannbench-logo-light.png";
 import { buildBenchmarkViewModel, metricOptions } from "./data/benchmarkData";
 import { loadBenchmarkRecords } from "./data/benchmarkRecordsApi";
+import { fetchShapeTraceIndex, shapeTraceKey } from "./data/shapeTraceApi";
 import type { BenchmarkRecord, MetricOption } from "./types";
 
 function themeForCurrentHour(): "light" | "dark" {
@@ -42,6 +43,7 @@ export function App() {
   const [selectedOperator, setSelectedOperator] = useState("");
   const [selectedDataset, setSelectedDataset] = useState("");
   const [selectedMetric, setSelectedMetric] = useState<MetricOption["key"]>("latency");
+  const [shapeTraceKeys, setShapeTraceKeys] = useState<Set<string>>(new Set());
   const viewModel = buildBenchmarkViewModel(benchmarkRecords);
   const cases = viewModel.casesFor(selectedOperator, selectedDataset);
   const allSeries = viewModel.seriesFor(selectedOperator, selectedDataset);
@@ -69,6 +71,18 @@ export function App() {
       delete document.body.dataset.theme;
     };
   }, [theme]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchShapeTraceIndex(controller.signal)
+      .then((entries) => setShapeTraceKeys(new Set(entries.map(shapeTraceKey))))
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setShapeTraceKeys(new Set());
+        }
+      });
+    return () => controller.abort();
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -244,7 +258,12 @@ export function App() {
                 <span>boundary / stress coverage</span>
               </div>
               <BenchmarkChart series={chartSeries} segments={chartSegments} />
-              <CaseTable cases={cases} showDatasetColumn={selectedDataset === "ALL"} />
+              <CaseTable
+                operator={selectedOperator}
+                cases={cases}
+                showDatasetColumn={selectedDataset === "ALL"}
+                shapeTraceKeys={shapeTraceKeys}
+              />
               {showDiffPanel ? <CodeDiffPanel operator={selectedOperator} /> : null}
             </>
           )}

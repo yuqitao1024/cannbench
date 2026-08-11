@@ -643,6 +643,23 @@ tbody tr {
   vertical-align: top;
 }
 
+.shape-link {
+  color: inherit;
+  text-decoration-line: underline;
+  text-decoration-color: transparent;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.shape-link:hover {
+  text-decoration-color: currentColor;
+}
+
+.shape-link:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
+}
+
 .diff-panel {
   padding: 14px 16px 16px;
 }

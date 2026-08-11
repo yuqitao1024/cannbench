@@ -111,6 +111,12 @@ beforeAll(() => {
           json: async () => ({ gpu_upload_enabled: false })
         };
       }
+      if (url === "/api/shape-traces") {
+        return {
+          ok: true,
+          json: async () => ({ traces: [] })
+        };
+      }
       if (url === "/published/index.json") {
         return {
           ok: true,
