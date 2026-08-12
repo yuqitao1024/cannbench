@@ -338,3 +338,42 @@ plausible enough to profile after grid-64 lost by 88-292%; its result remains
 unmeasured. All temporary source and source-test changes were restored; no
 implementation, selector,
 published record, or README change is retained.
+
+### Experiment 3: Width 33-64 Two-Dimensional Selector - Rejected
+
+The experiment recreated a general two-slot, 32-row MTE2/V/MTE3 UB pipeline
+for FP16 and FP32 widths 33-64. Its temporary selector used only width and an
+outer-row cap. It did not use case ids, model names, or complete fixed shapes.
+All implementation, selector, link-order, and source-test changes were restored
+after rejection.
+
+Focused FP16/FP32 correctness passed 16/16 cases at widths 32, 33, 47, 48, 49,
+63, 64, and 65. The canonical FP16 suite passed 40/40. The clean baseline and
+candidate extension SHA-256 values were respectively
+`cecd7362326058eeec4584f4b713297c28d5dd01b0a604644fb0e4415c34a6ca` and
+`f9b5869d74feb3007ed8dbdcb7ab60d3292f6428f4297d2c1f250846dfb4f56d`.
+
+After the device reboot, the clean binaries completed two standard CannBench
+pairs at 1650/1650 MHz. No profiler warmup option was passed; every row used
+the default `Warm Up enabled. times:5`.
+
+| Round | Case | Width / outer rows | Baseline | Candidate | Candidate change |
+| --- | --- | --- | ---: | ---: | ---: |
+| R1 | `xcit_attention` | 48 / 3072 | 4.441000 us | 4.064000 us | 8.49% faster |
+| R2 | `xcit_attention` | 48 / 3072 | 4.483000 us | 4.025000 us | 10.22% faster |
+| R1 | `swin_window_attention` | 49 / 200704 | 70.728996 us | 80.675003 us | 14.06% slower |
+| R2 | `swin_window_attention` | 49 / 200704 | 70.387001 us | 80.823997 us | 14.83% slower |
+| R1 | width-8 control | 8 / 64 | 2.473000 us | 2.516000 us | 1.74% slower |
+| R2 | width-8 control | 8 / 64 | 2.772000 us | 2.695000 us | 2.78% faster |
+| R1 | width-128 control | 128 / 2048 | 3.875000 us | 4.075000 us | 5.16% slower |
+| R2 | width-128 control | 128 / 2048 | 3.818000 us | 3.895000 us | 2.02% slower |
+
+The rated-frequency evidence root is
+`/root/cannbench-softmax-v3-task3-standard-ab-post-reboot-20260812`; its raw
+CSV hash manifest has SHA-256
+`73c2b55b1efafbe8c2fdb0f00368f159c7716d6dfcf472712989fa6e458e2bf7`.
+
+The broad selector is rejected. It repeatably helps the small primary but
+regresses the large primary by about 10 us and 14%-15%. The two measured outer
+sizes do not establish a safe monotonic cutoff between 3072 and 200704, so no
+narrower threshold is retained without inventing an unmeasured boundary.
