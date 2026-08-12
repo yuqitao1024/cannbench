@@ -308,6 +308,8 @@ def test_ascend_softmax_v3_dispatches_exact_256_without_capacity_guards():
     assert "AscendC::LocalTensor" not in persistent_256
     assert "CrossCoreSetFlag" not in persistent_256
     assert "CrossCoreWaitFlag" not in persistent_256
+    assert "SetFlag" not in persistent_256
+    assert "WaitFlag" not in persistent_256
     assert "PipeBarrier" not in persistent_256
 
 
