@@ -63,13 +63,24 @@ Use a minimal fixed-value launch to expose ABI errors before testing full data.
 ## Watch Translation-Unit Resource Effects
 
 Observed toolchains have allowed an unused template instance in the same ASC
-translation unit to change effective UB/resource metadata for a kernel that was
-actually launched. When a resource error appears after adding a dispatch family:
+translation unit to change effective UB/resource metadata or the performance of
+a kernel that was actually launched. One measured row-reduction build left the
+width-256 source and dispatch unchanged, yet adding width-160 and width-224
+instances to its translation unit caused a repeatable regression of about
+`1.1%`. Moving the new instances to a separate translation unit restored the
+width-256 control to baseline.
+
+When a resource error or unexplained neighboring-range regression appears after
+adding a dispatch family:
 
 1. Keep the failing launch fixed.
 2. Remove only the unused instantiation.
 3. Put the instantiation in a separate ASC translation unit.
-4. Compare compiler metadata and runtime behavior.
+4. Preserve the relative order of existing objects and append new
+   specialization objects while testing, so link-layout movement is not mixed
+   into the source experiment.
+5. Compare compiler metadata and runtime behavior, including a control shape
+   from an unchanged neighboring dispatch range.
 
 If split-TU passes while single-TU fails, preserve both as a compiler repro.
 Do not claim that all same-TU templates are unsafe; bind the observation to the
@@ -97,6 +108,18 @@ version-specific limitation if the minimal BF16 form fails while FP16 passes.
   symbol for the discriminator in addition to checking host-library hashes.
 
 Rebuilding successfully does not prove the remote process loaded that build.
+
+Treat profiler instrumentation as a separate artifact-producing step. In one
+observed `msopprof` run, profiling modified the input shared library in place:
+
+```text
+clean build:          4c8b4878a2046181a0afeaecae10c52611fa7dc66ccb14b95a920b896843a254
+post-instrumentation: 1a94b31efc8f73b99a4a8dbb77410a7c4329cd6702c9229b927bd2df7b0d8b6b
+```
+
+Record build and post-instrumentation hashes separately, retain an untouched
+build artifact, and do not use an in-place instrumented library as the clean
+candidate in a later timing comparison.
 
 ## Construct A Minimal Repro Ladder
 
