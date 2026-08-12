@@ -229,6 +229,26 @@ argument; each log confirms the profiler default `Warm Up enabled. times:5`:
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | TrOCR `131072x256` | 118.053 us | 73.665 us | 37.60% | 118.038 us | 69.383 us | 41.22% |
 
+The final combined branch also completed the synthetic outer and dispatch
+control matrix with the same standard command, default profiler warmup, and
+1650/1650 MHz gate:
+
+| Shape | Baseline | Combined | Change |
+| --- | ---: | ---: | ---: |
+| `1024x256` | 4.354 us | 3.464 us | 20.44% faster |
+| `16384x256` | 17.571 us | 11.002 us | 37.39% faster |
+| `65536x256` | 61.002 us | 34.282 us | 43.80% faster |
+| `262144x256` | 232.860 us | 154.748 us | 33.54% faster |
+| `1024x224` control | 4.190 us | 4.088 us | 2.43% faster |
+| `1024x225` control | 4.690 us | 4.737 us | 1.00% slower |
+| `1024x255` control | 5.025 us | 4.717 us | 6.13% faster |
+| `1024x257` control | 12.299 us | 12.121 us | 1.45% faster |
+
+The controls retained their intended persistent-160/224, capacity-256, and
+generic fallback kernel families. These short controls are single paired
+screens, so their sub-microsecond deltas are regression guards rather than
+distribution estimates.
+
 Three valid control pairs retained their existing kernel families. CrossViT
 width 197 had baseline/candidate medians `4.278/4.389 us`; its `0.111 us`
 difference lies within the candidate's `4.268-4.456 us` spread. GPT-J width
@@ -380,16 +400,21 @@ narrower threshold is retained without inventing an unmeasured boundary.
 
 ### Experiment 4: Very-Short-Row Launch Policy - Rejected
 
-The experiment compared three orthogonal changes against production's 1024
-threads, two rows per warp, and grid limit 64 for power-of-two widths up to 32:
+The experiment compared five launch changes against production's 1024 threads,
+two rows per warp, and grid limit 64 for power-of-two widths up to 32:
 
+- 128 threads with the other settings unchanged;
 - 256 threads with the other settings unchanged;
+- 512 threads with the other settings unchanged;
 - one row per warp with the other settings unchanged;
 - grid limit 32 with the other settings unchanged.
 
-Focused device correctness covered the baseline and all three candidates for
-FP16 and FP32 widths 1, 9, 16, 31, 32, 33, and 48. All 56 comparisons passed
-without NaN, Inf, or tolerance mismatch.
+Focused device correctness covered the baseline and the three orthogonal
+thread/row/grid candidates selected for the initial screen at FP16 and FP32
+widths 1, 9, 16, 31, 32, 33, and 48. All 56 comparisons passed without NaN,
+Inf, or tolerance mismatch. The supplemental 128/512-thread candidates were
+rejected by their final performance screen and did not advance to retention
+correctness.
 
 Standard CannBench measurements of `convbert_local_kernel` used no explicit
 warmup option. Every accepted row reported 1650/1650 MHz and the profiler
@@ -401,6 +426,14 @@ default `Warm Up enabled. times:5`:
 | 256 threads | 17.435 us | 111.4% slower |
 | One row per warp | 10.101 us | 22.5% slower |
 | Grid limit 32 | 13.088 us | 58.7% slower |
+
+The final review screen completed fresh paired baselines for the remaining
+thread candidates under the same measurement contract:
+
+| Configuration | Fresh baseline | Candidate | Change |
+| --- | ---: | ---: | ---: |
+| 128 threads | 8.233 us | 29.634 us | 259.9% slower |
+| 512 threads | 8.640 us | 10.947 us | 26.7% slower |
 
 All candidates regress materially, so none is retained. The temporary policy
 controls and source tests were removed. Raw evidence is preserved under
