@@ -164,6 +164,9 @@ class AscendBuildExtension(build_ext):
 def get_extensions():
     sources = list(glob.glob(os.path.join(EXTENSIONS_DIR, "*.asc")))
     sources += list(glob.glob(os.path.join(EXTENSIONS_DIR, "simt", "*.asc")))
+    # Preserve the existing object order so the added buckets do not perturb
+    # code layout for the unchanged 225-256 kernel.
+    sources.sort(key=lambda source: source.endswith("persistent_160_224.asc"))
     return [
         Extension(
             name=f"{library_name}._C",

@@ -184,7 +184,7 @@
       "source_file": "timm_train/crossvit_9_240_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms": 0.004812
+        "latency_ms": 0.004359
       },
       "accuracy": {
         "passed": true,
@@ -349,7 +349,7 @@
       "source_file": "timm_train/eca_halonext26ts_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms": 0.232311005
+        "latency_ms": 0.159440994
       },
       "accuracy": {
         "passed": true,
@@ -415,7 +415,7 @@
       "source_file": "timm_train/levit_128_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms": 0.700997986
+        "latency_ms": 0.606981018
       },
       "accuracy": {
         "passed": true,
@@ -448,7 +448,7 @@
       "source_file": "timm_train/levit_128_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms": 0.352185974
+        "latency_ms": 0.305088989
       },
       "accuracy": {
         "passed": true,
@@ -732,7 +732,7 @@
       "source_file": "torchbench_train/speech_transformer_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms": 0.017606999999999998
+        "latency_ms": 0.015565
       },
       "accuracy": {
         "passed": true,

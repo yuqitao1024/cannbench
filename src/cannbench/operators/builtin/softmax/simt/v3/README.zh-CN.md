@@ -41,7 +41,10 @@ row shape 的多路径实现：
    内存访问和循环控制开销。
 4. 针对高频的 `dim_size=512/1024`，先隔离编译单元规避编译器 UB
    估算问题，再引入 GM -> UB -> SIMT 计算 -> GM 的双缓冲流水。
-5. 针对 logits 大 row，按“一整行能否放入 UB”继续分流：能放入时使用
+5. 对 `129..256` 的通用 persistent UB 流水按 reduction width 细分为
+   `160/224/256` 三个编译期容量档，减少无效展开迭代；`160/224` 使用独立
+   翻译单元，避免改变原 `225..256` kernel 的编译和链接布局。
+6. 针对 logits 大 row，按“一整行能否放入 UB”继续分流：能放入时使用
    whole-row UB recompute；放不下时，FP16 使用单 kernel 融合 tiled stats/write
    并复用一块完整 UB tile，FP32 保留两个 MTE/UB tiled kernel fallback。两种
    路径都使用行级 GM workspace。
@@ -101,6 +104,12 @@ else:
         persistent path
         if dim_size == 128:
             128 专用单行 GM/UB 双缓冲 kernel
+        elif 129 <= dim_size <= 160:
+            160 容量档 GM/UB 双缓冲 kernel
+        elif 161 <= dim_size <= 224:
+            224 容量档 GM/UB 双缓冲 kernel
+        elif 225 <= dim_size <= 256:
+            256 容量档 GM/UB 双缓冲 kernel
         elif dim_size == 512:
             512 专用 GM/UB 双缓冲 kernel
         elif dim_size == 1024:
@@ -139,6 +148,9 @@ direct fast kernel 不再由主分发命中。它的 ILP、x4/x2 和 scalar 访�
 | `dim_size` | 当前路径 |
 | ---: | --- |
 | `128` | `persistent_128` 专用单行 GM/UB 双缓冲 |
+| `129..160` | `persistent_160_224` 的 160 容量档 |
+| `161..224` | `persistent_160_224` 的 224 容量档 |
+| `225..256` | 原 `persistent_256` 的 256 容量档 |
 | `512` | `persistent_512` 专用 GM/UB 双缓冲 |
 | `1024` | `persistent_1024` 专用 GM/UB 双缓冲 |
 | `32128` | fast row 下的 whole-row UB recompute |
@@ -380,6 +392,29 @@ FP32 没有复用这一路径：其 tile 宽度、UB 占用和已有收益证据
 的两 kernel fallback。这个 dtype 分流是受控 A/B 的保守边界，不代表 FP32
 融合在其他 shape 或工具链上一定无收益。
 
+### 4.15 为 `129..224` persistent row 增加紧容量档
+
+**已实现。** 原 `129..256` 路径统一按 `kMaxElements=256` 展开，每个 lane
+固定执行 8 次 load/max/exp/store 循环。当前按 reduction width 分为：
+
+```text
+129..160 -> 160 容量，5 次 lane 迭代
+161..224 -> 224 容量，7 次 lane 迭代
+225..256 -> 原 256 容量，8 次 lane 迭代
+```
+
+分派只看 dtype 和 `dim_size`，不识别 case 或模型。160/224 档继续使用 1024
+线程、每 tile 32 行、两槽 MTE2/V/MTE3 流水和 FP32 累加；grid、实际 DMA 字节
+及事件顺序均不变。新实例放在独立 `persistent_160_224.asc`，并在链接时追加到
+原有 object 之后。这样既覆盖一整类 shape，又保持 `persistent_256.asc` 与原
+实现逐字一致，避免模板和链接布局影响 `225..256` 控制区间。
+
+20002 节点的重复 BasicInfo A/B 显示，width 144 提升约 31%，width 196 提升
+约 12% 至 13%，width 197 提升约 8.5%，width 204 提升约 9.7%。独立翻译单元
+下 width 256 控制为 `117.928 us`，基线为 `118.013 us`，未出现联合翻译单元
+曾观察到的约 1.1% 回退。FP16/FP32 六个分桶边界和 FP16 canonical 40 case
+均通过；完整证据见 `docs/designs/softmax-short-row-bucket-design.md`。
+
 ## 5. 已实现优化方法归纳
 
 | 优化维度 | V3 做法 | 对应 commit |
@@ -394,6 +429,7 @@ FP32 没有复用这一路径：其 tile 宽度、UB 占用和已有收益证据
 | 编译器隔离 | 512/1024 模板实例拆分翻译单元 | `5a565c7`, `ea0eeab` |
 | UB staging | 512/1024 使用双缓冲 GM/UB 流水 | `bb1c443` |
 | exact-128 UB staging | 每 warp 一行、每 tile 32 行的双缓冲 GM/UB 流水 | `17b38fb` |
+| 129..224 紧容量档 | 160/224 编译期容量，独立翻译单元，保留原 256 路径 | 当前变更 |
 | 分发正确性 | 专用 512/1024 与通用 fallback 明确分离 | `15efd0e` |
 | 大 row 片上计算 | 能放入 UB 时 whole-row recompute | `af01f6f` |
 | FP16 超大 row 融合 | stats/write 单 kernel + 完整 UB tile 复用 + 行级 workspace | 当前变更 |
@@ -486,11 +522,12 @@ prepared input 和 CannBench 默认 `BasicInfo` 参数做了两组成对采集�
 形成可工作的策略，但还缺少由 device 属性、UB 可用容量和 occupancy
 统一推导的 cost model。
 
-### 7.2 专用 UB 流水只覆盖精确 `128/512/1024`
+### 7.2 专用 UB 流水仍是稀疏容量档
 
-其他 persistent shape 仍走通用 GM register/shuffle 路径。例如 196、256
-等 realistic shape 的 row 数很多，也可能从小 row tile + 搬运流水中
-受益。
+当前已覆盖精确 `128/512/1024` 和 `129..256` 的 160/224/256 容量档，但
+其他 persistent shape 仍走通用 GM register/shuffle 路径。尤其 129 以下
+不能直接复用相同 UB 流水：33..64 候选曾使大 outer 的 width 49 回退
+14% 至 15%，因此已拒绝。
 
 ### 7.3 whole-row recompute 的收益依赖 shape
 
@@ -554,11 +591,11 @@ estimated_cost =
 配置。只有 P0-1 的测量闭环就绪后才开始该项；完成时应给出阈值扫描表、
 选择依据、已知例外和全部回归结果，而不是只提交新的经验常量。
 
-### P1：扩展 persistent UB tile 的 shape 覆盖
+### P1：继续扩展 persistent UB tile 的 shape 覆盖
 
-可以把 `512/1024` 的精确模板推广为少量 bucket，例如 128、256、512、1024，
-但不要为每个 `dim_size` 生成一个实例。每个 bucket 使用固定 tile 容量，
-通过边界判断处理不足部分。
+当前 129..256 已按 160/224/256 分桶。后续可继续评估其他少量 bucket，但
+不能为每个 `dim_size` 生成实例，也不能从小 outer 的收益推断大 outer；
+33..64 的拒绝实验已经说明固定 DMA/事件成本会改变 shape 适用范围。
 
 这样既能复用双缓冲流水，也能控制编译时间、二进制体积和翻译单元资源组合。
 新增 bucket 仍应保持独立编译或至少按资源规模分组，以防编译器 UB 估算问题
@@ -675,6 +712,7 @@ row sum 检查。
 | 2026-07-25 | `18059f8` | 超大 logits 三 kernel GM workspace 路径 |
 | 2026-08-11 | `17b38fb` | exact-128 单行 GM/UB 流水 |
 | 2026-08-11 | 当前变更 | FP16 超大 logits 单 kernel 融合与完整 UB tile 复用 |
+| 2026-08-12 | 当前变更 | 129..224 的 160/224 紧容量档与独立翻译单元 |
 
 补充证据：`cebbb3d` 添加了 persistent 单翻译单元与拆分翻译单元的编译器
 最小复现。它不属于 V3 目录本身的提交历史，直接支持 `5a565c7` 的问题

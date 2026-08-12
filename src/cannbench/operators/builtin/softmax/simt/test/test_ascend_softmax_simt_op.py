@@ -233,6 +233,29 @@ def test_ascend_softmax_v3_dispatches_exact_128_to_single_row_ub_pipeline():
     assert "kernel_operator.h" not in persistent_128
 
 
+def test_ascend_softmax_v3_129_through_256_pipeline_uses_tight_compile_time_buckets():
+    persistent_256 = _read_v3_simt_source("persistent_256.asc")
+    persistent_tight = _read_v3_simt_source("persistent_160_224.asc")
+    dispatch = _read_v3_simt_source("row_persistent_fallback.asc")
+    setup = (SIMT_OP_V3_ROOT / "setup.py").read_text()
+
+    assert "kMaxElements = 160" in persistent_tight
+    assert "kMaxElements = 224" in persistent_tight
+    assert "dim_size >= 129 && dim_size <= 160" in dispatch
+    assert "dim_size >= 161 && dim_size <= 224" in dispatch
+    assert "dispatch_row_persistent_forward_kernel_160_fp16(" in dispatch
+    assert "dispatch_row_persistent_forward_kernel_224_fp16(" in dispatch
+    assert "dispatch_row_persistent_forward_kernel_160_fp32(" in dispatch
+    assert "dispatch_row_persistent_forward_kernel_224_fp32(" in dispatch
+    assert "kMaxElements = 256" in persistent_256
+    assert "kMaxElements = 160" not in persistent_256
+    assert "kMaxElements = 224" not in persistent_256
+    assert '#include "c_api/asc_simd.h"' in persistent_tight
+    assert "basic_api/" not in persistent_tight
+    assert "kernel_operator.h" not in persistent_tight
+    assert 'source.endswith("persistent_160_224.asc")' in setup
+
+
 def test_ascend_softmax_v3_dispatches_129_through_256_to_ub_pipeline():
     source = _read_v3_simt_source("row_persistent_fallback.asc")
 
