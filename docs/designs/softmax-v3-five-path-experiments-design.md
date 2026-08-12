@@ -208,6 +208,35 @@ collection for every retained dispatch range.
 
 ## Results
 
-Results are added here one experiment at a time. Until device evidence is
-recorded, no candidate is considered retained.
+### Experiment 1: Exact Width 256 - Retained
 
+The exact-width candidate is retained. It adds a distinct width-256 VF and
+kernel entry in `persistent_256.asc`; widths 225-255 continue to use the
+capacity-256 entry. The exact VF has eight unconditionally valid compile-time
+iterations and `int32_t` UB tile indices while GM and outer-row offsets remain
+`int64_t`. DMA byte counts, two-slot event order, 32-row tiles, 1024 threads,
+physical grid policy, and FP32 accumulation are unchanged.
+
+The candidate passed FP16 and FP32 widths 224, 225, 255, 256, and 257 with 65
+tail rows. Maximum absolute error was `9.54e-07` for FP16 and `1.49e-08` for
+FP32; the canonical FP16 suite passed 40/40 cases.
+
+Two fresh remote-locked standard CannBench BasicInfo pairs at 1650/1650 MHz
+measured one selected kernel per call. CannBench passed no application warmup
+argument; each log confirms the profiler default `Warm Up enabled. times:5`:
+
+| Shape | Baseline R1 | Candidate R1 | Gain R1 | Baseline R2 | Candidate R2 | Gain R2 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| TrOCR `131072x256` | 118.053 us | 73.665 us | 37.60% | 118.038 us | 69.383 us | 41.22% |
+
+Three valid control pairs retained their existing kernel families. CrossViT
+width 197 had baseline/candidate medians `4.278/4.389 us`; its `0.111 us`
+difference lies within the candidate's `4.268-4.456 us` spread. GPT-J width
+128 had medians `3.907/3.914 us`; one valid `37.355 us` profiler outlier is
+retained in its reported `3.852-37.355 us` candidate spread. The unchanged
+paths do not show a repeatable candidate-specific regression.
+
+The canonical TrOCR publication collection measured `69.735001 us`. Accepted
+raw data is under `standard-final-o`, `standard-final-controls-extra`, and
+`standard-final-publication` in the final remote Task 1 root. Full hashes and
+raw CSV paths are recorded in the Task 1 report.

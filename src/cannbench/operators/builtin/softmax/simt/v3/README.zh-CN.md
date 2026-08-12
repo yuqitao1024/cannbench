@@ -400,20 +400,40 @@ FP32 没有复用这一路径：其 tile 宽度、UB 占用和已有收益证据
 ```text
 129..160 -> 160 容量，5 次 lane 迭代
 161..224 -> 224 容量，7 次 lane 迭代
-225..256 -> 原 256 容量，8 次 lane 迭代
+225..255 -> 原 256 容量，8 次 lane 迭代
+256      -> exact-256，8 次编译期有效 lane 迭代
 ```
 
 分派只看 dtype 和 `dim_size`，不识别 case 或模型。160/224 档继续使用 1024
 线程、每 tile 32 行、两槽 MTE2/V/MTE3 流水和 FP32 累加；grid、实际 DMA 字节
 及事件顺序均不变。新实例放在独立 `persistent_160_224.asc`，并在链接时追加到
-原有 object 之后。这样既覆盖一整类 shape，又保持 `persistent_256.asc` 与原
-实现逐字一致，避免模板和链接布局影响 `225..256` 控制区间。
+原有 object 之后。这样既覆盖一整类 shape，又保持 225..255 的 capacity
+实现不变。
 
 20002 节点的重复 BasicInfo A/B 显示，width 144 提升约 31%，width 196 提升
 约 12% 至 13%，width 197 提升约 8.5%，width 204 提升约 9.7%。独立翻译单元
 下 width 256 控制为 `117.928 us`，基线为 `118.013 us`，未出现联合翻译单元
 曾观察到的约 1.1% 回退。FP16/FP32 六个分桶边界和 FP16 canonical 40 case
 均通过；完整证据见 `docs/designs/softmax-short-row-bucket-design.md`。
+
+### 4.16 exact-256 编译期有效路径
+
+width 256 现在进入独立的 exact VF 和 kernel entry。该路径把每个 warp 的
+8 次 lane 迭代、256 元素 UB 行跨度和所有元素有效性表达为编译期常量，删除
+不可能触发的 `element_index < dim_size` 分支，并把 UB tile 内的 row/lane/
+element index 收窄为 `int32_t`。outer row、GM offset、tile stride 和 tile
+count 继续使用 `int64_t`。225..255 仍走原 capacity-256 VF。
+
+实现保留 1024-thread VF、32 行 tile、64 physical grid cap、两槽
+MTE2/V/MTE3 event 顺序、FP32 累加和实际 DMA 字节。Ascend 950PR 上通过仓库
+标准 CannBench 路径采集的两组 TrOCR 成对 BasicInfo 结果分别从
+`118.053/118.038 us` 降至 `73.665/69.383 us`，改善 37.60% 和 41.22%。
+CrossViT width 197 三组 baseline/candidate 中位数为 `4.278/4.389 us`，
+`0.111 us` 差异位于候选 `4.268-4.456 us` 波动范围内；GPT-J width 128
+中位数为 `3.907/3.914 us`，并如实保留一个 `37.355 us` profiler 离群值。
+所有有效 raw row 均为 1650/1650 MHz、单目标 kernel、profiler 默认 warmup 5。
+FP16/FP32 width 224/225/255/256/257 的 65-row tail 和 40/40 canonical
+FP16 case 全部通过。TrOCR 发布记录更新为 `69.735001 us`。
 
 ## 5. 已实现优化方法归纳
 
@@ -430,6 +450,7 @@ FP32 没有复用这一路径：其 tile 宽度、UB 占用和已有收益证据
 | UB staging | 512/1024 使用双缓冲 GM/UB 流水 | `bb1c443` |
 | exact-128 UB staging | 每 warp 一行、每 tile 32 行的双缓冲 GM/UB 流水 | `17b38fb` |
 | 129..224 紧容量档 | 160/224 编译期容量，独立翻译单元，保留原 256 路径 | 当前变更 |
+| exact-256 编译期路径 | 删除元素有效性分支，UB tile index 使用 `int32_t` | 当前变更 |
 | 分发正确性 | 专用 512/1024 与通用 fallback 明确分离 | `15efd0e` |
 | 大 row 片上计算 | 能放入 UB 时 whole-row recompute | `af01f6f` |
 | FP16 超大 row 融合 | stats/write 单 kernel + 完整 UB tile 复用 + 行级 workspace | 当前变更 |

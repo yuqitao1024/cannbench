@@ -861,7 +861,7 @@
       "source_file": "hf_train/TrOCRForCausalLM_train.json",
       "source_op": "aten._softmax.default",
       "metrics": {
-        "latency_ms": 0.118013
+        "latency_ms": 0.069735001
       },
       "accuracy": {
         "passed": true,

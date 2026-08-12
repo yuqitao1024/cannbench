@@ -213,7 +213,7 @@ def test_ascend_softmax_v3_dispatches_exact_128_to_single_row_ub_pipeline():
     persistent_128 = _read_v3_simt_source("persistent_128.asc")
     exact_128_start = dispatch.index("if (dim_size == 128)")
     exact_128_end = dispatch.index(
-        "if (dim_size >= 129 && dim_size <= 256)", exact_128_start
+        "if (dim_size >= 129 && dim_size <= 160)", exact_128_start
     )
     exact_128_dispatch = dispatch[exact_128_start:exact_128_end]
 
@@ -259,9 +259,56 @@ def test_ascend_softmax_v3_129_through_256_pipeline_uses_tight_compile_time_buck
 def test_ascend_softmax_v3_dispatches_129_through_256_to_ub_pipeline():
     source = _read_v3_simt_source("row_persistent_fallback.asc")
 
-    assert "dim_size >= 129 && dim_size <= 256" in source
+    assert "dim_size >= 129 && dim_size <= 160" in source
+    assert "dim_size >= 161 && dim_size <= 224" in source
+    assert "dim_size >= 225 && dim_size <= 255" in source
+    assert "dim_size == 256" in source
     assert "dispatch_row_persistent_forward_kernel_256_fp16(" in source
     assert "dispatch_row_persistent_forward_kernel_256_fp32(" in source
+
+
+def test_ascend_softmax_v3_dispatches_exact_256_without_capacity_guards():
+    dispatch = _read_v3_simt_source("row_persistent_fallback.asc")
+    persistent_256 = _read_v3_simt_source("persistent_256.asc")
+
+    exact_start = dispatch.index("if (dim_size == 256)")
+    capacity_start = dispatch.index(
+        "if (dim_size >= 225 && dim_size <= 255)", exact_start
+    )
+    exact_dispatch = dispatch[exact_start:capacity_start]
+    capacity_end = dispatch.index("if (dim_size == 1024)", capacity_start)
+    capacity_dispatch = dispatch[capacity_start:capacity_end]
+
+    assert "dispatch_row_persistent_forward_kernel_exact_256_fp16(" in exact_dispatch
+    assert "dispatch_row_persistent_forward_kernel_exact_256_fp32(" in exact_dispatch
+    assert "dispatch_row_persistent_forward_kernel_256_fp16(" in capacity_dispatch
+    assert "dispatch_row_persistent_forward_kernel_256_fp32(" in capacity_dispatch
+
+    exact_vf_start = persistent_256.index("row_softmax_persistent_exact_256_vf")
+    exact_vf_end = persistent_256.index(
+        "template <\n    typename scalar_t", exact_vf_start
+    )
+    exact_vf = persistent_256[exact_vf_start:exact_vf_end]
+    assert "constexpr int32_t kElements = 256" in exact_vf
+    assert "constexpr int32_t kWarpIterations = 8" in exact_vf
+    assert "const int32_t row_in_tile" in exact_vf
+    assert "const int32_t lane" in exact_vf
+    assert "const int32_t row_offset" in exact_vf
+    assert "const int32_t element_index" in exact_vf
+    assert "element_index < dim_size" not in exact_vf
+    assert "int64_t dim_size" not in exact_vf
+    assert "const int64_t row_base" in persistent_256
+    assert "bool kExactWidth" in persistent_256
+    assert "if constexpr (kExactWidth)" in persistent_256
+    assert persistent_256.count("asc_init();") == 1
+    assert "row_softmax_persistent_exact_256_vf<" in persistent_256
+    assert "row_softmax_persistent_256_vf<" in persistent_256
+    assert "basic_api/" not in persistent_256
+    assert "kernel_operator.h" not in persistent_256
+    assert "AscendC::LocalTensor" not in persistent_256
+    assert "CrossCoreSetFlag" not in persistent_256
+    assert "CrossCoreWaitFlag" not in persistent_256
+    assert "PipeBarrier" not in persistent_256
 
 
 def test_ascend_softmax_v3_remaining_persistent_fallback_uses_generic_1024_thread_kernel():
