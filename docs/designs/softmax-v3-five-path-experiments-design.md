@@ -240,3 +240,101 @@ The canonical TrOCR publication collection measured `69.735001 us`. Accepted
 raw data is under `standard-final-o`, `standard-final-controls-extra`, and
 `standard-final-publication` in the final remote Task 1 root. Full hashes and
 raw CSV paths are recorded in the Task 1 report.
+
+### Experiment 2: Rejected
+
+The experiment added temporary, operator-local compile-time controls for the
+FP16 whole-row capacity (production/32768), direct implementation (automatic,
+x4, shifted x2, or scalar), and persistent grid limit (32/64). The source test
+first failed without these controls and then passed with production-preserving
+defaults. The focused operator suite passed 39 tests, the complete operator
+SIMT suite passed 41 tests, and the focused profile suite passed 22 tests.
+
+All nine clean relinked extensions had distinct SHA-256 hashes. The hashes used
+for screening were:
+
+- production whole-row selector (32768/56320), grid 64:
+  `63b55140de0ec494ac4cb2a1fbd55fb2eea6db231281a2fcd839fee0d5c02d3c`;
+- whole-row 32768/grid 64:
+  `eba1203dc64abd582a4ad28441137fe26e77dc1646505d0f995592109a2b7b2a`;
+- direct x4/grid 64:
+  `32125660ebe14a02dff5eecf8cfa35605e72477c46962321ddf1c030a719d2e0`;
+- direct x2/grid 64:
+  `5e75b132343a45ca3e51a218c81d2f319b4ef82d2bfac73a4d28f65be94908cb`;
+- direct scalar/grid 64:
+  `41bdb99a59cfc557df8ac793db5cbc6522a086f21f3b6224d70ffbf297ccc88a`.
+
+The corresponding grid-32 variants were built and discriminated by hashes
+`4b7221d2b8c067bf388aa82239a851ceb694a8904aea67ef11c5d57920783596`,
+`8091c9beab688bdf37fbd3e11c9fc7e8cfa3461c210e07dc900aedc5d0212516`,
+`40abee08a57c867659fac0ea016ee63d075322afdb47f6728076d9362956cc5b`,
+and `ab832354ab9145fe680103abc7faacec7898bbd1a03f7ef68fa2f9a327c55d94`
+for whole-row 32768, x4, x2, and scalar respectively. An earlier summary that
+read stale inplace extensions after relinking was marked `INVALID` and was not
+used; under remote root
+`/root/cannbench-softmax-v3-large-selector-task2-20260812-b`, the authoritative
+artifact list is `evidence/valid-artifact-hashes.log`.
+
+The experiment source revision was
+`f511cff5dc0667dd6b8bd0a4e563d8c90116e709`; its source diff SHA-256 was
+`02bc0feda870f93d437b566a8c625cd7095a2bdf0075250babbc3602599f03ed`.
+Each profile `run.log` records the imported inplace extension path and its hash
+before launch. A read-only audit after all profiles, at
+`2026-08-12T15:26:46+08:00`, found profile directories only for baseline,
+whole32768_g64, direct_x4_g64, direct_x2_g64, and direct_scalar_g64. For each,
+the currently loaded inplace copy still had the hash listed above and matched
+the clean `build/lib` copy byte-for-byte, with unchanged size and mtime. This is
+retrospective post-profile verification, not a contemporaneous per-run
+post-profile capture. Grid-32 variants were not profiled and have no
+post-profile claim. Profiles used `--launch-count=1`; raw BasicInfo rows select
+the kernel, while `run.log` records the imported path
+`<remote-root>/variants/<variant>/src/src/cannbench/operators/builtin/softmax/simt/v3/aten_softmax_v3/_C.cpython-311-x86_64-linux-gnu.so`.
+The selected kernel names were
+`_ZN15aten_softmax_v312_GLOBAL__N_150row_softmax_fast_large_row_inplace_pipeline_kernelIDhfLl32768EEEvPT_PKS2_ll`
+or
+`_ZN15aten_softmax_v312_GLOBAL__N_150row_softmax_fast_large_row_inplace_pipeline_kernelIDhfLl56320EEEvPT_PKS2_ll`
+(block 64), and
+`_ZN15aten_softmax_v312_GLOBAL__N_131row_softmax_fast_forward_kernelIDhfDhEEvPT1_PKT_llll`
+(block 4096 for automatic direct and block 64 for forced direct).
+
+Fresh-process correctness passed for the baseline (14 cases, including FP16
+widths 8191, 8192, 32768, 32769, 56320, 56321 and FP32 boundaries) and for each
+grid-64 candidate (12 FP16 boundary, published-width, and tail cases). A
+previous multi-process run stalled during device initialization; a locked
+single-case diagnostic loaded the intended baseline hash and completed the
+8192-width reference/candidate comparison with `allclose=True`, so it was
+treated as environmental contamination rather than candidate evidence.
+
+Raw `msopprof BasicInfo` screening at 1650/1650 MHz showed that unchanged-path
+controls below the proposed 32768 threshold remained within 0.30%, but switching
+to the direct path was substantially slower:
+
+| Outer x width | Existing whole-row (us) | Candidate | Candidate (us) | Change |
+|---|---:|---|---:|---:|
+| 4096 x 32769 | 527.904968 | automatic direct | 1226.911987 | +132.4% |
+| 4096 x 50005 | 741.446045 | automatic direct | 1764.466919 | +138.0% |
+| 4096 x 50265 | 748.242004 | automatic direct | 1767.493042 | +136.2% |
+| 4096 x 50272 | 706.226013 | automatic direct | 1412.397095 | +100.0% |
+| 4096 x 32128 | 490.988007 | forced x4 | 923.638000 | +88.1% |
+| 4096 x 50272 | 706.226013 | forced x4 | 1381.910034 | +95.7% |
+| 4096 x 30522 | 502.796997 | forced shifted x2 | 1083.557983 | +115.5% |
+| 4096 x 32005 | 520.099976 | forced scalar | 1915.894043 | +268.4% |
+| 4096 x 50005 | 741.446045 | forced scalar | 2902.718018 | +291.5% |
+| 4096 x 50265 | 748.242004 | forced scalar | 2909.327148 | +288.8% |
+
+The unchanged-path control pairs at widths 30522, 32005, 32128, and 32768
+were `502.796997/504.262024`, `520.099976/520.739014`,
+`490.988007/491.332977`, and `497.518005/497.579987` us (baseline/candidate).
+Raw roots are
+`/root/cannbench-softmax-v3-large-selector-task2-20260812-b/screen-r1`
+and
+`/root/cannbench-softmax-v3-large-selector-task2-20260812-b/forced-direct-r1`.
+
+No direct mode produced a plausible winning region, including at the first
+general width boundary. Therefore no selector could be derived. Grid-32
+profiling, the wider outer-row matrix, canonical accuracy, and two paired
+retention rounds were pruned under the rejection rule because grid-32 was not
+plausible enough to profile after grid-64 lost by 88-292%; its result remains
+unmeasured. All temporary source and source-test changes were restored; no
+implementation, selector,
+published record, or README change is retained.
