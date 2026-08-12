@@ -377,3 +377,32 @@ The broad selector is rejected. It repeatably helps the small primary but
 regresses the large primary by about 10 us and 14%-15%. The two measured outer
 sizes do not establish a safe monotonic cutoff between 3072 and 200704, so no
 narrower threshold is retained without inventing an unmeasured boundary.
+
+### Experiment 4: Very-Short-Row Launch Policy - Rejected
+
+The experiment compared three orthogonal changes against production's 1024
+threads, two rows per warp, and grid limit 64 for power-of-two widths up to 32:
+
+- 256 threads with the other settings unchanged;
+- one row per warp with the other settings unchanged;
+- grid limit 32 with the other settings unchanged.
+
+Focused device correctness covered the baseline and all three candidates for
+FP16 and FP32 widths 1, 9, 16, 31, 32, 33, and 48. All 56 comparisons passed
+without NaN, Inf, or tolerance mismatch.
+
+Standard CannBench measurements of `convbert_local_kernel` used no explicit
+warmup option. Every accepted row reported 1650/1650 MHz and the profiler
+default `Warm Up enabled. times:5`:
+
+| Configuration | Duration | Change vs. 8.246 us baseline |
+| --- | ---: | ---: |
+| Production baseline | 8.246 us | 0.0% |
+| 256 threads | 17.435 us | 111.4% slower |
+| One row per warp | 10.101 us | 22.5% slower |
+| Grid limit 32 | 13.088 us | 58.7% slower |
+
+All candidates regress materially, so none is retained. The temporary policy
+controls and source tests were removed. Raw evidence is preserved under
+`/root/cannbench-softmax-v3-very-short-task4-20260812-a`, with the accepted
+screen under `evidence/post-reboot-standard-screen-20260812-b`.
