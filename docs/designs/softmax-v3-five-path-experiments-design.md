@@ -406,3 +406,44 @@ All candidates regress materially, so none is retained. The temporary policy
 controls and source tests were removed. Raw evidence is preserved under
 `/root/cannbench-softmax-v3-very-short-task4-20260812-a`, with the accepted
 screen under `evidence/post-reboot-standard-screen-20260812-b`.
+
+### Experiment 5: Width 129-224 Launch Policy - Rejected
+
+The experiment compared 16 rows per tile, grid limit 32, and grid limit 128
+independently with production's 32 rows per tile and grid limit 64. The width
+160/224 capacity buckets, two-slot event protocol, and FP32 accumulation were
+unchanged. No case, model, or complete-shape dispatch was added.
+
+The four clean extensions passed 88/88 FP16 and FP32 device comparisons across
+widths 128, 129, 144, 160, 161, 196, 197, 204, 224, 225, and 256. Maximum
+absolute error was `1.22070312e-4` for FP16 and `5.96046448e-8` for FP32.
+
+Standard CannBench used no explicit warmup option. All accepted rows reported
+1650/1650 MHz and the profiler default `Warm Up enabled. times:5`. The initial
+width-197 screen was:
+
+| Configuration | Duration | Change vs. baseline |
+| --- | ---: | ---: |
+| Production baseline | 4.244 us | 0.0% |
+| 16 rows, grid 64 | 4.165 us | 1.86% faster |
+| 32 rows, grid 32 | 4.391 us | 3.46% slower |
+| 32 rows, grid 128 | 4.327 us | 1.96% slower |
+
+After this screen, the retention threshold was adjusted from 3% to a
+repeatable improvement of at least 1% in every fresh pair, with correctness
+and neighboring controls unchanged. The 16-row candidate advanced:
+
+| Pair | Production | 16 rows | Improvement |
+| --- | ---: | ---: | ---: |
+| 1 | 4.407 us | 4.220 us | 4.24% |
+| 2 | 4.313 us | 4.294 us | 0.44% |
+
+The second pair missed the adjusted threshold. The published large-outer
+width-196 case regressed from `607.084045 us` to `761.452026 us`, or 25.43%.
+Neighbor controls measured width 128 at `3.627 -> 3.490 us` and width 225 at
+`4.641 -> 4.693 us`; width 225 was 1.12% slower.
+
+No candidate satisfies the adjusted contract across the affected shape
+family. All temporary implementation controls, headers, tests, and remote
+datasets were removed. No README or published record was changed. Evidence is
+preserved under `/root/cannbench-softmax-v3-mid-launch-task5-20260812-a`.
