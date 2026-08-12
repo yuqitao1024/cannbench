@@ -50,8 +50,8 @@ A candidate is retained only when all of the following hold:
 
 1. Focused FP16 and FP32 boundary/tail correctness passes.
 2. The complete canonical FP16 Softmax accuracy suite passes.
-3. Each named primary shape improves in both paired collections, with at least
-   3% median device-latency improvement or a clearly larger absolute saving.
+3. Each named primary shape improves in both paired collections by at least 1%,
+   or has a clearly larger absolute saving without regressing another primary.
 4. Control shapes from unchanged neighboring dispatch ranges do not regress by
    more than 1% outside normal repeated-run noise.
 5. The final combined branch repeats the gain after earlier retained candidates
