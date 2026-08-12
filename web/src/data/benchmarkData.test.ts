@@ -157,6 +157,25 @@ describe("buildBenchmarkViewModel", () => {
     ]);
   });
 
+  it("orders cases and chart points by shape element count", () => {
+    const cudaRecord = records[0];
+    const unorderedRecords: BenchmarkRecord[] = [
+      { ...cudaRecord, run_id: "large", case_id: "large", shape: [3, 3, 3] },
+      { ...cudaRecord, run_id: "same-shape-b", case_id: "same_shape_b", shape: [2, 8] },
+      { ...cudaRecord, run_id: "small", case_id: "small", shape: [3, 4] },
+      { ...cudaRecord, run_id: "same-volume", case_id: "same_volume", shape: [4, 4] },
+      { ...cudaRecord, run_id: "same-shape-a", case_id: "same_shape_a", shape: [2, 8] }
+    ];
+    const expectedOrder = ["small", "same_shape_a", "same_shape_b", "same_volume", "large"];
+
+    const model = buildBenchmarkViewModel(unorderedRecords);
+
+    expect(model.casesFor("softmax", "realistic").map((item) => item.caseId)).toEqual(expectedOrder);
+    expect(model.seriesFor("softmax", "realistic")[0].points.map((point) => point.caseId)).toEqual(
+      expectedOrder
+    );
+  });
+
   it("exposes dataset coverage metadata in case summaries", () => {
     const model = buildBenchmarkViewModel(records);
     const [realistic] = model.casesFor("softmax", "realistic");

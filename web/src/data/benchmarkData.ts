@@ -31,6 +31,24 @@ function orderedUnique(values: string[]): string[] {
   return [...new Set(values)];
 }
 
+function shapeElementCount(shape: number[]): bigint {
+  return shape.reduce((count, dimension) => count * BigInt(dimension), 1n);
+}
+
+function compareShapes(left: number[], right: number[]): number {
+  const leftCount = shapeElementCount(left);
+  const rightCount = shapeElementCount(right);
+  if (leftCount !== rightCount) {
+    return leftCount < rightCount ? -1 : 1;
+  }
+  for (let index = 0; index < Math.min(left.length, right.length); index += 1) {
+    if (left[index] !== right[index]) {
+      return left[index] - right[index];
+    }
+  }
+  return left.length - right.length;
+}
+
 function isGpuRecord(record: BenchmarkRecord): boolean {
   return record.backend === "nvidia" || record.backend === "gpu";
 }
@@ -129,18 +147,34 @@ function filteredRecords(records: BenchmarkRecord[], operator: string, dataset?:
 }
 
 function orderedCaseKeys(records: BenchmarkRecord[], dataset: string): string[] {
+  const sampleByCase = new Map<string, BenchmarkRecord>();
+  for (const record of records) {
+    if (!sampleByCase.has(record.case_id)) {
+      sampleByCase.set(record.case_id, record);
+    }
+  }
+  const sortCaseKeys = (keys: string[]) =>
+    keys.sort((left, right) => {
+      const shapeOrder = compareShapes(sampleByCase.get(left)!.shape, sampleByCase.get(right)!.shape);
+      return shapeOrder || left.localeCompare(right);
+    });
+
   if (dataset !== ALL_DATASET) {
-    return orderedUnique(records.map((record) => record.case_id));
+    return sortCaseKeys(orderedUnique(records.map((record) => record.case_id)));
   }
   const ordered: string[] = [];
   for (const split of SPLIT_ORDER) {
-    const splitKeys = orderedUnique(records.filter((record) => record.dataset === split).map((record) => record.case_id));
+    const splitKeys = sortCaseKeys(
+      orderedUnique(records.filter((record) => record.dataset === split).map((record) => record.case_id))
+    );
     ordered.push(...splitKeys);
   }
-  const remainder = orderedUnique(
-    records
-      .filter((record) => !SPLIT_ORDER.includes(record.dataset as (typeof SPLIT_ORDER)[number]))
-      .map((record) => record.case_id)
+  const remainder = sortCaseKeys(
+    orderedUnique(
+      records
+        .filter((record) => !SPLIT_ORDER.includes(record.dataset as (typeof SPLIT_ORDER)[number]))
+        .map((record) => record.case_id)
+    )
   );
   ordered.push(...remainder);
   return ordered;
