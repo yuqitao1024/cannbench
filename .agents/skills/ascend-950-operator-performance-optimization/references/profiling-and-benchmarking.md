@@ -123,6 +123,14 @@ Confirm both paths use the same:
 - initialization, packing, and postprocess boundary
 - device frequency and target core type
 
+For frequency-sensitive retention, require the selected raw kernel row to
+report the accepted execution-time current/rated frequency. Treat an idle DSMI
+read as node-state context, not as evidence for a measured launch: an idle
+device may report a low dynamic clock, and a later profiled kernel may still
+run below rated frequency after the profiler's default warmup. Do not rescale or
+normalize an under-frequency latency; discard it and recollect under the same
+frequency gate for baseline and candidate.
+
 An orders-of-magnitude gap warrants a boundary audit before an architectural
 explanation.
 
@@ -132,6 +140,12 @@ same process that runs the benchmark. `PYTHONPATH` alone is insufficient when
 the framework prepends an operator-local directory or an earlier import has
 already populated the module cache. Re-run in a fresh process after replacing
 an extension.
+
+Make the provenance assertion fail before profiling if the imported extension
+path or hash is not the frozen baseline/candidate artifact. Log that proof in
+the benchmark parent process without relying on installer output; profiler
+children and editable-package `.pth` files can resolve a different module even
+when the shell environment points at the intended source tree.
 
 Capture mapped device-library paths and, when the profiler dumps one, the device
 object hash inside the same process. Use unique run names and output roots. A
