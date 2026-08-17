@@ -29,6 +29,66 @@ only the single target row's `Task Duration`, requires launch-count one,
 production block dimensions (vLLM-Ascend 4, SIMT v2 64), and frequency parity,
 and retains every raw collection below `evidence/`.
 
+## Rejected four-block SIMT experiment
+
+An unpublished experiment tested whether SIMT VF code could benefit from the
+same four-row-block ownership and logical score partition as the vLLM-Ascend
+implementation. It retained the fixed BF16 `[4, 32768]` to INT32 `[4, 2048]`
+contract and one-kernel boundary, assigned one block to each row, processed the
+first `16384` scores and then merged the remaining `2048 + 16384 = 18432`
+scores, and used two high/low-byte radix-threshold stages. Each stage built a
+256-bin histogram with UB atomics; greater/equal compaction used ballot,
+warp-prefix calculation, and repeated block barriers for each 1024-element
+chunk. The two compact stages processed 68 chunks in total.
+
+This matched vLLM-Ascend's logical radix phases and data split, but not its SIMD
+primitives or dataflow. On Ascend 950PR it was more than ten times slower than
+the retained 64-block distributed SIMT v2 implementation, so the source,
+target, run-script integration, and source-contract tests were removed rather
+than retained as an alternative example.
+
+The comparison was collected on 2026-08-17 at
+`root@121.41.199.170:20002`, device 0, with CANN 9.2.0, Bisheng clang 15.0.5,
+`dav-3510`, and `msopprof` 26.2.0. All implementations used one kernel launch;
+vLLM-Ascend and the rejected candidate used four blocks, while retained SIMT
+v2 used 64. Every row used unmodified profiler warmup (reported as 5),
+`--aic-metrics=Default`, `--launch-count=1`, no `--kernel-name`, and
+current/rated frequency `1650/1650 MHz`. All direct and profiled executions
+passed the score-set oracle.
+
+| Implementation | Blocks | Ten Task Duration samples (us) | Median (us) |
+| --- | ---: | --- | ---: |
+| vLLM-Ascend | 4 | 7.772, 7.776, 7.632, 7.690, 7.814, 7.646, 7.769, 7.578, 7.662, 7.563 | 7.6760 |
+| Rejected four-block SIMT | 4 | 215.292999, 212.688004, 212.984985, 212.983994, 212.022003, 215.410004, 215.532990, 211.776001, 212.951004, 212.990005 | 212.9844895 |
+| Retained distributed SIMT v2 | 64 | 20.849001, 20.868000, 20.840000, 20.662001, 20.782000, 20.454000, 20.875000, 21.077999, 20.837999, 20.809999 | 20.8389995 |
+
+The rejected candidate won `0/10` paired measurements against either baseline.
+Its median was `27.7468x` vLLM-Ascend (`+2674.6807%`) and `10.2205x` retained
+distributed SIMT v2 (`+922.0476%`). Source/executable SHA-256 pairs are:
+
+- vLLM-Ascend: `df4b560fe8809dbb2b5099bc8e21ff4c25bfc466b8abf8f61a7ab188912e06d8` /
+  `855ce09844b8c846f857ae2a4c2e434b90d1068afa98664f5db713851ce9bcb9`
+- Rejected four-block SIMT:
+  `a21d11c7abb09c1ab70592d6059c8f97d629dbc2f2b4817e98b437cc68483f62` /
+  `e89c115e35df58968a373eb47427cc4baafe023376dff8781d21ce82f69736ba`
+- Retained distributed SIMT v2:
+  `0b2a13a2feac2fa2d353a23e17a1570b22de7f9602e8a0d8d951ab8365e7cf51` /
+  `4339779baa096350ba9a7f96be8e096e6cd596e0e1f3c1dbec931d11984b4a42`
+
+Raw evidence remains at remote
+`/tmp/cannbench-topk-simt-vllm-partition-iTc9ET`. The 869-entry archive is
+available on both hosts at
+`/tmp/dsa-topk-simt-vllm-partition-evidence-20260817.tar.gz`, SHA-256
+`bc2d63f2f7f495f8b638c4ccaec6205cdaadf8a5b7d4cfd967abe55c1451352f`.
+
+Do not recreate or tune this exact combination: four row blocks, the
+`16384 -> 18432` split, UB atomic histograms, and per-chunk
+ballot/warp-prefix/block-barrier compaction. Future SIMT TopK work must start
+from the retained 64-block distributed SIMT v2 path. Four-block ownership may
+be reconsidered only with a materially different inner implementation and a
+written bottleneck hypothesis, for example warp-atomic output reservation that
+eliminates per-chunk block synchronization.
+
 ## Four-candidate tuning evidence
 
 Collected on 2026-08-17 on `root@121.41.199.170:20002`, using Ascend 950PR

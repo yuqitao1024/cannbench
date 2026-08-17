@@ -85,3 +85,30 @@ correct candidate when it does not improve the measured device boundary. The
 final retained combination must also be compared with commit `887eb3d` using
 ten alternating-order pairs, with source/executable hashes and every raw
 OPPROF tree preserved outside the repository.
+
+## Rejected four-block SIMT experiment
+
+The rejected experiment used four row blocks and copied vLLM-Ascend's logical
+`16384 -> 18432` score split into SIMT VF code. Its two high/low-byte radix
+stages used UB atomic 256-bin histograms. Greater/equal compaction used
+1024-element chunks with ballot, warp-prefix calculation, and repeated block
+barriers; the two compact stages processed 68 chunks in total. Although the
+radix phases and split matched vLLM-Ascend, the SIMD primitives and dataflow
+did not.
+
+Ten paired `Default` collections established a `212.9844895 us` median, versus
+`7.6760 us` for four-block vLLM-Ascend and `20.8389995 us` for retained
+64-block distributed SIMT v2. The rejected candidate won no pair against
+either baseline and regressed the medians by `2674.6807%` and `922.0476%`,
+respectively. All implementations passed the score-set oracle under the same
+one-launch, frequency-parity, unmodified-warmup measurement boundary.
+
+Consequently, the rejected source, executable target, run-script integration,
+and source-contract tests are intentionally absent. Do not recreate or tune
+the exact combination of four row blocks, the `16384 -> 18432` split, UB atomic
+histograms, and per-chunk ballot/warp-prefix/block-barrier compaction. Future
+SIMT TopK performance work must start from the retained distributed SIMT v2
+path. Four-block ownership requires a materially different inner
+implementation and a written bottleneck hypothesis before it may be tested
+again, such as warp-atomic output reservation that removes per-chunk block
+synchronization.
