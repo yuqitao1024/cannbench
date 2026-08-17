@@ -7,16 +7,18 @@ kernel launch and use only ACL Runtime on the host. Output ordering is
 intentionally not compared, and equal-score index identity is intentionally not
 compared.
 
-The current SIMT executable includes four retained example-only fixed-shape
+The current SIMT executable includes five retained example-only fixed-shape
 optimizations. Each of its 64 blocks copies one 2,048-element BF16 shard from
 GM to a dedicated 4 KiB UB tile once; the high-byte histogram, low-byte
 histogram, and compact VFs all reuse it. The four reducer blocks also stage
 their 16 x 256 high and low histogram matrices in UB, and the high-byte
 threshold search uses 16 parallel groups of 16 bins. The compact VF uses
 warp-level ballot and UB atomic output reservations instead of a block-wide
-ping-pong prefix scan. A separate per-warp-private histogram candidate was
-implemented and validated but is not retained because it regressed device task
-time. Production SIMT v2 is not modified.
+ping-pong prefix scan. The low reducer uses a width-16 warp shuffle scan for
+shard output offsets. Separate per-warp-private histogram and follow-up tuning
+candidates were implemented and validated but are not retained when they
+regressed or produced unstable device task time. Production SIMT v2 is not
+modified.
 
 Build and collect with:
 
@@ -88,6 +90,56 @@ Raw evidence remains at remote
 `/tmp/cannbench-topk-warp-atomic-Qyq59K`. The 1,016-entry archive is available
 on both hosts at `/tmp/dsa-topk-warp-atomic-evidence-20260817.tar.gz`, SHA-256
 `22e4ce773d40559262426f3236cddc51b811adb7344f5226666c44b09f83d3e0`.
+
+## Warp-shuffle reducer evidence
+
+Follow-up tuning on 2026-08-17 used the retained warp-atomic source as its
+frozen baseline and kept the same Ascend 950PR device, CANN 9.2.0, Bisheng
+clang 15.0.5, `dav-3510`, and `msopprof` 26.2.0 boundary. Every accepted row
+used unmodified profiler warmup, `--aic-metrics=Default`,
+`--launch-count=1`, no `--kernel-name`, one 64-block target launch, and
+current/rated `1650/1650 MHz`. Direct runs and all profiled runs passed the
+four-row score-set oracle.
+
+The retained candidate replaces the low reducer's 16 serial prior-shard
+greater/equal prefix loops with four width-16 `asc_shfl_up` steps. Warp 0
+executes the collective uniformly; lanes 0-15 publish exclusive offsets and
+the total-greater count. All histogram algorithms, score traversal, compact
+logic, five VF calls, four `SyncAll` boundaries, and GM visibility operations
+remain unchanged.
+
+Two independent five-pair rounds produced:
+
+| Variant | Ten Task Duration samples (us) | Median (us) | Pair wins |
+| --- | --- | ---: | ---: |
+| Warp-atomic baseline | 19.115999, 18.922001, 18.903, 19.086, 18.979, 19.209, 18.849001, 18.712, 18.791, 19.351999 | 18.9505005 | 0/10 |
+| Warp-shuffle reducer | 18.146, 18.235001, 18.739, 18.179001, 18.389999, 17.993999, 18.100, 18.232, 18.371, 18.365999 | 18.2335005 | 10/10 |
+
+The retained candidate reduced the combined median by `3.7835%`. Relative to
+the earlier, separately collected block-scan compact median of `20.5035 us`,
+the current `18.2335005 us` median is `11.0713%` lower. That historical ratio
+is not a paired A/B result and is reported only for orientation.
+
+Four independently measured follow-ups are rejected:
+
+| Candidate | Baseline median (us) | Candidate median (us) | Delta | Pair wins | Result |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Invoke reducer VFs only on four row-owner blocks | 18.948999 | 18.985001 | +0.1900% | 2/5 | Rejected |
+| Return early for an empty compact ballot, first round | 19.205999 | 19.021999 | -0.9580% | 3/5 | Repeated |
+| Return early for an empty compact ballot, repeat | 19.247999 | 19.302000 | +0.2806% | 3/5 | Rejected as unstable |
+| Transform each BF16 sortable key once in UB | 19.073000 | 19.125999 | +0.2779% | 1/5 | Rejected |
+| Load two adjacent BF16 scores per 32-bit UB access | 18.171000 | 18.599001 | +2.3554% | 0/5 | Rejected |
+
+Baseline source/executable SHA-256 is
+`a98d73005eac24cf6f7bd0be3dc13677c3819eb80e8e77cd68c285971f032731` /
+`d4d9da5ae54792f1c629b5ef470888503a540914777b38760fa144e8a19c9025`.
+Retained source/executable SHA-256 is
+`1b11b72738b789228db1230f9f1369b980a0f7da5599db27fe4fd6c510b7fc13` /
+`c22f7c34b400978fe8db224148106d8662a446dd4cc150445f1ec583002b3b3c`.
+Raw evidence remains at remote `/tmp/cannbench-topk-followup-hWn76l`; its
+2,286-entry archive is available on both hosts at
+`/tmp/dsa-topk-followup-evidence-20260817.tar.gz`, SHA-256
+`4bbe1350491d3be7218345a62ec4dffc36a137916c77fa701d9e0416bf417619`.
 
 ## Rejected four-block SIMT experiment
 

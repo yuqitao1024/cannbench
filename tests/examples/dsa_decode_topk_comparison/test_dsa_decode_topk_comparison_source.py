@@ -171,6 +171,47 @@ def test_simt_reducers_stage_high_and_low_histograms_in_ub():
     assert "low_histogram_shards" in kernel
 
 
+def test_simt_low_reducer_uses_warp_shuffle_scan_for_shard_offsets():
+    simt = read_required("simt_v2_topk.asc")
+    select_low = function_source(
+        simt,
+        "lightning_indexer_decode_distributed_select_low_offsets_bfloat16_v2_vf",
+        "lightning_indexer_decode_distributed_compact_bfloat16_v2_vf",
+    )
+    normalized = normalize_whitespace(select_low)
+
+    assert "prior_shard" not in select_low
+    assert "if (thread_index < kWarpSize)" in select_low
+    assert "for (int32_t shuffle_delta = 1" in select_low
+    assert "shuffle_delta < kCanonicalContextShardCount" in select_low
+    assert "shuffle_delta <<= 1" in select_low
+    assert select_low.count("asc_shfl_up(") == 2
+    for prefix in ("shard_greater_prefix", "shard_equal_prefix"):
+        assert re.search(
+            rf"asc_shfl_up\(\s*{prefix},\s*shuffle_delta,\s*"
+            r"kCanonicalContextShardCount\)",
+            normalized,
+        )
+    assert "shard_greater_prefix - shard_greater_count" in select_low
+    assert "shard_equal_prefix - shard_equal_count" in select_low
+    ordered_tokens = (
+        "if (thread_index < kWarpSize)",
+        "for (int32_t shuffle_delta = 1",
+        "const uint32_t prior_greater = asc_shfl_up(",
+        "const uint32_t prior_equal = asc_shfl_up(",
+        "if (lane_in_scan_group >= shuffle_delta)",
+        "shard_greater_prefix += prior_greater",
+        "shard_equal_prefix += prior_equal",
+        "if (owns_shard)",
+        "shard_offsets[offset_base + kOffsetGreater] = shard_greater_prefix - shard_greater_count",
+        "shard_offsets[offset_base + kOffsetEqual] = shard_equal_prefix - shard_equal_count",
+        "if (shard_index + 1 == context_shard_count)",
+        "state[state_base + kStateTotalGreater] = shard_greater_prefix",
+    )
+    positions = [normalized.index(token) for token in ordered_tokens]
+    assert positions == sorted(positions)
+
+
 def test_simt_high_threshold_scan_uses_parallel_bin_groups():
     simt = read_required("simt_v2_topk.asc")
     select_high = function_source(
@@ -430,6 +471,14 @@ def test_docs_freeze_measurement_and_evidence_contract():
         "893b6406afc1a6384ab6fae8a2247d03cc230d87",
         "dsa-topk-warp-atomic-evidence-20260817.tar.gz",
         "22e4ce773d40559262426f3236cddc51b811adb7344f5226666c44b09f83d3e0",
+        "18.9505005",
+        "18.2335005",
+        "3.7835%",
+        "11.0713%",
+        "1b11b72738b789228db1230f9f1369b980a0f7da5599db27fe4fd6c510b7fc13",
+        "c22f7c34b400978fe8db224148106d8662a446dd4cc150445f1ec583002b3b3c",
+        "dsa-topk-followup-evidence-20260817.tar.gz",
+        "4bbe1350491d3be7218345a62ec4dffc36a137916c77fa701d9e0416bf417619",
     ):
         assert token in combined
     assert "TODO" not in read_required("README.md")

@@ -42,7 +42,7 @@ this distributed path. The five production stages, their algorithms, and four
 device-wide synchronization points are preserved under a unique standalone
 64-block distributed kernel symbol.
 
-The example applies four retained fixed-shape optimizations on top of that
+The example applies five retained fixed-shape optimizations on top of that
 baseline:
 
 1. Each block issues one 4 KiB C API MTE2 copy for its contiguous 2,048 BF16
@@ -60,11 +60,15 @@ baseline:
    block-private UB, and a shuffle broadcasts the returned start. This removes
    the ten-round block-wide ping-pong scan and all but the counter-initialization
    block barrier from the compact VF.
+5. The low reducer computes the 16 shard greater/equal prefixes with four
+   width-16 `asc_shfl_up` steps. Warp 0 executes the scan uniformly, and its
+   first 16 lanes convert the inclusive register prefixes to the existing
+   exclusive GM offsets.
 
 Score, high-histogram, low-histogram, and shared stage-scratch UB regions do not
 overlap. Kernel launch geometry, five VFs, and four `SyncAll` boundaries remain
 unchanged. The retained standalone candidate source SHA-256 is
-`a98d73005eac24cf6f7bd0be3dc13677c3819eb80e8e77cd68c285971f032731`.
+`1b11b72738b789228db1230f9f1369b980a0f7da5599db27fe4fd6c510b7fc13`.
 
 An earlier candidate allocated 32 private 256-bin histograms per block, updated
 the owning warp's bins, and reduced the 32 counters for every final bin in both
@@ -159,3 +163,53 @@ pairs. That capacity reduction is rejected, so the retained warp-atomic source
 keeps the original 8 KiB compact UB request. Full raw evidence is archived at
 `/tmp/dsa-topk-warp-atomic-evidence-20260817.tar.gz`, SHA-256
 `22e4ce773d40559262426f3236cddc51b811adb7344f5226666c44b09f83d3e0`.
+
+## Follow-up distributed SIMT optimization campaign
+
+Further tuning remains restricted to the retained 64-block distributed path.
+The four-block `16384 -> 18432` experiment and the reduced-scratch candidate
+must not be reused. Five candidates are evaluated independently, in this
+order, against the currently retained source:
+
+1. Only the four row-owner blocks invoke the high and low reducer VFs. All 64
+   physical blocks still reach all four device-wide `SyncAll` boundaries in
+   the same order, and every producer still publishes its GM writes before the
+   following barrier.
+2. Warp output reservation returns immediately when its ballot mask is zero.
+   A nonempty warp retains the same UB atomic reservation, lane-zero shuffle,
+   and lane-prefix population count as the accepted compact algorithm.
+3. The high-histogram VF converts each staged BF16 score to its sortable key
+   once and writes the key back to the same UB shard. The low-histogram and
+   compact VFs consume those keys directly; no original score bits are needed
+   after the first radix pass.
+4. The low reducer replaces the first 16 threads' serial prior-shard offset
+   loops with a four-step, width-16 warp shuffle scan. The first warp executes
+   the collective uniformly and only its first 16 lanes publish shard offsets.
+5. Each score-pass thread loads two adjacent staged BF16 bit patterns through
+   one aligned 32-bit UB access. The fixed 1,024-thread launch covers the 2,048
+   element shard exactly; histogram and compact semantics remain unchanged.
+
+Each candidate must first pass the source-contract test and direct four-row
+score-set oracle. Performance uses alternating-order baseline/candidate
+`msopprof --aic-metrics=Default --launch-count=1` pairs with unmodified
+profiler warmup, no `--kernel-name`, exactly one 64-block target row, and
+current/rated `1650/1650 MHz`. A candidate is retained only if its median is
+lower, it wins a clear majority of pairs, and fresh combined-stack validation
+preserves correctness. Source, executable, commands, individual samples, and
+all raw OPPROF trees are retained outside the repository.
+
+The reducer warp-shuffle candidate is the only retained result. Across two
+independent five-pair rounds, the frozen baseline median was `18.9505005 us`
+and the retained median was `18.2335005 us`, a `3.7835%` reduction with
+`10/10` pair wins. Row-owner-only reducer VF invocation regressed `0.1900%`;
+the empty-ballot fast path improved `0.9580%` once but regressed `0.2806%` on
+repeat; in-place sortable-key reuse regressed `0.2779%`; and adjacent BF16
+32-bit packed loads regressed `2.3554%`. Those four source changes and their
+source-contract assertions are absent from the retained example.
+
+The retained source/executable SHA-256 pair is
+`1b11b72738b789228db1230f9f1369b980a0f7da5599db27fe4fd6c510b7fc13` /
+`c22f7c34b400978fe8db224148106d8662a446dd4cc150445f1ec583002b3b3c`.
+All follow-up evidence is archived at
+`/tmp/dsa-topk-followup-evidence-20260817.tar.gz`, SHA-256
+`4bbe1350491d3be7218345a62ec4dffc36a137916c77fa701d9e0416bf417619`.
