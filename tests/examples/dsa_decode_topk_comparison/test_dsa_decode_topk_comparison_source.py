@@ -137,7 +137,7 @@ def test_simt_score_consumers_reuse_one_dma_staged_ub_shard():
         assert "__ubuf__ const uint16_t* score_shard" in score_consumer
         assert "score_shard[shard_offset]" in score_consumer
         assert "reduced_score_bits[" not in score_consumer
-    assert compact.count("score_shard[shard_offset]") == 2
+    assert compact.count("score_shard[shard_offset]") == 1
 
 
 def test_simt_reducers_stage_high_and_low_histograms_in_ub():
@@ -185,6 +185,85 @@ def test_simt_high_threshold_scan_uses_parallel_bin_groups():
     assert "bucket * kThresholdBucketsPerGroup" in select_high
     assert "higher_group = bucket + 1" in select_high
     assert "group_bucket_begin + kThresholdBucketsPerGroup - 1" in select_high
+
+
+def test_simt_compact_uses_warp_atomic_reservations_without_block_scan():
+    simt = read_required("simt_v2_topk.asc")
+    reservation = function_source(
+        simt,
+        "reserve_warp_output",
+        "lightning_indexer_decode_distributed_compact_bfloat16_v2_vf",
+    )
+    compact = function_source(
+        simt,
+        "lightning_indexer_decode_distributed_compact_bfloat16_v2_vf",
+        "} // namespace",
+    )
+    warp_compact = reservation + compact
+    normalized_reservation = normalize_whitespace(reservation)
+    normalized_compact = normalize_whitespace(compact)
+
+    assert '#include "simt_api/device_warp_functions.h"' in simt
+    for token in (
+        "kCompactGreater",
+        "kCompactEqual",
+        "asc_ballot",
+        "__popc",
+        "lanemask_lt",
+        "asc_atomic_add",
+        "asc_shfl",
+    ):
+        assert token in warp_compact
+    assert reservation.count("asc_ballot(") == 1
+    assert reservation.count("asc_atomic_add(") == 1
+    assert reservation.count("asc_shfl(") == 1
+    ordered_reservation_tokens = (
+        "const uint32_t selected_mask = asc_ballot(selected ? 1 : 0)",
+        "const uint32_t warp_selected_count = static_cast<uint32_t>(__popc(selected_mask))",
+        "if (laneid() == 0 && warp_selected_count != 0)",
+        "warp_start = asc_atomic_add(counter, warp_selected_count)",
+        "warp_start = asc_shfl(warp_start, 0, kWarpSize)",
+        "__popc(selected_mask & static_cast<uint32_t>(lanemask_lt()))",
+        "return warp_start + lane_offset",
+    )
+    positions = [
+        normalized_reservation.index(token)
+        for token in ordered_reservation_tokens
+    ]
+    assert positions == sorted(positions)
+
+    assert normalized_compact.count("reserve_warp_output(") == 2
+    ordered_compact_tokens = (
+        "compact_counters[thread_index] = 0",
+        "asc_syncthreads()",
+        "for (int32_t shard_offset = thread_index",
+        "const uint32_t warp_greater_rank = reserve_warp_output( greater, compact_counters + kCompactGreater)",
+        "const uint32_t warp_equal_rank = reserve_warp_output( equal, compact_counters + kCompactEqual)",
+        "if (greater)",
+        "else if (equal)",
+    )
+    positions = [normalized_compact.index(token) for token in ordered_compact_tokens]
+    assert positions == sorted(positions)
+
+    equal_branch = normalized_compact[normalized_compact.index("else if (equal)"):]
+    ordered_equal_tokens = (
+        "const uint32_t equal_rank = shard_equal_offset + warp_equal_rank",
+        "if (equal_rank < equal_count_needed)",
+        "const uint32_t output_slot = total_greater_count + equal_rank",
+        "output[row_offset + output_slot] = context_index",
+    )
+    positions = [equal_branch.index(token) for token in ordered_equal_tokens]
+    assert positions == sorted(positions)
+    assert compact.count("asc_syncthreads()") == 1
+    for obsolete in (
+        "scan_a",
+        "scan_b",
+        "scan_source",
+        "scan_destination",
+        "packed_inclusive_counts",
+        "offset <<= 1",
+    ):
+        assert obsolete not in compact
 
 
 def test_host_is_acl_runtime_only_and_uses_score_set_oracle():
@@ -342,6 +421,15 @@ def test_docs_freeze_measurement_and_evidence_contract():
         "actual-distributed-20260813-200615",
         "28.629",
         "28.742001",
+        "18.8459995",
+        "8.0840%",
+        "10/10",
+        "18.874001",
+        "0.7204%",
+        "1/5",
+        "893b6406afc1a6384ab6fae8a2247d03cc230d87",
+        "dsa-topk-warp-atomic-evidence-20260817.tar.gz",
+        "22e4ce773d40559262426f3236cddc51b811adb7344f5226666c44b09f83d3e0",
     ):
         assert token in combined
     assert "TODO" not in read_required("README.md")

@@ -7,14 +7,16 @@ kernel launch and use only ACL Runtime on the host. Output ordering is
 intentionally not compared, and equal-score index identity is intentionally not
 compared.
 
-The current SIMT executable includes three retained example-only fixed-shape
+The current SIMT executable includes four retained example-only fixed-shape
 optimizations. Each of its 64 blocks copies one 2,048-element BF16 shard from
 GM to a dedicated 4 KiB UB tile once; the high-byte histogram, low-byte
 histogram, and compact VFs all reuse it. The four reducer blocks also stage
 their 16 x 256 high and low histogram matrices in UB, and the high-byte
-threshold search uses 16 parallel groups of 16 bins. A fourth per-warp-private
-histogram candidate was implemented and validated but is not retained because
-it regressed device task time. Production SIMT v2 is not modified.
+threshold search uses 16 parallel groups of 16 bins. The compact VF uses
+warp-level ballot and UB atomic output reservations instead of a block-wide
+ping-pong prefix scan. A separate per-warp-private histogram candidate was
+implemented and validated but is not retained because it regressed device task
+time. Production SIMT v2 is not modified.
 
 Build and collect with:
 
@@ -28,6 +30,64 @@ five independent `msopprof` `Default` collections per implementation. It uses
 only the single target row's `Task Duration`, requires launch-count one,
 production block dimensions (vLLM-Ascend 4, SIMT v2 64), and frequency parity,
 and retains every raw collection below `evidence/`.
+
+## Warp-atomic compact evidence
+
+Collected on 2026-08-17 on `root@121.41.199.170:20002`, using Ascend 950PR
+device 0, CANN 9.2.0, Bisheng clang 15.0.5, `dav-3510`, and `msopprof` 26.2.0.
+The baseline is the retained `4446005` stack. The accepted candidate changes
+only its compact VF: it replaces the ten-round 1,024-thread ping-pong scan with
+two block-private UB counters, warp ballots, one UB atomic reservation per
+nonempty warp/category, and a lane-zero shuffle broadcast. It classifies and
+writes each 2,048-element shard in one pass and retains the baseline 8 KiB
+compact UB request.
+
+The mechanism is adapted from the warp-compaction variant in PyTorch
+`aten/src/ATen/native/cuda/TensorTopK.cu` at commit
+`893b6406afc1a6384ab6fae8a2247d03cc230d87`. That code is under PyTorch's ROCm
+branch; the NVIDIA CUDA branch in the same file still uses
+`exclusiveBinaryPrefixScan`.
+
+- Profiler mode: ten alternating-order baseline/candidate pairs,
+  `--aic-metrics=Default`, unmodified warmup (reported as 5),
+  `--launch-count=1`, and no `--kernel-name`
+- Launch and frequency parity: every accepted row reports 64 blocks and
+  current/rated `1650/1650 MHz`
+- Correctness: both direct executions and all 20 profiled executions passed the
+  four-row score-set oracle
+- Baseline source/executable SHA-256:
+  `0b2a13a2feac2fa2d353a23e17a1570b22de7f9602e8a0d8d951ab8365e7cf51` /
+  `4339779baa096350ba9a7f96be8e096e6cd596e0e1f3c1dbec931d11984b4a42`
+- Accepted source/executable SHA-256:
+  `a98d73005eac24cf6f7bd0be3dc13677c3819eb80e8e77cd68c285971f032731` /
+  `d4d9da5ae54792f1c629b5ef470888503a540914777b38760fa144e8a19c9025`
+
+| Variant | Ten Task Duration samples (us) | Median (us) | Min (us) | Max (us) | Pair wins |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Block-scan baseline | 20.552, 20.587999, 20.608, 20.308001, 20.840, 20.455, 20.027, 20.632, 20.062, 20.398001 | 20.5035 | 20.027 | 20.840 | 0/10 |
+| Warp-atomic compact | 18.686001, 18.677999, 18.868, 18.959, 18.885, 18.691, 19.278, 19.134001, 18.736, 18.823999 | 18.8459995 | 18.677999 | 19.278 | 10/10 |
+
+The accepted candidate reduced median task duration by `8.0840%` and won all
+ten pairs.
+
+After that result, a separate candidate reduced total dynamic UB from about
+44 KiB to 37.125 KiB by removing the now-unused 8 KiB scan reservation. It was
+correct but did not improve the accepted algorithm:
+
+| Variant | Five Task Duration samples (us) | Median (us) | Pair wins |
+| --- | --- | ---: | ---: |
+| Accepted 8 KiB reservation | 18.495001, 18.739, 19.139999, 18.930, 18.719 | 18.739 | 4/5 |
+| Reduced scratch candidate | 18.663, 18.993, 18.849001, 19.115, 18.874001 | 18.874001 | 1/5 |
+
+The reduced-scratch candidate regressed the median by `0.7204%` and is not
+retained. Its source/executable SHA-256 pair is
+`187d6d7ce2668e1b4773811283718d2d884a1bebabf07c44d161bfb8121741e7` /
+`caf119c71e56f3ab40781ab70b4b35935a764f99bc79a4010b826d5a5d306e74`.
+
+Raw evidence remains at remote
+`/tmp/cannbench-topk-warp-atomic-Qyq59K`. The 1,016-entry archive is available
+on both hosts at `/tmp/dsa-topk-warp-atomic-evidence-20260817.tar.gz`, SHA-256
+`22e4ce773d40559262426f3236cddc51b811adb7344f5226666c44b09f83d3e0`.
 
 ## Rejected four-block SIMT experiment
 

@@ -42,12 +42,12 @@ this distributed path. The five production stages, their algorithms, and four
 device-wide synchronization points are preserved under a unique standalone
 64-block distributed kernel symbol.
 
-The example applies three retained fixed-shape optimizations on top of that
+The example applies four retained fixed-shape optimizations on top of that
 baseline:
 
 1. Each block issues one 4 KiB C API MTE2 copy for its contiguous 2,048 BF16
-   score shard. The high-byte histogram, low-byte histogram, and both compact
-   scans reuse that dedicated UB tile.
+   score shard. The high-byte histogram, low-byte histogram, and compact pass
+   reuse that dedicated UB tile.
 2. Each of the four reducer blocks issues one 16 KiB GM-to-UB copy for its
    complete 16 x 256 high histogram matrix and, after the low producer stage,
    one 16 KiB copy for the corresponding low histogram matrix. Both reducers
@@ -55,13 +55,18 @@ baseline:
 3. High-byte selection computes 16 group totals in parallel. The owning group
    scans only its 16 bins in descending order instead of one thread scanning
    all 256 bins.
+4. Compact classifies each score once. Each warp uses ballot and population
+   count, lane zero atomically reserves a contiguous greater/equal range in
+   block-private UB, and a shuffle broadcasts the returned start. This removes
+   the ten-round block-wide ping-pong scan and all but the counter-initialization
+   block barrier from the compact VF.
 
 Score, high-histogram, low-histogram, and shared stage-scratch UB regions do not
 overlap. Kernel launch geometry, five VFs, and four `SyncAll` boundaries remain
 unchanged. The retained standalone candidate source SHA-256 is
-`0b2a13a2feac2fa2d353a23e17a1570b22de7f9602e8a0d8d951ab8365e7cf51`.
+`a98d73005eac24cf6f7bd0be3dc13677c3819eb80e8e77cd68c285971f032731`.
 
-A fourth candidate allocated 32 private 256-bin histograms per block, updated
+An earlier candidate allocated 32 private 256-bin histograms per block, updated
 the owning warp's bins, and reduced the 32 counters for every final bin in both
 histogram stages. It was correct but increased median task duration by
 `12.8417%` in five alternating pairs, so its source-contract test and kernel
@@ -112,3 +117,45 @@ path. Four-block ownership requires a materially different inner
 implementation and a written bottleneck hypothesis before it may be tested
 again, such as warp-atomic output reservation that removes per-chunk block
 synchronization.
+
+## Warp-atomic compact optimization
+
+The retained optimization applies only to the 64-block
+distributed SIMT v2 path. It preserves the fixed shape, one 2,048-element
+score shard per block, single GM-to-UB score copy, radix histograms, reducer
+stages, launch geometry, and output oracle. Only the final compact VF changes.
+
+The baseline compact packs each thread's greater/equal counts and performs a
+ten-round 1,024-thread ping-pong prefix scan. Every round has two block
+barriers. The candidate instead processes the shard's two 1,024-element
+iterations with warp-local ballot and population count. Lane zero reserves one
+contiguous greater or equal output range for the warp with a UB atomic add,
+then broadcasts the returned starting offset with a warp shuffle. Each selected
+lane adds its ballot-derived lane prefix to that start. Greater and equal
+reservations use separate block-private UB counters; the existing per-shard
+global offsets keep blocks' output ranges disjoint. Output ordering and the
+identity of threshold-equal indices remain outside the contract.
+
+This mechanism is adapted from the warp-compaction variant in PyTorch
+`aten/src/ATen/native/cuda/TensorTopK.cu` at commit
+`893b6406afc1a6384ab6fae8a2247d03cc230d87`. That variant is guarded by
+PyTorch's ROCm branch; the NVIDIA CUDA branch in the same source still uses
+`exclusiveBinaryPrefixScan`. The experiment therefore claims reuse of the
+warp-reservation mechanism, not migration of PyTorch's current NVIDIA CUDA
+default path.
+
+The algorithm change was measured without reducing the baseline 8 KiB compact
+UB request. In ten alternating-order `--aic-metrics=Default` pairs on Ascend
+950PR, the block-scan baseline median was `20.5035 us` and the warp-atomic
+candidate median was `18.8459995 us`. The candidate reduced task duration by
+`8.0840%`, won `10/10` pairs, and passed every direct and profiled score-set
+oracle. All accepted rows used unmodified profiler warmup, `--launch-count=1`,
+no `--kernel-name`, 64 blocks, and current/rated `1650/1650 MHz`.
+
+Removing the unused scan reservation was then measured independently. Reducing
+total dynamic UB from about 44 KiB to 37.125 KiB changed the median from
+`18.739 us` to `18.874001 us`, a `0.7204%` regression, and won only `1/5`
+pairs. That capacity reduction is rejected, so the retained warp-atomic source
+keeps the original 8 KiB compact UB request. Full raw evidence is archived at
+`/tmp/dsa-topk-warp-atomic-evidence-20260817.tar.gz`, SHA-256
+`22e4ce773d40559262426f3236cddc51b811adb7344f5226666c44b09f83d3e0`.
