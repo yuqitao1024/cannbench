@@ -33,14 +33,40 @@ trunk merge/gather algorithm. The wrapper only converts direct BF16 input to
 the sortable key representation that the upstream score producer supplies and
 provides the standalone kernel/host boundary.
 
-The SIMT migration comes from
+The SIMT algorithm baseline comes from
 `src/cannbench/operators/builtin/lightning_indexer/simt/v2/aten_dsa_lightning_indexer_v2/csrc/simt/lightning_indexer_decode_distributed_topk_bfloat16.asc`,
 SHA-256 `c33332a87b88b9c7e0b76fca16a10c7cdd7545ff54cf8c97aafbf6b2604f553e`.
 The V3.2 dispatch condition is
 `batch_size == 2 && query_count == 2 && context_shard_count == 16`; it selects
-this distributed path. The five production stages and four device-wide
-synchronization points are preserved under a unique standalone 64-block
-distributed kernel symbol.
+this distributed path. The five production stages, their algorithms, and four
+device-wide synchronization points are preserved under a unique standalone
+64-block distributed kernel symbol.
+
+The example applies three retained fixed-shape optimizations on top of that
+baseline:
+
+1. Each block issues one 4 KiB C API MTE2 copy for its contiguous 2,048 BF16
+   score shard. The high-byte histogram, low-byte histogram, and both compact
+   scans reuse that dedicated UB tile.
+2. Each of the four reducer blocks issues one 16 KiB GM-to-UB copy for its
+   complete 16 x 256 high histogram matrix and, after the low producer stage,
+   one 16 KiB copy for the corresponding low histogram matrix. Both reducers
+   consume the UB matrices.
+3. High-byte selection computes 16 group totals in parallel. The owning group
+   scans only its 16 bins in descending order instead of one thread scanning
+   all 256 bins.
+
+Score, high-histogram, low-histogram, and shared stage-scratch UB regions do not
+overlap. Kernel launch geometry, five VFs, and four `SyncAll` boundaries remain
+unchanged. The retained standalone candidate source SHA-256 is
+`0b2a13a2feac2fa2d353a23e17a1570b22de7f9602e8a0d8d951ab8365e7cf51`.
+
+A fourth candidate allocated 32 private 256-bin histograms per block, updated
+the owning warp's bins, and reduced the 32 counters for every final bin in both
+histogram stages. It was correct but increased median task duration by
+`12.8417%` in five alternating pairs, so its source-contract test and kernel
+changes are deliberately absent from the retained example. All changes are
+example-only; the production SIMT v2 source remains unchanged.
 
 ## Measurement
 
@@ -52,3 +78,10 @@ are outside the boundary. Current/rated frequency parity is mandatory, each
 implementation must match its production launch dimension (4 and 64), and all
 raw profiler data is retained. Report all samples, median, min, max, and the
 ratio of vLLM-Ascend median to SIMT v2 median.
+
+For optimization retention, compare each candidate with the currently retained
+stack using alternating-order pairs under the same constraints. Reject a
+correct candidate when it does not improve the measured device boundary. The
+final retained combination must also be compared with commit `887eb3d` using
+ten alternating-order pairs, with source/executable hashes and every raw
+OPPROF tree preserved outside the repository.

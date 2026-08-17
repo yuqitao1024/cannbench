@@ -20,6 +20,12 @@ def normalize_whitespace(text: str) -> str:
     return " ".join(text.split())
 
 
+def function_source(source: str, name: str, next_name: str) -> str:
+    start = source.index(name)
+    end = source.index(next_name, start)
+    return source[start:end]
+
+
 def test_exact_deliverables_and_two_targets():
     expected = {
         "CMakeLists.txt",
@@ -103,6 +109,82 @@ def test_sources_freeze_exact_upstream_provenance_and_algorithms():
     assert "decode_radix_topk" not in simt
     assert simt.index("} // namespace") < simt.index(
         "__global__ __vector__ void dsa_decode_topk_simt_v2_kernel")
+
+
+def test_simt_score_consumers_reuse_one_dma_staged_ub_shard():
+    simt = read_required("simt_v2_topk.asc")
+    high_histogram = function_source(
+        simt,
+        "lightning_indexer_decode_distributed_high_histogram_bfloat16_v2_vf",
+        "lightning_indexer_decode_distributed_select_high_bfloat16_v2_vf",
+    )
+    low_histogram = function_source(
+        simt,
+        "lightning_indexer_decode_distributed_low_histogram_bfloat16_v2_vf",
+        "lightning_indexer_decode_distributed_select_low_offsets_bfloat16_v2_vf",
+    )
+    compact = function_source(
+        simt,
+        "lightning_indexer_decode_distributed_compact_bfloat16_v2_vf",
+        "} // namespace",
+    )
+
+    assert '#include "c_api/asc_simd.h"' in simt
+    assert simt.count("mutable_gm_ptr(reduced_scores + score_base)") == 1
+    assert "kScoreShardUbufBytes" in simt
+    assert "kTotalUbufBytes" in simt
+    for score_consumer in (high_histogram, low_histogram, compact):
+        assert "__ubuf__ const uint16_t* score_shard" in score_consumer
+        assert "score_shard[shard_offset]" in score_consumer
+        assert "reduced_score_bits[" not in score_consumer
+    assert compact.count("score_shard[shard_offset]") == 2
+
+
+def test_simt_reducers_stage_high_and_low_histograms_in_ub():
+    simt = read_required("simt_v2_topk.asc")
+    select_high = function_source(
+        simt,
+        "lightning_indexer_decode_distributed_select_high_bfloat16_v2_vf",
+        "lightning_indexer_decode_distributed_low_histogram_bfloat16_v2_vf",
+    )
+    select_low = function_source(
+        simt,
+        "lightning_indexer_decode_distributed_select_low_offsets_bfloat16_v2_vf",
+        "lightning_indexer_decode_distributed_compact_bfloat16_v2_vf",
+    )
+    kernel = simt[simt.index("__global__ __vector__ void dsa_decode_topk_simt_v2_kernel"):]
+
+    assert "kHistogramShardWords" in simt
+    assert "kHistogramShardUbufBytes" in simt
+    assert simt.count("asc_copy_gm2ub_align(") == 3
+    assert "__ubuf__ const uint32_t* high_histogram_shards" in select_high
+    assert "__gm__ const uint32_t* high_histogram" not in select_high
+    for token in (
+        "__ubuf__ const uint32_t* high_histogram_shards",
+        "__ubuf__ const uint32_t* low_histogram_shards",
+    ):
+        assert token in select_low
+    assert "__gm__ const uint32_t* high_histogram" not in select_low
+    assert "__gm__ const uint32_t* low_histogram" not in select_low
+    assert "if (block_index < row_count)" in kernel
+    assert "high_histogram_shards" in kernel
+    assert "low_histogram_shards" in kernel
+
+
+def test_simt_high_threshold_scan_uses_parallel_bin_groups():
+    simt = read_required("simt_v2_topk.asc")
+    select_high = function_source(
+        simt,
+        "lightning_indexer_decode_distributed_select_high_bfloat16_v2_vf",
+        "lightning_indexer_decode_distributed_low_histogram_bfloat16_v2_vf",
+    )
+
+    assert "if (bucket == 0)" not in select_high
+    assert "threshold_group_counts" in select_high
+    assert "bucket < kThresholdGroupCount" in select_high
+    assert "bucket * kThresholdBucketsPerGroup" in select_high
+    assert "higher_group = bucket + 1" in select_high
+    assert "group_bucket_begin + kThresholdBucketsPerGroup - 1" in select_high
 
 
 def test_host_is_acl_runtime_only_and_uses_score_set_oracle():
