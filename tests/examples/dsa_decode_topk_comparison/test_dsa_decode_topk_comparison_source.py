@@ -212,20 +212,136 @@ def test_simt_low_reducer_uses_warp_shuffle_scan_for_shard_offsets():
     assert positions == sorted(positions)
 
 
-def test_simt_high_threshold_scan_uses_parallel_bin_groups():
+def test_simt_histogram_producers_emit_inclusive_suffix_counts():
+    simt = read_required("simt_v2_topk.asc")
+    suffix_scan = function_source(
+        simt,
+        "histogram_to_inclusive_suffix",
+        "lightning_indexer_decode_distributed_high_histogram_bfloat16_v2_vf",
+    )
+    assert "kHistogramWarpCount = 8" in simt
+    assert "asc_shfl_down" in suffix_scan
+    assert "shuffle_delta <<= 1" in suffix_scan
+    assert "warp_suffix_totals" in suffix_scan
+    assert simt.count("histogram_to_inclusive_suffix(local_histogram)") == 2
+
+
+def test_simt_suffix_results_stay_in_registers_until_gm_publication():
+    simt = read_required("simt_v2_topk.asc")
+    suffix_scan = function_source(
+        simt,
+        "__simt_callee__ inline",
+        "lightning_indexer_decode_distributed_high_histogram_bfloat16_v2_vf",
+    )
+    high_histogram = function_source(
+        simt,
+        "lightning_indexer_decode_distributed_high_histogram_bfloat16_v2_vf",
+        "lightning_indexer_decode_distributed_select_high_bfloat16_v2_vf",
+    )
+    low_histogram = function_source(
+        simt,
+        "lightning_indexer_decode_distributed_low_histogram_bfloat16_v2_vf",
+        "lightning_indexer_decode_distributed_select_low_offsets_bfloat16_v2_vf",
+    )
+
+    assert "inline uint32_t histogram_to_inclusive_suffix" in suffix_scan
+    assert suffix_scan.count("asc_syncthreads()") == 1
+    assert "histogram[thread_index] = suffix_count" not in suffix_scan
+    assert "histogram[thread_index] += higher_warp_count" not in suffix_scan
+    assert "suffix_count += higher_warp_count" in suffix_scan
+    assert "return suffix_count" in suffix_scan
+    for producer in (high_histogram, low_histogram):
+        normalized = normalize_whitespace(producer)
+        assert (
+            "const uint32_t suffix_count = "
+            "histogram_to_inclusive_suffix(local_histogram)"
+        ) in normalized
+        assert (
+            "histogram[histogram_base + thread_index] = suffix_count"
+        ) in normalized
+
+
+def test_simt_reducers_exchange_only_warp_boundary_counts():
+    simt = read_required("simt_v2_topk.asc")
+    assert "adjacent_suffix_greater_count" in simt
+    exchange = function_source(
+        simt,
+        "__simt_callee__ inline uint32_t adjacent_suffix_greater_count",
+        "lightning_indexer_decode_distributed_select_high_bfloat16_v2_vf",
+    )
+    select_high = function_source(
+        simt,
+        "lightning_indexer_decode_distributed_select_high_bfloat16_v2_vf",
+        "lightning_indexer_decode_distributed_low_histogram_bfloat16_v2_vf",
+    )
+    select_low = function_source(
+        simt,
+        "lightning_indexer_decode_distributed_select_low_offsets_bfloat16_v2_vf",
+        "lightning_indexer_decode_distributed_compact_bfloat16_v2_vf",
+    )
+
+    normalized_exchange = normalize_whitespace(exchange)
+    for token in (
+        "uint32_t adjacent_suffix_greater_count(",
+        "uint32_t inclusive_count",
+        "__ubuf__ uint32_t* warp_first_counts",
+        "const uint32_t next_lane_count = asc_shfl_down(",
+        "inclusive_count, 1, kWarpSize",
+        "if (lane_index == 0)",
+        "warp_first_counts[warp_index] = inclusive_count",
+        "asc_syncthreads()",
+        "if (thread_index + 1 >= kRadixBins)",
+        "if (lane_index + 1 < kWarpSize)",
+        "return next_lane_count",
+        "return warp_first_counts[warp_index + 1]",
+    ):
+        assert token in normalized_exchange
+    assert exchange.count("asc_syncthreads()") == 1
+
+    for reducer in (select_high, select_low):
+        normalized = normalize_whitespace(reducer)
+        assert "const uint32_t inclusive_count = bucket_count" in normalized
+        assert (
+            "adjacent_suffix_greater_count( "
+            "inclusive_count, combined_histogram)"
+        ) in normalized
+        assert "combined_histogram[bucket] = bucket_count" not in reducer
+        assert "combined_histogram[thread_index] = bucket_count" not in reducer
+        assert "combined_histogram[bucket + 1]" not in reducer
+        assert "combined_histogram[thread_index + 1]" not in reducer
+
+    assert (
+        "shard_greater_counts = combined_histogram + kHistogramWords"
+    ) in normalize_whitespace(select_low)
+
+
+def test_simt_reducers_query_suffix_histogram_positions():
     simt = read_required("simt_v2_topk.asc")
     select_high = function_source(
         simt,
         "lightning_indexer_decode_distributed_select_high_bfloat16_v2_vf",
         "lightning_indexer_decode_distributed_low_histogram_bfloat16_v2_vf",
     )
-
-    assert "if (bucket == 0)" not in select_high
-    assert "threshold_group_counts" in select_high
-    assert "bucket < kThresholdGroupCount" in select_high
-    assert "bucket * kThresholdBucketsPerGroup" in select_high
-    assert "higher_group = bucket + 1" in select_high
-    assert "group_bucket_begin + kThresholdBucketsPerGroup - 1" in select_high
+    select_low = function_source(
+        simt,
+        "lightning_indexer_decode_distributed_select_low_offsets_bfloat16_v2_vf",
+        "lightning_indexer_decode_distributed_compact_bfloat16_v2_vf",
+    )
+    for reducer in (select_high, select_low):
+        assert "inclusive_count" in reducer
+        assert "greater_count" in reducer
+        assert "threshold_group_counts" not in reducer
+        assert "higher_group" not in reducer
+        assert "group_bucket_begin" not in reducer
+    for token in (
+        "selected_high + 1",
+        "selected_low + 1",
+        "high_greater_count",
+        "low_greater_count",
+        "inclusive_low_count - low_greater_count",
+    ):
+        assert token in select_low
+    assert "partial_group" not in select_low
 
 
 def test_simt_compact_uses_warp_atomic_reservations_without_block_scan():
@@ -479,6 +595,45 @@ def test_docs_freeze_measurement_and_evidence_contract():
         "c22f7c34b400978fe8db224148106d8662a446dd4cc150445f1ec583002b3b3c",
         "dsa-topk-followup-evidence-20260817.tar.gz",
         "4bbe1350491d3be7218345a62ec4dffc36a137916c77fa701d9e0416bf417619",
+        "14.6075",
+        "19.3824%",
+        "df9424a9399b274390d638eff77208d6e9e25c02357480cda950ecd6383a5f1c",
+        "a6d7b98bfc9c66187c03b95adeb18255a9cd077da503bcb68bea6b576bf8b689",
+        "dsa-topk-suffix-histogram-evidence-20260817.tar.gz",
+        "65e83bf9501c51a400a4203ffe6d50acffaa6799b7a06d78dcc6955ba9481ba2",
+        "14.328",
+        "14.495",
+        "0d2afd39acab8106b37acf86e15966783b0440507487df84de48ffaacc0da88f",
+        "3ed946705d333e44aff0f28f80b2fc5f805b3ff758d6e888580237d5035df880",
+        "dsa-topk-register-suffix-evidence-20260817.tar.gz",
+        "1fec59bd6b0827ce3621a540bc919917bb49289324c5d8c18e29a5e6639e23a9",
+        "14.8800",
+        "14.7055",
+        "f2bc5f75635d99425839b22d43760b041fb2fa4dbca1b9cdd71d1d0041c2c2d7",
+        "d8c9f1bdb008b47ed4aa5928af3a1fddf03680b72c72957a6b399409de244cfa",
+        "dsa-topk-striped-histogram-evidence-20260817.tar.gz",
+        "c4536899da8ba087bc32b19599215562961c7c5719fba41027f539ff9c29f375",
+        "14.2915",
+        "14.1825",
+        "-0.1795 us",
+        "0.7627%",
+        "6/10",
+        "d0f5821eeb739d00c2ab783c0bc19a401a1500e3b5918746b0c8d07ded13a0ae",
+        "ad85d89f66cddb256cb1dbcf1a58956c8e48c3fa89d6c3f66e1420a7a0fdb418",
+        "dsa-topk-adjacent-bin-reducer-evidence-20260817.tar.gz",
+        "7bce8463a050432810c8444245d1d25e9d03753dce16e738918c4eb2dfe3eff1",
+        "16.4770005",
+        "+2.3805 us",
+        "14.916",
+        "+0.7945 us",
+        "e8534aa00b926657777f31a0785dc044b920f6904f6504a176d6d6382238897e",
+        "245c10662d3b25ad4ee1d18deec8c5b19545b3caafd8b93e9c10b6746999b776",
+        "0476d46fcdba931fe6e7ea87f562c941ef9d2f065eec47763b400971325c0627",
+        "f91f187785d7db26941fc6821fa2a9f0dd55f7f05b24a3972994fc5ae888219f",
+        "344182237997e08d8826fa931c4d31b760a2da4d0954c43a3f84cc0dceb02844",
+        "cc6c9ce98417ccf65bc75d027806b8672d8da62d5a1d1ff57c3e17c545e75c74",
+        "dsa-topk-three-directions-evidence-20260817.tar.gz",
+        "007125808dee427f0257004de521fd23510a64edf4acc3f70ea1411588ca1e74",
     ):
         assert token in combined
     assert "TODO" not in read_required("README.md")

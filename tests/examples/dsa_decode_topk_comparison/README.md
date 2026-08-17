@@ -7,18 +7,26 @@ kernel launch and use only ACL Runtime on the host. Output ordering is
 intentionally not compared, and equal-score index identity is intentionally not
 compared.
 
-The current SIMT executable includes five retained example-only fixed-shape
+The current SIMT executable includes seven retained example-only fixed-shape
 optimizations. Each of its 64 blocks copies one 2,048-element BF16 shard from
 GM to a dedicated 4 KiB UB tile once; the high-byte histogram, low-byte
 histogram, and compact VFs all reuse it. The four reducer blocks also stage
-their 16 x 256 high and low histogram matrices in UB, and the high-byte
-threshold search uses 16 parallel groups of 16 bins. The compact VF uses
-warp-level ballot and UB atomic output reservations instead of a block-wide
-ping-pong prefix scan. The low reducer uses a width-16 warp shuffle scan for
-shard output offsets. Separate per-warp-private histogram and follow-up tuning
-candidates were implemented and validated but are not retained when they
-regressed or produced unstable device task time. Production SIMT v2 is not
-modified.
+their 16 x 256 high and low histogram matrices in UB. Each histogram producer
+converts its 256 raw counters to inclusive suffix counts with an eight-warp
+hierarchical scan. Each suffix result remains in a register across the
+warp-total merge and is written directly to GM; the following publication
+barrier replaces a second helper barrier and final UB round trip. The reducers
+keep their combined inclusive counts in registers, exchange adjacent lanes with
+a warp shuffle, and use only eight UB words at warp boundaries. They select
+thresholds from adjacent suffix positions, and the low reducer obtains each
+shard's greater/equal counts from
+constant-position suffix reads instead of scanning both matrices again. The
+compact VF uses warp-level ballot and UB atomic output reservations instead of
+a block-wide ping-pong prefix scan. The low reducer uses a width-16 warp
+shuffle scan for shard output offsets. Separate per-warp-private histogram and
+follow-up tuning candidates were implemented and validated but are not retained
+when they regressed or produced unstable device task time. Production SIMT v2
+is not modified.
 
 Build and collect with:
 
@@ -140,6 +148,205 @@ Raw evidence remains at remote `/tmp/cannbench-topk-followup-hWn76l`; its
 2,286-entry archive is available on both hosts at
 `/tmp/dsa-topk-followup-evidence-20260817.tar.gz`, SHA-256
 `4bbe1350491d3be7218345a62ec4dffc36a137916c77fa701d9e0416bf417619`.
+
+## Inclusive suffix histogram evidence
+
+Stage-prefix attribution on 2026-08-17 identified the low threshold/offset
+boundary as the largest separable post-producer stage. The retained candidate
+changes both shard histogram workspaces from raw bin counts to inclusive suffix
+counts without changing their size. Each producer performs a 256-bin scan in
+eight warps and writes the same 16 x 256 matrix shape. High and low reducers
+then select their threshold where `suffix[b]` reaches the rank while
+`suffix[b + 1]` does not. The low reducer also reads each shard's high-greater,
+low-greater, and equal counts from those two adjacent suffix positions. This
+removes its full high/low bin rescan and partial-group reduction.
+
+The frozen baseline is commit `4b99b0a`. Both sources retain one kernel launch,
+64 blocks, five VF calls, four `SyncAll` boundaries, the existing GM workspace,
+and the warp-atomic compact implementation. Ten alternating-order pairs used
+unmodified profiler warmup, `--aic-metrics=Default`, `--launch-count=1`, no
+`--kernel-name`, and current/rated `1650/1650 MHz`. Direct runs and all 20
+profiled runs passed the four-row score-set oracle.
+
+| Variant | Ten Task Duration samples (us) | Median (us) | Min (us) | Max (us) | Pair wins |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Raw histogram baseline | 18.271, 18.100, 18.259001, 17.979, 18.546, 18.132999, 18.106001, 18.242001, 18.002001, 18.083 | 18.1195 | 17.979 | 18.546 | 0/10 |
+| Inclusive suffix histogram | 14.370, 14.925, 15.250, 14.185, 14.833, 14.304, 14.811, 14.547, 14.668, 14.313 | 14.6075 | 14.185 | 15.250 | 10/10 |
+
+The retained suffix candidate reduced median task duration by `19.3824%` and
+won all ten pairs. Its source/executable SHA-256 pair is
+`df9424a9399b274390d638eff77208d6e9e25c02357480cda950ecd6383a5f1c` /
+`a6d7b98bfc9c66187c03b95adeb18255a9cd077da503bcb68bea6b576bf8b689`.
+Raw evidence remains at remote
+`/tmp/dsa-topk-suffix-histogram-exp-9PYzom`; the archive is available on both
+hosts at `/tmp/dsa-topk-suffix-histogram-evidence-20260817.tar.gz`, SHA-256
+`65e83bf9501c51a400a4203ffe6d50acffaa6799b7a06d78dcc6955ba9481ba2`.
+
+## Post-suffix stage attribution and rejected warp-offset broadcast
+
+The five-prefix attribution was repeated after retaining suffix histograms,
+because the earlier raw-histogram attribution no longer represented the
+kernel. Ten rotated-order Default rounds produced a stage-5 median of
+`14.603 us`, consistent with the standalone retained result. All 50 rows used
+64 blocks at current/rated `1650/1650 MHz` and passed the appropriate stage
+oracle.
+
+| Cumulative boundary | Median (us) | Increment from prior median (us) | Paired increment median (us) |
+| --- | ---: | ---: | ---: |
+| Input DMA + high histogram + publication + `SyncAll` | 6.188 | 6.188 | n/a |
+| High threshold | 7.423 | 1.235 | 1.183 |
+| Low histogram | 10.614 | 3.191 | 3.103 |
+| Low threshold and offsets | 12.498 | 1.884 | 1.8095 |
+| Compact | 14.603 | 2.105 | 2.074 |
+
+The next experiment changed only the second half of
+`histogram_to_inclusive_suffix`. Instead of all 32 lanes in each warp summing
+higher-warp totals, lane zero performed that loop and broadcast the result with
+`asc_shfl`. This reduced the source-level UB reads but regressed device time,
+so it is not retained.
+
+| Variant | Ten Task Duration samples (us) | Median (us) | Min (us) | Max (us) | Pair wins |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Retained per-lane accumulation | 14.613, 14.360, 14.710, 14.652, 14.808, 14.290, 14.536, 14.328, 14.854, 14.670 | 14.6325 | 14.290 | 14.854 | 8/10 |
+| Rejected lane-zero broadcast | 15.353, 15.189, 14.854, 15.350, 14.491, 15.144, 14.579, 15.369, 14.815, 15.225 | 15.1665 | 14.491 | 15.369 | 2/10 |
+
+The rejected candidate was `3.6494%` slower, with a paired candidate-minus-
+baseline median of `+0.6265 us`. Baseline/candidate source SHA-256 values are
+`df9424a9399b274390d638eff77208d6e9e25c02357480cda950ecd6383a5f1c` /
+`4f331ecc3a5fd88393483d65d035f8cd1f6ae7e302977e50a5312113539f9ff8`;
+binary SHA-256 values are
+`224c836088f990c046bd3911b0b78acd62cf62d8124dd827658c856323261124` /
+`8400d431d77702b7c9393c9a8c97ea0e233553ea01d70b1f86c45cf0547357c6`.
+Do not retry this exact lane-zero loop plus warp-broadcast transformation
+without a materially different scan or compiler hypothesis.
+
+Raw stage evidence remains at remote
+`/tmp/dsa-topk-suffix-stage-exp-PxqTcF` and is archived on both hosts at
+`/tmp/dsa-topk-suffix-stage-evidence-20260817.tar.gz`, SHA-256
+`a6753b8a974f9b30d7192e38ddbcf3ba422adceaaf6dca4e994b2b6734eaeae3`.
+Raw A/B evidence remains at remote `/tmp/dsa-topk-warp-offset-exp-f8hdY6`
+and is archived on both hosts at
+`/tmp/dsa-topk-warp-offset-evidence-20260817.tar.gz`, SHA-256
+`e37bedbca78308e2b8a10ab897a94153dab068ff4b122c8eb9916de07c913021`.
+
+## Register-resident suffix evidence
+
+The retained follow-up keeps each thread's warp-local suffix in a register,
+adds the existing per-thread higher-warp total after the required warp-total
+barrier, and returns the final value directly to the high/low producer's GM
+store. It removes the two final UB accesses per bin and the helper's second
+block barrier. The immediately following `publish_gm_for_next_stage()` barrier
+still orders every GM store before thread zero performs DCCI publication. No
+VF call, `SyncAll`, workspace, histogram type, reducer, or compact logic
+changes.
+
+Two independent ten-pair Default rounds used the same frozen binaries,
+alternating order, unmodified profiler warmup, `--launch-count=1`, no
+`--kernel-name`, 64 blocks, and current/rated `1650/1650 MHz`. Both direct
+executions and all 40 profiled executions passed the four-row score-set oracle.
+
+| Round and variant | Ten Task Duration samples (us) | Median (us) | Pair wins |
+| --- | --- | ---: | ---: |
+| Round 1 baseline | 14.506, 14.690, 14.404, 14.704, 14.345, 14.403, 14.578, 14.561, 14.447, 14.645 | 14.5335 | 2/10 |
+| Round 1 register suffix | 14.443, 14.339, 14.647, 14.235, 14.227, 14.620, 14.139, 14.055, 14.336, 14.320 | 14.3280 | 8/10 |
+| Round 2 baseline | 14.872, 14.795, 14.532, 16.587, 14.638, 14.477, 14.826, 14.703, 14.742, 14.497 | 14.7225 | 3/10 plus one tie |
+| Round 2 register suffix | 15.108, 14.482, 14.532, 14.256, 14.325, 14.259, 14.308, 14.508, 14.600, 14.631 | 14.4950 | 7/10 plus one tie |
+
+The two rounds reduced their medians by `1.4140%` and `1.5453%`; paired delta
+medians were `-0.2215 us` and `-0.2065 us`. Across all 20 pairs, baseline and
+candidate medians were `14.6080 us` and `14.3375 us`, a `1.8517%` reduction,
+with `15/20` candidate wins and one tie. The candidate is retained because both
+independent rounds passed the median and paired-win gates.
+
+Baseline/candidate source SHA-256 values are
+`df9424a9399b274390d638eff77208d6e9e25c02357480cda950ecd6383a5f1c` /
+`0d2afd39acab8106b37acf86e15966783b0440507487df84de48ffaacc0da88f`;
+binary SHA-256 values are
+`224c836088f990c046bd3911b0b78acd62cf62d8124dd827658c856323261124` /
+`3ed946705d333e44aff0f28f80b2fc5f805b3ff758d6e888580237d5035df880`.
+Raw evidence remains at remote `/tmp/dsa-topk-register-suffix-exp-gN1x5h`
+and is archived on both hosts at
+`/tmp/dsa-topk-register-suffix-evidence-20260817.tar.gz`, SHA-256
+`1fec59bd6b0827ce3621a540bc919917bb49289324c5d8c18e29a5e6639e23a9`.
+
+## Rejected striped partial-histogram experiment
+
+A three-way follow-up tested whether reducing UB atomic contention could
+improve the two histogram producer stages. The two candidates distributed the
+32 producer warps over either two or four 256-bin `uint32_t` histograms. After
+the atomic pass, threads 0-255 merged the corresponding replica counters into
+registers and fed those values directly into the retained inclusive-suffix
+scan. The two-way and four-way layouts used 2,080 and 4,128 bytes of the
+unchanged 8 KiB stage scratch. Score traversal, radix buckets, GM workspace,
+64 blocks, five VF calls, four `SyncAll` boundaries, reducers, publication,
+and compaction remained unchanged.
+
+Ten rotated-order triples used `--aic-metrics=Default --launch-count=1`, the
+default profiler warmup, and no `--kernel-name`. All three direct executions
+and all 30 profiled executions passed the four-row score-set oracle. Every
+parsed target row reported 64 blocks and current/rated `1650/1650 MHz`.
+
+| Variant | Ten Task Duration samples (us) | Median (us) | Min (us) | Max (us) | Wins vs baseline |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Register-suffix baseline | 14.195, 14.402, 14.211, 14.359, 14.532, 14.548, 14.270, 14.332, 14.332, 14.157 | 14.3320 | 14.157 | 14.548 | n/a |
+| Two-way striped | 14.664, 14.724, 14.924, 15.278, 15.016, 14.836, 14.795, 15.103, 14.792, 15.178 | 14.8800 | 14.664 | 15.278 | 0/10 |
+| Four-way striped | 14.926, 14.698, 14.806, 14.578, 14.627, 14.543, 14.796, 14.713, 14.769, 14.494 | 14.7055 | 14.494 | 14.926 | 1/10 |
+
+The two-way candidate regressed the median by `3.8236%`, with a paired delta
+median of `+0.5045 us`. The four-way candidate regressed by `2.6061%`, with a
+paired delta median of `+0.3590 us`. Both are rejected: the reduced atomic
+contention did not repay replica initialization and per-bin merge work. The
+repository source is restored to the register-suffix baseline, and this exact
+striped experiment must not be retried without a changed contention or
+compiler premise.
+
+Baseline/two-way/four-way source SHA-256 values are
+`0d2afd39acab8106b37acf86e15966783b0440507487df84de48ffaacc0da88f` /
+`f2bc5f75635d99425839b22d43760b041fb2fa4dbca1b9cdd71d1d0041c2c2d7` /
+`d8c9f1bdb008b47ed4aa5928af3a1fddf03680b72c72957a6b399409de244cfa`;
+their executable hashes are
+`811298087d46264f1f0212ec33e9f108578b0885957201d60c1636f2d630bfb1` /
+`f38adcdc2d4464fadf1fb27a3e81b46eabbe1349bb3245f203eafaf5975acae2` /
+`66b60f45edd0bfb3dace754804d2f415c11ed340f8dc2659bcbfcafaf0c173f0`.
+Raw evidence remains at remote
+`/tmp/dsa-topk-striped-histogram-exp-20260817` and is archived on both hosts at
+`/tmp/dsa-topk-striped-histogram-evidence-20260817.tar.gz`, SHA-256
+`c4536899da8ba087bc32b19599215562961c7c5719fba41027f539ff9c29f375`.
+
+## Adjacent-bin reducer retention
+
+The retained reducer follow-up keeps each thread's sum of the 16 shard suffix
+values in a register. A uniform width-32 shuffle supplies the next lane's
+count; lane zero of each warp publishes one value to an eight-word UB boundary
+array, so only seven warp-tail threads read the next warp's value. Thread 255
+uses zero. This replaces each reducer's 256 UB writes and adjacent-bin rereads
+without changing the histogram producers, GM workspace, 64 blocks, five VF
+calls, four `SyncAll` boundaries, DCCI publication, shard offsets, or compact
+path.
+
+Ten alternating-order pairs used the default profiler warmup,
+`--aic-metrics=Default --launch-count=1`, and no `--kernel-name`. All 20
+profiled executions and both direct executions passed the four-row score-set
+oracle; every parsed target row reported one 64-block launch at current/rated
+`1650/1650 MHz`.
+
+| Variant | Ten Task Duration samples (us) | Median (us) | Min (us) | Max (us) | Pair wins |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Register-suffix baseline | 14.345, 14.078, 14.542, 14.117, 14.238, 14.135, 14.511, 14.427, 14.403, 14.151 | 14.2915 | 14.078 | 14.542 | 4/10 |
+| Adjacent-bin exchange | 14.054, 14.186, 13.994, 14.195, 14.095, 14.203, 14.113, 14.211, 14.179, 14.203 | 14.1825 | 13.994 | 14.211 | 6/10 |
+
+The median decreased by `0.7627%`; the paired candidate-minus-baseline median
+was `-0.1795 us`. The candidate meets the predefined lower-median and `6/10`
+win gates and is retained. Baseline/candidate source SHA-256 values are
+`0d2afd39acab8106b37acf86e15966783b0440507487df84de48ffaacc0da88f` /
+`d0f5821eeb739d00c2ab783c0bc19a401a1500e3b5918746b0c8d07ded13a0ae`;
+their executable hashes are
+`811298087d46264f1f0212ec33e9f108578b0885957201d60c1636f2d630bfb1` /
+`ad85d89f66cddb256cb1dbcf1a58956c8e48c3fa89d6c3f66e1420a7a0fdb418`.
+Raw evidence remains at remote
+`/tmp/dsa-topk-adjacent-bin-reducer-exp-20260817` and is archived on both hosts
+at `/tmp/dsa-topk-adjacent-bin-reducer-evidence-20260817.tar.gz`, SHA-256
+`7bce8463a050432810c8444245d1d25e9d03753dce16e738918c4eb2dfe3eff1`.
 
 ## Rejected four-block SIMT experiment
 
@@ -336,3 +543,53 @@ extracted the actual distributed decode path.
 These measurements are device task time, not end-to-end host dispatch latency,
 and do not generalize beyond the fixed BF16 decode shape and recorded Ascend
 950/CANN environment.
+
+## Three-direction follow-up results
+
+Three follow-ups were measured independently from frozen commit `5611bbc` on
+2026-08-18. All accepted profiles used the default profiler warmup,
+`--aic-metrics=Default --launch-count=1`, no `--kernel-name`, exactly one target
+row, and current/rated `1650/1650 MHz`.
+
+| Candidate | Baseline median (us) | Candidate median (us) | Paired delta median | Pair wins | Result |
+| --- | ---: | ---: | ---: | ---: | --- |
+| 8 context shards / 32 blocks | 14.1015 | 16.4770005 | +2.3805 us | 0/10 | Rejected |
+| selected-high candidate offsets / 64 blocks | 14.1625 | 14.916 | +0.7945 us | 0/10 | Rejected |
+| MTE3 histogram publication / 64 blocks | n/a | n/a | n/a | n/a | Direct correctness failed |
+
+The 32-shard / 128-block geometry reproducibly failed to exit at the existing
+`AscendC::SyncAll()` boundaries. A diagnostic retaining its 32-shard data
+layout but launching only 64 blocks exited and produced the expected first two
+rows, confirming that 128 logical tasks are not valid participants in this
+dav-3510 all-AIV hardware barrier structure. It was not profiled.
+
+The corrected candidate-offset implementation caches all offsets whose high
+radix byte is greater than or equal to `selected_high`; the low histogram still
+counts only the equal bucket. It passed correctness but lost every pair, so the
+added ballot, UB atomic reservation, and UB stores cost more than the reduced
+compact rescan for this fixed shape.
+
+The MTE3 candidate reached the same final radix state and shard offsets as the
+baseline but compact emitted below-threshold indices. Four isolated diagnostics
+did not recover it: restoring producer `asc_syncthreads()`, reloading score UB,
+publishing compact output with DCCI, and invalidating consumer DCache before
+compact. It is rejected before profiling. Do not retry this exact publication
+structure without a changed synchronization or buffer-lifetime premise.
+
+Source/executable SHA-256 pairs are:
+
+- 32 shards: `e8534aa00b926657777f31a0785dc044b920f6904f6504a176d6d6382238897e` /
+  `245c10662d3b25ad4ee1d18deec8c5b19545b3caafd8b93e9c10b6746999b776`
+- candidate offsets: `0476d46fcdba931fe6e7ea87f562c941ef9d2f065eec47763b400971325c0627` /
+  `f91f187785d7db26941fc6821fa2a9f0dd55f7f05b24a3972994fc5ae888219f`
+- MTE3 publication: `344182237997e08d8826fa931c4d31b760a2da4d0954c43a3f84cc0dceb02844` /
+  `cc6c9ce98417ccf65bc75d027806b8672d8da62d5a1d1ff57c3e17c545e75c74`
+
+No factor passed the retention gate, so no combined candidate was created and
+the example kernel remains the `5611bbc` baseline. Raw evidence remains at
+remote `/tmp/dsa-topk-three-directions-exp-20260817`. The 1,939-entry archive
+is present on both hosts at
+`/tmp/dsa-topk-three-directions-evidence-20260817.tar.gz`, SHA-256
+`007125808dee427f0257004de521fd23510a64edf4acc3f70ea1411588ca1e74`.
+The plan remains outside the archive at
+`/tmp/dsa-topk-three-directions-plan.md`.
