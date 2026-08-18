@@ -75,6 +75,14 @@ describe("relativePerformanceValue", () => {
   ])("returns null for an invalid pair %#", (baseline, implementation) => {
     expect(relativePerformanceValue(baseline, implementation)).toBeNull();
   });
+
+  it("returns null when finite inputs overflow the quotient", () => {
+    expect(relativePerformanceValue(Number.MAX_VALUE, Number.MIN_VALUE)).toBeNull();
+  });
+
+  it("returns null when finite inputs underflow the quotient", () => {
+    expect(relativePerformanceValue(Number.MIN_VALUE, Number.MAX_VALUE)).toBeNull();
+  });
 });
 
 describe("enforceSelectedSeries", () => {

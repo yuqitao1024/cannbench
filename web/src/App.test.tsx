@@ -33,6 +33,7 @@ const publishedRunsWithCuda = {
   runs: ["opbench-nvidia-h800-cuda-pytorch-softmax-smoke-float16", ...publishedRuns.runs]
 };
 let includeCudaRun = false;
+let useRawOnlyFixture = false;
 
 const benchmarkPayload = {
   records: [
@@ -123,6 +124,37 @@ const payloadByRun = {
   }
 } satisfies Record<string, { records: typeof benchmarkPayload.records }>;
 
+const rawOnlyPublishedRuns = {
+  runs: [
+    "opbench-ascend-950pr-simt-v1-rms-norm-realistic-float16",
+    "opbench-ascend-950pr-vllm-ascend-rms-norm-realistic-float16"
+  ]
+};
+const rawOnlyPayloadByRun = {
+  "opbench-ascend-950pr-simt-v1-rms-norm-realistic-float16": {
+    records: [
+      {
+        ...benchmarkPayload.records[2],
+        run_id: "opbench-ascend-950pr-simt-v1-rms-norm-realistic-float16",
+        operator: "rms_norm",
+        implementation: "simt",
+        implementation_version: "v1"
+      }
+    ]
+  },
+  "opbench-ascend-950pr-vllm-ascend-rms-norm-realistic-float16": {
+    records: [
+      {
+        ...benchmarkPayload.records[2],
+        run_id: "opbench-ascend-950pr-vllm-ascend-rms-norm-realistic-float16",
+        operator: "rms_norm",
+        implementation: "vllm_ascend",
+        implementation_version: "vllm-ascend"
+      }
+    ]
+  }
+};
+
 beforeAll(() => {
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
     measureText: (text: string) => ({ width: text.length * 8 })
@@ -148,8 +180,19 @@ beforeAll(() => {
       if (url === "/published/index.json") {
         return {
           ok: true,
-          json: async () => (includeCudaRun ? publishedRunsWithCuda : publishedRuns)
+          json: async () =>
+            useRawOnlyFixture ? rawOnlyPublishedRuns : includeCudaRun ? publishedRunsWithCuda : publishedRuns
         };
+      }
+      if (useRawOnlyFixture) {
+        for (const [runName, payload] of Object.entries(rawOnlyPayloadByRun)) {
+          if (url === `/published/${runName}/meta/benchmark-records.json`) {
+            return {
+              ok: true,
+              json: async () => payload
+            };
+          }
+        }
       }
       for (const [runName, payload] of Object.entries(payloadByRun)) {
         if (url === `/published/${runName}/meta/benchmark-records.json`) {
@@ -194,6 +237,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   benchmarkChartRenders.length = 0;
   includeCudaRun = false;
+  useRawOnlyFixture = false;
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date(2024, 0, 1, 12, 0, 0));
 });
@@ -217,10 +261,8 @@ describe("App", () => {
       expect(screen.getByRole("button", { name: /^softmax\s+1 cases/i })).toHaveAttribute("aria-pressed", "true");
     });
 
-    expect(screen.getByRole("button", { name: /^Relative performance$/i })).toHaveAttribute(
-      "aria-pressed",
-      "true"
-    );
+    expect(screen.getByRole("status", { name: "Relative performance, selected" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Relative performance$/i })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^ALL$/i })).toHaveAttribute("aria-pressed", "true");
     await waitFor(() => {
       const cannBaseline = screen.getByRole("button", {
@@ -274,6 +316,19 @@ describe("App", () => {
         expect(series.map((item) => item.key)).toContain(baseline.seriesKey);
       }
     }
+  });
+
+  it("keeps raw latency when an operator has only SIMT and vLLM series", async () => {
+    useRawOnlyFixture = true;
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "rms_norm" })).toBeInTheDocument();
+      expect(screen.getByRole("status", { name: "Latency, selected" })).toBeInTheDocument();
+      expect(benchmarkChartRenders.at(-1)).toEqual(expect.objectContaining({ baseline: null }));
+    });
+
+    expect(screen.queryByRole("button", { name: /baseline locked/i })).not.toBeInTheDocument();
   });
 
   it("opens the GPU JSON import dialog after three title clicks in light theme", async () => {

@@ -508,6 +508,7 @@ h1,
 }
 
 .filter-chip[aria-pressed="true"],
+.filter-chip.is-selected,
 .diff-toggle button[aria-pressed="true"] {
   color: var(--bg1);
   background: var(--accent);

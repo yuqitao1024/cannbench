@@ -11,8 +11,7 @@ describe("RunFilters", () => {
 
     render(
       <RunFilters
-        metrics={[{ key: "relative_performance", name: "Relative performance" }]}
-        selectedMetric="relative_performance"
+        metric={{ key: "relative_performance", name: "Relative performance" }}
         datasets={["realistic"]}
         selectedDataset="realistic"
         seriesOptions={[
@@ -21,7 +20,6 @@ describe("RunFilters", () => {
         ]}
         selectedSeries={["cuda", "simt"]}
         lockedSeries="cuda"
-        onSelectMetric={vi.fn()}
         onSelectDataset={vi.fn()}
         onToggleSeries={onToggleSeries}
       />
@@ -30,6 +28,14 @@ describe("RunFilters", () => {
     const baseline = screen.getByRole("button", { name: /NVIDIA H800 PyTorch.*baseline locked/i });
     expect(baseline).toBeDisabled();
     expect(baseline).toHaveAttribute("aria-pressed", "true");
+
+    const metric = screen.getByRole("status", { name: "Relative performance, selected" });
+    expect(metric).toBeVisible();
+    expect(metric).toHaveClass("is-selected");
+    expect(screen.queryByRole("button", { name: /^Relative performance$/i })).not.toBeInTheDocument();
+    await user.click(metric);
+    expect(screen.getByRole("status", { name: "Relative performance, selected" })).toBeInTheDocument();
+
     await user.click(baseline);
     expect(onToggleSeries).not.toHaveBeenCalled();
   });

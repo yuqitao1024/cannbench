@@ -13,7 +13,7 @@ import { buildBenchmarkViewModel, metricOptions } from "./data/benchmarkData";
 import { loadBenchmarkRecords } from "./data/benchmarkRecordsApi";
 import { enforceSelectedSeries, selectPerformanceBaseline } from "./data/performanceBaseline";
 import { fetchShapeTraceIndex, shapeTraceKey } from "./data/shapeTraceApi";
-import type { BenchmarkRecord, MetricOption } from "./types";
+import type { BenchmarkRecord } from "./types";
 
 function themeForCurrentHour(): "light" | "dark" {
   const hour = new Date().getHours();
@@ -44,15 +44,12 @@ function BenchmarkWorkspace() {
   const [theme, setTheme] = useState<"light" | "dark">(themeForCurrentHour);
   const [selectedOperator, setSelectedOperator] = useState("");
   const [selectedDataset, setSelectedDataset] = useState("");
-  const [selectedMetric, setSelectedMetric] = useState<MetricOption["key"]>("latency");
   const [shapeTraceKeys, setShapeTraceKeys] = useState<Set<string>>(new Set());
   const viewModel = buildBenchmarkViewModel(benchmarkRecords);
   const cases = viewModel.casesFor(selectedOperator, selectedDataset);
   const allSeries = viewModel.seriesFor(selectedOperator, selectedDataset);
   const baseline = selectPerformanceBaseline(allSeries);
-  const metrics = metricOptions(baseline !== null);
-  const automaticMetric = baseline ? "relative_performance" : "latency";
-  const displayedMetric = selectedMetric === automaticMetric ? selectedMetric : automaticMetric;
+  const metric = metricOptions(baseline !== null)[0];
   const seriesOptions = viewModel.seriesOptionsFor(selectedOperator, selectedDataset);
   const [selectedSeries, setSelectedSeries] = useState<string[]>([]);
   const availableSeriesKeys = seriesOptions.filter((option) => option.available).map((option) => option.key);
@@ -139,10 +136,6 @@ function BenchmarkWorkspace() {
       return;
     }
   }, [benchmarkRecords, selectedDataset, selectedOperator, viewModel]);
-
-  useEffect(() => {
-    setSelectedMetric(baseline ? "relative_performance" : "latency");
-  }, [baseline?.seriesKey]);
 
   useEffect(() => {
     setSelectedSeries((current) => {
@@ -248,14 +241,12 @@ function BenchmarkWorkspace() {
                   <h2 id="selected-operator-title">{selectedOperator}</h2>
                 </div>
                 <RunFilters
-                  metrics={metrics}
-                  selectedMetric={displayedMetric}
+                  metric={metric}
                   datasets={datasets}
                   selectedDataset={selectedDataset}
                   seriesOptions={seriesOptions}
                   selectedSeries={effectiveSelectedSeries}
                   lockedSeries={baseline?.seriesKey ?? null}
-                  onSelectMetric={setSelectedMetric}
                   onSelectDataset={setSelectedDataset}
                   onToggleSeries={(series) => {
                     if (series === baseline?.seriesKey) {

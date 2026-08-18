@@ -45,7 +45,8 @@ export function relativePerformanceValue(
   ) {
     return null;
   }
-  return baselineLatencyMs / implementationLatencyMs;
+  const ratio = baselineLatencyMs / implementationLatencyMs;
+  return Number.isFinite(ratio) && ratio > 0 ? ratio : null;
 }
 
 export function enforceSelectedSeries(

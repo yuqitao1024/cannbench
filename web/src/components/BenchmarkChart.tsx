@@ -297,7 +297,10 @@ export function BenchmarkChart({ series, segments, baseline }: BenchmarkChartPro
   }, [baseline, baselineSeries, segments, series]);
 
   return (
-    <section className="chart-panel" aria-label="Latency comparison chart">
+    <section
+      className="chart-panel"
+      aria-label={baseline ? `Performance comparison chart vs ${baselineLabel(baseline)} baseline` : "Latency comparison chart"}
+    >
       {summary.length > 0 ? (
         <div className="chart-baseline-card" aria-label={`${baselineLabel(baseline!)} baseline comparison`}>
           <span className="chart-baseline-title">vs {baselineLabel(baseline!)} baseline</span>

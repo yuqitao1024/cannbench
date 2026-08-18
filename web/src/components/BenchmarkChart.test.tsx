@@ -60,6 +60,39 @@ describe("BenchmarkChart", () => {
     dispose.mockClear();
   });
 
+  it("labels raw and relative charts according to the active baseline", () => {
+    const series: ChartSeries[] = [
+      {
+        key: "baseline",
+        name: "Baseline",
+        records: [],
+        points: [{ caseId: "case", latencyMs: 0.01, record: null }]
+      }
+    ];
+    const segments: ChartSegment[] = [{ key: "realistic", label: "realistic", start: 0, end: 0 }];
+    const { rerender } = render(<BenchmarkChart series={series} segments={segments} baseline={null} />);
+
+    expect(screen.getByLabelText("Latency comparison chart")).toBeInTheDocument();
+
+    rerender(
+      <BenchmarkChart
+        series={series}
+        segments={segments}
+        baseline={{ seriesKey: "baseline", seriesName: "Baseline", kind: "cuda" }}
+      />
+    );
+    expect(screen.getByLabelText("Performance comparison chart vs CUDA baseline")).toBeInTheDocument();
+
+    rerender(
+      <BenchmarkChart
+        series={series}
+        segments={segments}
+        baseline={{ seriesKey: "baseline", seriesName: "Baseline", kind: "cann_ops" }}
+      />
+    );
+    expect(screen.getByLabelText("Performance comparison chart vs CANN Ops baseline")).toBeInTheDocument();
+  });
+
   it("plots performance relative to CUDA", async () => {
     const series: ChartSeries[] = [
       {

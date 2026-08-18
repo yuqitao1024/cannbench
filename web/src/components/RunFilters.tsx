@@ -3,14 +3,12 @@ import { Lock } from "lucide-react";
 import type { MetricOption, SeriesOption } from "../types";
 
 interface RunFiltersProps {
-  metrics: MetricOption[];
-  selectedMetric: MetricOption["key"];
+  metric: MetricOption;
   datasets: string[];
   selectedDataset: string;
   seriesOptions: SeriesOption[];
   selectedSeries: string[];
   lockedSeries: string | null;
-  onSelectMetric: (metric: MetricOption["key"]) => void;
   onSelectDataset: (dataset: string) => void;
   onToggleSeries: (series: string) => void;
 }
@@ -30,31 +28,21 @@ function FilterRow({ label, children }: FilterRowProps) {
 }
 
 export function RunFilters({
-  metrics,
-  selectedMetric,
+  metric,
   datasets,
   selectedDataset,
   seriesOptions,
   selectedSeries,
   lockedSeries,
-  onSelectMetric,
   onSelectDataset,
   onToggleSeries
 }: RunFiltersProps) {
   return (
     <section className="run-filters" aria-label="Benchmark filters">
       <FilterRow label="Metric">
-        {metrics.map((metric) => (
-          <button
-            key={metric.key}
-            type="button"
-            className="filter-chip"
-            aria-pressed={metric.key === selectedMetric}
-            onClick={() => onSelectMetric(metric.key)}
-          >
-            {metric.name}
-          </button>
-        ))}
+        <span className="filter-chip is-selected" role="status" aria-label={`${metric.name}, selected`}>
+          {metric.name}
+        </span>
       </FilterRow>
       <FilterRow label="Dataset split">
         {datasets.map((dataset) => (
