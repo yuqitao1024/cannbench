@@ -2,8 +2,26 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { App } from "./App";
 import { jsonResponse, makeShapeTrace } from "./shape-trace/testFixtures";
+
+const benchmarkChartRenders = vi.hoisted(
+  () => [] as Array<{ baseline: { seriesKey: string } | null; series: Array<{ key: string }> }>
+);
+
+vi.mock("./components/BenchmarkChart", () => ({
+  BenchmarkChart({
+    baseline,
+    series
+  }: {
+    baseline: { seriesKey: string } | null;
+    series: Array<{ key: string }>;
+  }) {
+    benchmarkChartRenders.push({ baseline, series });
+    return null;
+  }
+}));
+
+import { App } from "./App";
 
 const publishedRuns = {
   runs: [
@@ -11,6 +29,10 @@ const publishedRuns = {
     "opbench-ascend-950pr-simt-v1-softmax-realistic-float16"
   ]
 };
+const publishedRunsWithCuda = {
+  runs: ["opbench-nvidia-h800-cuda-pytorch-softmax-smoke-float16", ...publishedRuns.runs]
+};
+let includeCudaRun = false;
 
 const benchmarkPayload = {
   records: [
@@ -84,6 +106,11 @@ const benchmarkPayload = {
 };
 
 const payloadByRun = {
+  "opbench-nvidia-h800-cuda-pytorch-softmax-smoke-float16": {
+    records: benchmarkPayload.records.filter(
+      (record) => record.run_id === "opbench-nvidia-h800-cuda-pytorch"
+    )
+  },
   "opbench-ascend-950pr-cannops-softmax-realistic-float16": {
     records: benchmarkPayload.records.filter(
       (record) => record.run_id === "opbench-ascend-950pr-cannops-softmax-realistic-float16"
@@ -121,7 +148,7 @@ beforeAll(() => {
       if (url === "/published/index.json") {
         return {
           ok: true,
-          json: async () => publishedRuns
+          json: async () => (includeCudaRun ? publishedRunsWithCuda : publishedRuns)
         };
       }
       for (const [runName, payload] of Object.entries(payloadByRun)) {
@@ -165,6 +192,8 @@ afterEach(() => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  benchmarkChartRenders.length = 0;
+  includeCudaRun = false;
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date(2024, 0, 1, 12, 0, 0));
 });
@@ -204,6 +233,47 @@ describe("App", () => {
 
     expect(screen.getByRole("cell", { name: /TritonBench \/ GPTJForCausalLM/i })).toBeInTheDocument();
     expect(screen.getByRole("cell", { name: /real-model coverage/i })).toBeInTheDocument();
+  });
+
+  it("keeps chart and locked baselines aligned through CUDA-to-CANN dataset transition", async () => {
+    includeCudaRun = true;
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => {
+      const cudaBaseline = screen.getByRole("button", {
+        name: /NVIDIA H800 PyTorch.*baseline locked/i
+      });
+      expect(cudaBaseline).toHaveAttribute("aria-pressed", "true");
+      expect(cudaBaseline).toBeDisabled();
+    });
+
+    await user.click(screen.getByRole("button", { name: /^Ascend 950PR CANN Ops$/i }));
+    await user.click(screen.getByRole("button", { name: /^realistic$/i }));
+
+    await waitFor(() => {
+      const cannBaseline = screen.getByRole("button", {
+        name: /Ascend 950PR CANN Ops.*baseline locked/i
+      });
+      expect(cannBaseline).toHaveAttribute("aria-pressed", "true");
+      expect(cannBaseline).toBeDisabled();
+    });
+
+    expect(benchmarkChartRenders).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          baseline: expect.objectContaining({ seriesKey: "nvidia-h800-cuda-pytorch" })
+        }),
+        expect.objectContaining({
+          baseline: expect.objectContaining({ seriesKey: "ascend-950pr-cannops" })
+        })
+      ])
+    );
+    for (const { baseline, series } of benchmarkChartRenders) {
+      if (baseline) {
+        expect(series.map((item) => item.key)).toContain(baseline.seriesKey);
+      }
+    }
   });
 
   it("opens the GPU JSON import dialog after three title clicks in light theme", async () => {

@@ -55,7 +55,13 @@ function BenchmarkWorkspace() {
   const displayedMetric = selectedMetric === automaticMetric ? selectedMetric : automaticMetric;
   const seriesOptions = viewModel.seriesOptionsFor(selectedOperator, selectedDataset);
   const [selectedSeries, setSelectedSeries] = useState<string[]>([]);
-  const chartSeries = allSeries.filter((series) => selectedSeries.includes(series.key));
+  const availableSeriesKeys = seriesOptions.filter((option) => option.available).map((option) => option.key);
+  const effectiveSelectedSeries = enforceSelectedSeries(
+    availableSeriesKeys,
+    selectedSeries,
+    baseline?.seriesKey ?? null
+  );
+  const chartSeries = allSeries.filter((series) => effectiveSelectedSeries.includes(series.key));
   const chartSegments = viewModel.chartSegmentsFor(selectedOperator, selectedDataset);
   const simtVersions = [
     ...new Set(
@@ -139,9 +145,8 @@ function BenchmarkWorkspace() {
   }, [baseline?.seriesKey]);
 
   useEffect(() => {
-    const available = seriesOptions.filter((option) => option.available).map((option) => option.key);
     setSelectedSeries((current) => {
-      const next = enforceSelectedSeries(available, current, baseline?.seriesKey ?? null);
+      const next = enforceSelectedSeries(availableSeriesKeys, current, baseline?.seriesKey ?? null);
       if (current.length === next.length && current.every((item, index) => item === next[index])) {
         return current;
       }
@@ -248,7 +253,7 @@ function BenchmarkWorkspace() {
                   datasets={datasets}
                   selectedDataset={selectedDataset}
                   seriesOptions={seriesOptions}
-                  selectedSeries={selectedSeries}
+                  selectedSeries={effectiveSelectedSeries}
                   lockedSeries={baseline?.seriesKey ?? null}
                   onSelectMetric={setSelectedMetric}
                   onSelectDataset={setSelectedDataset}
