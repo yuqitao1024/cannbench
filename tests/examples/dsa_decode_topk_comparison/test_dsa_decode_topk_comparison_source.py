@@ -30,6 +30,7 @@ def test_exact_deliverables_and_two_targets():
     expected = {
         "CMakeLists.txt",
         "README.md",
+        "README_SIMT_V2_HISTOGRAM_TOPK.zh-CN.md",
         "SPEC.md",
         "host_common.h",
         "scripts/parse_profile.py",
