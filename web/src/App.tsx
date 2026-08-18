@@ -258,7 +258,7 @@ function BenchmarkWorkspace() {
                 <span>real-model coverage</span>
                 <span>boundary / stress coverage</span>
               </div>
-              <BenchmarkChart series={chartSeries} segments={chartSegments} />
+              <BenchmarkChart series={chartSeries} segments={chartSegments} baseline={null} />
               <CaseTable
                 operator={selectedOperator}
                 cases={cases}
