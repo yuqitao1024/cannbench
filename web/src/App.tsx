@@ -11,6 +11,7 @@ import logoDarkUrl from "./assets/brand/cannbench-logo-dark.png";
 import logoLightUrl from "./assets/brand/cannbench-logo-light.png";
 import { buildBenchmarkViewModel, metricOptions } from "./data/benchmarkData";
 import { loadBenchmarkRecords } from "./data/benchmarkRecordsApi";
+import { enforceSelectedSeries, selectPerformanceBaseline } from "./data/performanceBaseline";
 import { fetchShapeTraceIndex, shapeTraceKey } from "./data/shapeTraceApi";
 import type { BenchmarkRecord, MetricOption } from "./types";
 
@@ -48,6 +49,10 @@ function BenchmarkWorkspace() {
   const viewModel = buildBenchmarkViewModel(benchmarkRecords);
   const cases = viewModel.casesFor(selectedOperator, selectedDataset);
   const allSeries = viewModel.seriesFor(selectedOperator, selectedDataset);
+  const baseline = selectPerformanceBaseline(allSeries);
+  const metrics = metricOptions(baseline !== null);
+  const automaticMetric = baseline ? "relative_performance" : "latency";
+  const displayedMetric = selectedMetric === automaticMetric ? selectedMetric : automaticMetric;
   const seriesOptions = viewModel.seriesOptionsFor(selectedOperator, selectedDataset);
   const [selectedSeries, setSelectedSeries] = useState<string[]>([]);
   const chartSeries = allSeries.filter((series) => selectedSeries.includes(series.key));
@@ -130,16 +135,19 @@ function BenchmarkWorkspace() {
   }, [benchmarkRecords, selectedDataset, selectedOperator, viewModel]);
 
   useEffect(() => {
+    setSelectedMetric(baseline ? "relative_performance" : "latency");
+  }, [baseline?.seriesKey]);
+
+  useEffect(() => {
     const available = seriesOptions.filter((option) => option.available).map((option) => option.key);
     setSelectedSeries((current) => {
-      const kept = current.filter((item) => available.includes(item));
-      const next = kept.length > 0 ? kept : available;
+      const next = enforceSelectedSeries(available, current, baseline?.seriesKey ?? null);
       if (current.length === next.length && current.every((item, index) => item === next[index])) {
         return current;
       }
       return next;
     });
-  }, [seriesOptions]);
+  }, [baseline?.seriesKey, seriesOptions]);
 
   const datasets = viewModel.datasetsFor(selectedOperator);
   const openHiddenModalFromTitle = () => {
@@ -235,15 +243,19 @@ function BenchmarkWorkspace() {
                   <h2 id="selected-operator-title">{selectedOperator}</h2>
                 </div>
                 <RunFilters
-                  metrics={metricOptions()}
-                  selectedMetric={selectedMetric}
+                  metrics={metrics}
+                  selectedMetric={displayedMetric}
                   datasets={datasets}
                   selectedDataset={selectedDataset}
                   seriesOptions={seriesOptions}
                   selectedSeries={selectedSeries}
+                  lockedSeries={baseline?.seriesKey ?? null}
                   onSelectMetric={setSelectedMetric}
                   onSelectDataset={setSelectedDataset}
                   onToggleSeries={(series) => {
+                    if (series === baseline?.seriesKey) {
+                      return;
+                    }
                     setSelectedSeries((current) => {
                       if (current.includes(series)) {
                         return current.length === 1 ? current : current.filter((item) => item !== series);
@@ -258,7 +270,7 @@ function BenchmarkWorkspace() {
                 <span>real-model coverage</span>
                 <span>boundary / stress coverage</span>
               </div>
-              <BenchmarkChart series={chartSeries} segments={chartSegments} baseline={null} />
+              <BenchmarkChart series={chartSeries} segments={chartSegments} baseline={baseline} />
               <CaseTable
                 operator={selectedOperator}
                 cases={cases}

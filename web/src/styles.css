@@ -518,6 +518,18 @@ h1,
   cursor: not-allowed;
 }
 
+.filter-chip.is-locked:disabled {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  opacity: 1;
+  cursor: default;
+}
+
+.filter-chip.is-locked svg {
+  flex: 0 0 auto;
+}
+
 .coverage-chips,
 .diff-files {
   display: flex;

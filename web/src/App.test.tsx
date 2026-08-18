@@ -188,10 +188,17 @@ describe("App", () => {
       expect(screen.getByRole("button", { name: /^softmax\s+1 cases/i })).toHaveAttribute("aria-pressed", "true");
     });
 
-    expect(screen.getByRole("button", { name: /^Latency$/i })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: /^Relative performance$/i })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
     expect(screen.getByRole("button", { name: /^ALL$/i })).toHaveAttribute("aria-pressed", "true");
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /^Ascend 950PR CANN Ops$/i })).toHaveAttribute("aria-pressed", "true");
+      const cannBaseline = screen.getByRole("button", {
+        name: /Ascend 950PR CANN Ops.*baseline locked/i
+      });
+      expect(cannBaseline).toHaveAttribute("aria-pressed", "true");
+      expect(cannBaseline).toBeDisabled();
       expect(screen.getByRole("button", { name: /^Ascend 950PR SIMT v1$/i })).toHaveAttribute("aria-pressed", "true");
     });
 

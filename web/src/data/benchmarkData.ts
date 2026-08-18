@@ -17,7 +17,11 @@ const SPLIT_ORDER = [
   "stress"
 ] as const;
 const ALL_DATASET = "ALL";
-const METRIC_OPTIONS: MetricOption[] = [{ key: "latency", name: "Latency" }];
+const LATENCY_METRIC: MetricOption = { key: "latency", name: "Latency" };
+const RELATIVE_PERFORMANCE_METRIC: MetricOption = {
+  key: "relative_performance",
+  name: "Relative performance"
+};
 
 function datasetRank(dataset: string): number {
   if (dataset === ALL_DATASET) {
@@ -180,8 +184,8 @@ function orderedCaseKeys(records: BenchmarkRecord[], dataset: string): string[] 
   return ordered;
 }
 
-export function metricOptions(): MetricOption[] {
-  return METRIC_OPTIONS;
+export function metricOptions(relativePerformance = false): MetricOption[] {
+  return [relativePerformance ? RELATIVE_PERFORMANCE_METRIC : LATENCY_METRIC];
 }
 
 export function buildBenchmarkViewModel(records: BenchmarkRecord[]): BenchmarkViewModel {

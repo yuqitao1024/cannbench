@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Lock } from "lucide-react";
 import type { MetricOption, SeriesOption } from "../types";
 
 interface RunFiltersProps {
@@ -8,6 +9,7 @@ interface RunFiltersProps {
   selectedDataset: string;
   seriesOptions: SeriesOption[];
   selectedSeries: string[];
+  lockedSeries: string | null;
   onSelectMetric: (metric: MetricOption["key"]) => void;
   onSelectDataset: (dataset: string) => void;
   onToggleSeries: (series: string) => void;
@@ -34,6 +36,7 @@ export function RunFilters({
   selectedDataset,
   seriesOptions,
   selectedSeries,
+  lockedSeries,
   onSelectMetric,
   onSelectDataset,
   onToggleSeries
@@ -67,18 +70,23 @@ export function RunFilters({
         ))}
       </FilterRow>
       <FilterRow label="Series">
-        {seriesOptions.map((series) => (
-          <button
-            key={series.key}
-            type="button"
-            className="filter-chip"
-            aria-pressed={selectedSeries.includes(series.key)}
-            disabled={!series.available}
-            onClick={() => onToggleSeries(series.key)}
-          >
-            {series.name}
-          </button>
-        ))}
+        {seriesOptions.map((series) => {
+          const locked = series.key === lockedSeries;
+          return (
+            <button
+              key={series.key}
+              type="button"
+              className={`filter-chip${locked ? " is-locked" : ""}`}
+              aria-label={locked ? `${series.name}, baseline locked` : series.name}
+              aria-pressed={selectedSeries.includes(series.key)}
+              disabled={!series.available || locked}
+              onClick={() => onToggleSeries(series.key)}
+            >
+              <span>{series.name}</span>
+              {locked ? <Lock size={13} aria-hidden="true" /> : null}
+            </button>
+          );
+        })}
       </FilterRow>
     </section>
   );
