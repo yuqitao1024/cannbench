@@ -514,6 +514,10 @@ h1,
   background: var(--accent);
 }
 
+.filter-chip.is-selected[role="status"] {
+  cursor: default;
+}
+
 .filter-chip:disabled {
   opacity: 0.34;
   cursor: not-allowed;
