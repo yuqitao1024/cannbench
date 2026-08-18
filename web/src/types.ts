@@ -86,9 +86,17 @@ export interface SeriesOption {
   available: boolean;
 }
 
+export type PerformanceBaselineKind = "cuda" | "cann_ops";
+
+export interface PerformanceBaseline {
+  seriesKey: string;
+  seriesName: string;
+  kind: PerformanceBaselineKind;
+}
+
 export interface MetricOption {
-  key: "latency";
-  name: "Latency";
+  key: "latency" | "relative_performance";
+  name: "Latency" | "Relative performance";
 }
 
 export interface BenchmarkViewModel {
