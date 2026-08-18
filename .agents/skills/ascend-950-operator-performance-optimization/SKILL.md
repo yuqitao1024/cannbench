@@ -83,6 +83,11 @@ criteria.
   workflow replay, launch aggregation, warmup, metric-set selection, variance,
   or baseline fairness, read
   [profiling-and-benchmarking.md](references/profiling-and-benchmarking.md).
+- For `msopprof` commands, `--aic-metrics` selection, the meaning of
+  `Default` or "all metrics," CSV versus MindStudio Insight artifacts,
+  metric-specific build requirements, replay restrictions, or 950-only
+  timeline and SIMT stall analysis, read
+  [msopprof.md](references/msopprof.md) before the general profiling guidance.
 - When compiler, linker, registration, loader, ABI, translation-unit,
   packaging, or version-dependent behavior blocks or contaminates a 950
   performance comparison, read
